@@ -5,7 +5,7 @@
 ![CI](https://github.com/ahmojo/Codex_Sync/actions/workflows/ci.yml/badge.svg)
 ![Go](https://img.shields.io/badge/Go-1.22%2B-00ADD8?logo=go)
 ![License](https://img.shields.io/badge/license-MIT-blue)
-![Status](https://img.shields.io/badge/status-v0.1.0-orange)
+![Status](https://img.shields.io/badge/status-v0.1.1-orange)
 
 > ⚠️ **Unofficial tool.** Not affiliated with or endorsed by OpenAI. Codex's
 > internals can change at any time and break this tool. Use at your own risk.
@@ -24,11 +24,19 @@ that file to another machine however you like (USB stick, `scp`, Syncthing,
 encrypted drive), and import it there. Codex picks the sessions up the next time
 it scans.
 
-```
+```text
 Machine A:  codex-sync export --project .
             → project.codexbundle      (copy this file to Machine B)
 
 Machine B:  codex-sync import ./project.codexbundle
+```
+
+If the project lives at a different path on the destination machine, v0.1.1 can
+optionally rewrite the recorded working directory during import:
+
+```bash
+codex-sync import ./project.codexbundle \
+  --map-cwd "/old/project/path=/new/project/path"
 ```
 
 ## 2. Badges
@@ -38,13 +46,16 @@ release. CI runs `build`, `vet`, and `test` on Linux, macOS, and Windows.
 
 ## 3. What is codex-sync?
 
-`codex-sync` is a CLI for **local Codex session portability**. It does exactly
-three things:
+`codex-sync` is a CLI for **local Codex session portability**. It does four
+things:
 
 - **Export** the Codex session files for a project into one `.codexbundle`.
 - **Inspect** a bundle's contents without extracting anything.
 - **Import** a bundle into another machine's Codex home, safely and without
   overwriting existing sessions.
+- **Optionally map cwd paths on import** with `--map-cwd OLD=NEW`, so sessions
+  created at one project path can appear under the matching project path on the
+  destination machine.
 
 That's the whole tool. It is intentionally small and predictable.
 
@@ -76,10 +87,15 @@ list/scan path.
 - **Export** discovers the rollout files for a project (matching the session's
   recorded working directory) and packages them — preserving the `YYYY/MM/DD`
   layout — into a `.codexbundle` ZIP with a manifest and checksums.
+- **Inspect** reads the bundle metadata without extracting or writing anything.
 - **Import** verifies the bundle, then copies the rollout files into the right
   place under your Codex sessions directory. It **never** touches SQLite. The
   next time Codex runs, it scans those files and reconciles its own index
   automatically.
+- **Import with `--map-cwd`** is opt-in. It rewrites only the canonical `cwd`
+  field inside the plain `.jsonl` session's `session_meta` line, then validates
+  the resulting JSONL before writing. It does not globally replace paths in chat
+  messages, tool output, or other session lines.
 
 Because the JSONL files are the source of truth, imported sessions become visible
 as soon as Codex next scans and reconciles them — typically on its next run.
@@ -131,6 +147,17 @@ codex-sync import ./project.codexbundle --dry-run
 codex-sync import ./project.codexbundle
 ```
 
+If the project path differs between machines, preview with `--map-cwd` first:
+
+```bash
+codex-sync import ./project.codexbundle \
+  --map-cwd "/Users/example/dev/project=C:\\Users\\example\\dev\\project" \
+  --dry-run
+
+codex-sync import ./project.codexbundle \
+  --map-cwd "/Users/example/dev/project=C:\\Users\\example\\dev\\project"
+```
+
 After importing, **restart the Codex App (or run Codex again)** so it scans and
 reconciles the imported rollout files.
 
@@ -144,6 +171,7 @@ reconciles the imported rollout files.
 | `codex-sync inspect <file.codexbundle>` | Shows a bundle's manifest and contents without extracting anything. |
 | `codex-sync import <file.codexbundle>` | Imports rollout files into your Codex home. Never overwrites; verifies checksums first. |
 | `codex-sync import <file.codexbundle> --dry-run` | Validates and reports what *would* happen, writing nothing. |
+| `codex-sync import <file.codexbundle> --map-cwd OLD=NEW` | Imports while rewriting matching plain `.jsonl` sessions' recorded cwd from `OLD` to `NEW`. Repeatable. |
 | `codex-sync help` | Show help. |
 
 ### Common flags
@@ -151,10 +179,11 @@ reconciles the imported rollout files.
 | Flag | Applies to | Meaning |
 | ---- | ---------- | ------- |
 | `--codex-home <path>` | all | Use a specific Codex home instead of the default (also honors `$CODEX_HOME`). |
-| `--project <path>` | export, import | Export: filter by session cwd. Import: check for cwd mismatch (no rewriting). |
+| `--project <path>` | export, import | Export: filter sessions by recorded cwd. Import: check for cwd mismatch. |
 | `--output, -o <path>` | export | Bundle output path (default `<project>.codexbundle`). |
 | `--include-archived` | list, export | Also consider archived sessions. |
 | `--dry-run` | import | Write nothing; just report. |
+| `--map-cwd OLD=NEW` | import | Opt-in cwd rewrite for matching plain `.jsonl` sessions. Does not rewrite `.jsonl.zst`. |
 
 ## 9. Safety model
 
@@ -173,7 +202,12 @@ reconciles the imported rollout files.
 - **Path-traversal / zip-slip and absolute paths are rejected.** Only
   `sessions/YYYY/MM/DD/` rollout files are imported.
 - **Atomic writes** (temp file + rename) so files are never left half-written.
-- **`.jsonl.zst` files are copied byte-for-byte**, never parsed or decompressed.
+- **Default import is byte-for-byte.** Session content is only changed if you
+  explicitly pass `--map-cwd`.
+- **`--map-cwd` is intentionally narrow.** It rewrites only the `cwd` field in
+  the `session_meta` line of matching plain `.jsonl` files. All non-`session_meta`
+  lines are preserved byte-for-byte. `.jsonl.zst` files are never decompressed or
+  rewritten.
 
 See [`docs/safety.md`](docs/safety.md) for the full safety and privacy details,
 including the important note that **`.codexbundle` files may contain sensitive
@@ -183,7 +217,7 @@ data**.
 
 A `.codexbundle` is a ZIP archive with this layout:
 
-```
+```text
 project.codexbundle
 ├── manifest.json          # format version, source info, per-session metadata
 ├── checksums.json         # SHA-256 of every other file in the bundle
@@ -207,13 +241,18 @@ project.codexbundle
   format can drift. Re-check after Codex updates.
 - **`.jsonl.zst` metadata parsing is not implemented yet.** Compressed sessions
   are copied byte-for-byte, but their recorded cwd is unknown, so they are
-  skipped by the `--project` cwd filter (and reported).
+  skipped by the `--project` cwd filter on export (and reported).
+- **`.jsonl.zst` cwd mapping is not implemented.** `--map-cwd` only rewrites
+  plain `.jsonl` files. Compressed sessions that match a mapping are copied
+  byte-for-byte and reported as not remapped.
 - **Project-specific visibility depends on matching cwd paths.** Codex's
   per-project sidebar filters by the session's recorded working directory. If
   your project lives at a different path on the two machines, an imported session
-  may not appear in that project's view even though it imported correctly.
-- **No automatic cwd rewriting.** v0.1 detects and warns about cwd mismatch; it
-  does not rewrite paths.
+  may not appear in that project's view until you import with an appropriate
+  `--map-cwd OLD=NEW` mapping.
+- **No global path rewriting.** `--map-cwd` only changes the canonical `cwd` field
+  in `session_meta`; it does not rewrite paths mentioned in prompts, assistant
+  messages, terminal output, or other JSONL lines.
 - **No automatic merge.** Sessions are copied, not merged.
 - **No cloud sync.**
 - **No GUI yet.**
@@ -222,18 +261,21 @@ project.codexbundle
 
 ## 12. Roadmap
 
-Planned, explicitly **not** in v0.1:
+Planned, explicitly **not** in v0.1.x:
 
 - `export --all`
 - `export --since <dur>`
 - `export --session <thread-id>`
 - Optional encrypted bundles (still no accounts, no hosting)
-- Safer path mapping (`--map-cwd`) after research proves it safe
+- Better `.jsonl.zst` handling, including metadata parsing and possible safe cwd
+  mapping after decompression/recompression is researched
+- Safer mapping UX around `--map-cwd` (clearer previews, examples, and possibly
+  bundle-level mapping reports)
 - A desktop app wrapper later, reusing the same Go core
-- Optional Claude support later (not in v0.1)
+- Optional Claude support later (not in v0.1.x)
 
 Never planned: cloud sync, accounts, hosting, background sync, direct SQLite
-writes, automatic JSONL rewriting, or automatic merge.
+writes, global JSONL path rewriting, or automatic merge.
 
 ## 13. Built with AI assistance
 
@@ -264,6 +306,8 @@ Contributions are welcome. Please:
 - Keep the **no cloud / no accounts / no hosting / no SQLite writes** principles
   intact.
 - Keep parsing defensive and the import path safe (no silent overwrites).
+- Treat any feature that mutates session content, including cwd mapping, as
+  security-sensitive and test it with fake Codex homes only.
 - Run the full check suite before opening a PR:
 
   ```bash
