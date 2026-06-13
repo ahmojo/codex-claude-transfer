@@ -53,6 +53,7 @@ type commonFlags struct {
 	project         string
 	output          string
 	dryRun          bool
+	mapCWD          []string
 	positional      []string
 }
 
@@ -87,6 +88,14 @@ func parseFlags(args []string) (commonFlags, error) {
 			f.output = val
 		case hasPrefix(arg, "--output="):
 			f.output = arg[len("--output="):]
+		case arg == "--map-cwd":
+			val, err := takeValue(args, &i, "--map-cwd")
+			if err != nil {
+				return f, err
+			}
+			f.mapCWD = append(f.mapCWD, val)
+		case hasPrefix(arg, "--map-cwd="):
+			f.mapCWD = append(f.mapCWD, arg[len("--map-cwd="):])
 		case arg == "--include-archived":
 			f.includeArchived = true
 		case arg == "--dry-run":
@@ -229,7 +238,7 @@ func runImport(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if len(f.positional) != 1 {
-		fmt.Fprintln(stderr, "usage: codex-sync import <file.codexbundle> [--dry-run] [--project <path>]")
+		fmt.Fprintln(stderr, "usage: codex-sync import <file.codexbundle> [--dry-run] [--project <path>] [--map-cwd OLD=NEW]")
 		return 2
 	}
 	home, ok := resolveHome(f, stderr)
@@ -246,10 +255,17 @@ func runImport(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
+	mappings, err := bundle.ParseCWDMappings(f.mapCWD)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 2
+	}
+
 	res, err := bundle.Import(home, bundle.ImportOptions{
 		BundlePath:  f.positional[0],
 		DryRun:      f.dryRun,
 		ProjectPath: absProject,
+		MapCWD:      mappings,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "error: import failed: %v\n", err)
@@ -288,6 +304,9 @@ Flags:
                         import: warn on cwd mismatch (never rewrites paths)
   --output, -o <path>   export: bundle output path (default <project>.codexbundle)
   --dry-run             import: validate and report only, write nothing
+  --map-cwd OLD=NEW     import: rewrite a session's recorded cwd from OLD to NEW
+                        so it lands in the right local project (repeatable;
+                        plain .jsonl only — .zst sessions are not rewritten)
 
 Examples:
   codex-sync doctor
@@ -296,6 +315,7 @@ Examples:
   codex-sync inspect ./my-project.codexbundle
   codex-sync import ./my-project.codexbundle --dry-run
   codex-sync import ./my-project.codexbundle
+  codex-sync import ./my-project.codexbundle --map-cwd "/old/path=/new/path"
 
 After importing, restart the Codex App (or run Codex again) so it scans and
 reconciles the imported rollout files.

@@ -2,12 +2,14 @@ package bundle
 
 import (
 	"archive/zip"
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/ahmojo/Codex_Sync/internal/codexhome"
 	"github.com/ahmojo/Codex_Sync/internal/safety"
@@ -31,6 +33,11 @@ type ImportItem struct {
 	Action      Action
 	OriginalCWD string
 	CWDMismatch bool
+	// Mapped reports whether --map-cwd rewrote this session's cwd.
+	Mapped bool
+	// content, when non-nil, is the (cwd-mapped) bytes to write instead of
+	// streaming the entry verbatim from the bundle.
+	content []byte
 }
 
 // ImportOptions configures an import.
@@ -38,8 +45,12 @@ type ImportOptions struct {
 	BundlePath string
 	DryRun     bool
 	// ProjectPath, when non-empty, enables per-session cwd-mismatch checks
-	// against this (already absolute) path. Import never rewrites cwd.
+	// against this (already absolute) path.
 	ProjectPath string
+	// MapCWD, when set, rewrites matching sessions' recorded cwd on import.
+	// Only plain .jsonl files are rewritten; .jsonl.zst files that match a
+	// mapping are copied byte-for-byte and reported as unmappable.
+	MapCWD []CWDMapping
 }
 
 // ImportResult summarizes an import.
@@ -51,9 +62,14 @@ type ImportResult struct {
 	Conflicts        int
 	SkippedOther     int
 	CWDMismatchCount int
-	ProjectProvided  bool
-	DryRun           bool
-	Warnings         []string
+	// Mapped counts imported sessions whose cwd was rewritten by --map-cwd.
+	Mapped int
+	// MappedCompressedSkipped counts compressed sessions that matched a
+	// mapping but could not be rewritten in v0.1 (copied byte-for-byte).
+	MappedCompressedSkipped int
+	ProjectProvided         bool
+	DryRun                  bool
+	Warnings                []string
 }
 
 // Import validates a bundle end-to-end and, unless DryRun is set, copies its
@@ -130,7 +146,40 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 			result.CWDMismatchCount++
 		}
 
-		action, err := decideAction(dest, checksums[rel])
+		// The effective checksum is the bundle's checksum unless --map-cwd
+		// rewrites this file, in which case it is the checksum of the rewritten
+		// bytes. Never use the bundle checksum as the target checksum after a
+		// mutation.
+		effectiveSum := checksums[rel]
+		if m := matchMapping(item.OriginalCWD, opts.MapCWD); m != nil {
+			if strings.HasSuffix(rel, compressedSessionSuffix) {
+				result.MappedCompressedSkipped++
+				result.Warnings = append(result.Warnings,
+					fmt.Sprintf("%s: compressed session cannot be cwd-mapped in v0.1; copied byte-for-byte", rel))
+			} else {
+				orig, err := readEntryBytes(&zr.Reader, rel)
+				if err != nil {
+					return result, err
+				}
+				mapped, changed, err := rewriteSessionMetaCWD(orig, m.Old, m.New)
+				if err != nil {
+					return result, fmt.Errorf("map cwd for %s: %w", rel, err)
+				}
+				if changed {
+					if err := validateMappedJSONL(orig, mapped, m.New); err != nil {
+						return result, fmt.Errorf("mapped %s failed validation: %w", rel, err)
+					}
+					item.Mapped = true
+					item.content = mapped
+					effectiveSum = sha256Hex(mapped)
+				} else {
+					result.Warnings = append(result.Warnings,
+						fmt.Sprintf("%s: recorded cwd did not match the mapping; not rewritten", rel))
+				}
+			}
+		}
+
+		action, err := decideAction(dest, effectiveSum)
 		if err != nil {
 			return result, err
 		}
@@ -138,6 +187,9 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 		switch action {
 		case ActionImport:
 			result.Imported++
+			if item.Mapped {
+				result.Mapped++
+			}
 		case ActionSkipIdentical:
 			result.SkippedIdentical++
 		case ActionConflict:
@@ -160,11 +212,34 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 		if item.Action != ActionImport {
 			continue
 		}
+		if item.content != nil {
+			if err := safety.CopyAtomic(item.DestPath, bytes.NewReader(item.content)); err != nil {
+				return result, fmt.Errorf("import %s: %w", item.BundlePath, err)
+			}
+			continue
+		}
 		if err := copyEntry(&zr.Reader, item.BundlePath, item.DestPath); err != nil {
 			return result, fmt.Errorf("import %s: %w", item.BundlePath, err)
 		}
 	}
 	return result, nil
+}
+
+// compressedSessionSuffix is the extension of compressed rollout files, which
+// are copied byte-for-byte and never parsed or rewritten in v0.1.
+const compressedSessionSuffix = ".jsonl.zst"
+
+func readEntryBytes(zr *zip.Reader, name string) ([]byte, error) {
+	f, err := openByName(zr, name)
+	if err != nil {
+		return nil, err
+	}
+	rc, err := f.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer rc.Close()
+	return io.ReadAll(rc)
 }
 
 // decideAction determines conflict handling for a single target path.

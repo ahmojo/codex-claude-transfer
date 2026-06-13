@@ -115,6 +115,12 @@ func printImport(w io.Writer, path string, res bundle.ImportResult) {
 	if res.SkippedOther > 0 {
 		fmt.Fprintf(w, "Other skipped (archived/non-session): %d\n", res.SkippedOther)
 	}
+	if res.Mapped > 0 {
+		fmt.Fprintf(w, "Remapped cwd: %d\n", res.Mapped)
+	}
+	if res.MappedCompressedSkipped > 0 {
+		fmt.Fprintf(w, "Compressed (cwd not remapped): %d\n", res.MappedCompressedSkipped)
+	}
 	if res.ProjectProvided {
 		fmt.Fprintf(w, "CWD mismatch warnings: %d\n", res.CWDMismatchCount)
 	}
