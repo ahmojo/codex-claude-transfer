@@ -9,8 +9,10 @@ All notable changes to codex-sync are documented here.
   `OLD` to `NEW` during import, so sessions land in the right local project without
   needing to create a folder at the original path.
   - Repeatable: use multiple `--map-cwd` flags to handle several path mappings at once.
-  - Only the canonical `cwd` field inside the `session_meta` line is rewritten;
-    all other lines and unknown fields are preserved byte-for-byte.
+  - Only the canonical `cwd` field inside the `session_meta` line is rewritten.
+  - All non-`session_meta` lines are preserved byte-for-byte.
+  - Unknown fields inside `session_meta` are preserved semantically, although the
+    `session_meta` line itself is re-serialized as JSON.
   - `.jsonl.zst` (compressed) sessions that match a mapping are copied byte-for-byte
     and reported as unmappable (cannot be rewritten without decompressing).
   - Mapping syntax is validated: `OLD=NEW`, `OLD` must not be empty, `NEW` must be
