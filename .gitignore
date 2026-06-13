@@ -1,0 +1,32 @@
+# Built binaries (root-anchored so the cmd/codex-sync/ source dir is NOT ignored)
+/codex-sync
+/codex-sync.exe
+/dist/
+/build/
+
+# Bundles can contain sensitive data
+*.codexbundle
+
+# Go test / coverage output
+*.out
+*.test
+coverage.txt
+coverage.html
+
+# Logs and temp files
+*.log
+*.tmp
+*.temp
+*~
+
+# Local Claude Code settings
+.claude/
+
+# Local Codex data 
+.codex/
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

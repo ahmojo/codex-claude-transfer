@@ -1,0 +1,76 @@
+name: Release
+
+# Builds cross-platform binaries and attaches them to a GitHub Release when you
+# push a version tag like v0.1.0. This does not publish anywhere else, does not
+# touch any server, and does not run automatically on normal pushes.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux,   goarch: amd64 }
+          - { goos: linux,   goarch: arm64 }
+          - { goos: darwin,  goarch: amd64 }
+          - { goos: darwin,  goarch: arm64 }
+          - { goos: windows, goarch: amd64 }
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME}"
+          name="codex-sync"
+          ext=""
+          if [ "$GOOS" = "windows" ]; then ext=".exe"; fi
+          outdir="dist/${name}_${version}_${GOOS}_${GOARCH}"
+          mkdir -p "$outdir"
+          go build -trimpath -ldflags "-s -w" -o "$outdir/${name}${ext}" ./cmd/codex-sync
+          cp README.md docs/safety.md "$outdir/" 2>/dev/null || true
+          ( cd dist && tar -czf "${name}_${version}_${GOOS}_${GOARCH}.tar.gz" "$(basename "$outdir")" )
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-sync_${{ matrix.goos }}_${{ matrix.goarch }}
+          path: dist/*.tar.gz
+
+  release:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.tar.gz
+          generate_release_notes: true
