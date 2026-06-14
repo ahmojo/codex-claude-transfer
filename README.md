@@ -46,18 +46,27 @@ release. CI runs `build`, `vet`, and `test` on Linux, macOS, and Windows.
 
 ## 3. What is codex-sync?
 
-`codex-sync` is a CLI for **local Codex session portability**. It does four
-things:
+`codex-sync` is a CLI for **local Codex session portability**. Its core is three
+commands:
 
-- **Export** the Codex session files for a project into one `.codexbundle`.
+- **Export** the Codex session files into one `.codexbundle` — for a project
+  (`--project`), for everything (`--all`), or for a single conversation
+  (`--session <thread-id>`), optionally filtered by time (`--since`).
 - **Inspect** a bundle's contents without extracting anything.
 - **Import** a bundle into another machine's Codex home, safely and without
   overwriting existing sessions.
-- **Optionally map cwd paths on import** with `--map-cwd OLD=NEW`, so sessions
-  created at one project path can appear under the matching project path on the
-  destination machine.
 
-That's the whole tool. It is intentionally small and predictable.
+Three optional, opt-in helpers round it out, all keeping everything on your own
+machines:
+
+- **Map cwd paths on import** with `--map-cwd OLD=NEW`, so sessions created at
+  one project path appear under the matching project path on the destination.
+- **Git-assisted handoff** (`--with-git` on export, `--clone` on import) to move
+  the project's code alongside the sessions.
+- **Bundle encryption** (`--encrypt-to` / `--passphrase`, via `age`) to protect
+  a bundle in transit.
+
+It is intentionally small and predictable.
 
 ## 4. Why this exists
 
@@ -246,7 +255,7 @@ affected. codex-sync still never uploads anything.
 | `--include-archived` | list, export | Also consider archived sessions. |
 | `--dry-run` | import | Write nothing; just report. |
 | `--map-cwd OLD=NEW` | import | Opt-in cwd rewrite for matching plain `.jsonl` sessions. Does not rewrite `.jsonl.zst`. |
-| `--clone <dir>` | import | After importing, clone the bundle's recorded git remote into `<dir>` and check out the recorded commit. Opt-in; needs `--with-git` data in the bundle. |
+| `--clone <dir>` | import | After importing, clone the bundle's recorded git remote into `<dir>` and check out the recorded commit. Opt-in; needs a git remote recorded in the bundle (by `--project` or `--with-git` on export). |
 | `--encrypt-to <recipient>` | export | Encrypt the bundle to an `age` recipient (`age1...`/`ssh-ed25519 ...`); repeatable. Writes `<output>.age`. Requires `age` on `PATH`. |
 | `--recipients-file <file>` | export | Encrypt to every `age` recipient listed in `<file>`. |
 | `--passphrase` | export, import, inspect | Export: encrypt with an interactive passphrase. Import/inspect: decrypt a passphrase-encrypted bundle. |
