@@ -2,6 +2,24 @@
 
 All notable changes to codex-sync are documented here.
 
+## [0.1.4] - 2026-06-14
+
+### Added
+- Optional bundle encryption via the external `age` tool
+  (https://github.com/FiloSottile/age), keeping codex-sync a single,
+  dependency-free binary (like the git integration, it shells out):
+  - `export --encrypt-to <recipient>`: encrypt the bundle to one or more age
+    recipients (`age1...`, `ssh-ed25519 ...`); repeatable. Output is written to
+    `<output>.age` and the plaintext bundle is removed.
+  - `export --recipients-file <file>`: encrypt to every recipient in a file.
+  - `export --passphrase`: encrypt with an interactive passphrase (mutually
+    exclusive with `--encrypt-to`/`--recipients-file`).
+  - `import`/`inspect` auto-detect a `.age` bundle and decrypt it to a temporary
+    file, requiring `--identity <file>` or `--passphrase`. The temporary
+    plaintext is removed when the command finishes.
+  - If `age` is not installed, encryption/decryption fails with install guidance
+    and nothing else in codex-sync is affected. codex-sync still never uploads.
+
 ## [0.1.3] - 2026-06-14
 
 ### Added

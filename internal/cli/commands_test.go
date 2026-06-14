@@ -315,3 +315,111 @@ func TestSanitizeForFilename(t *testing.T) {
 		}
 	}
 }
+
+func TestRunExportPassphraseRecipientConflict(t *testing.T) {
+	home := t.TempDir()
+	writeSession(t, home, "eeee1111-2222-3333-4444-555566667777", "/x")
+
+	var out, errOut bytes.Buffer
+	code := Run([]string{"export", "--all", "--codex-home", home,
+		"--passphrase", "--encrypt-to", "age1aaa",
+		"-o", filepath.Join(t.TempDir(), "b.codexbundle")}, &out, &errOut)
+	if code != 2 {
+		t.Fatalf("exit code = %d, want 2; stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "--passphrase cannot be combined") {
+		t.Errorf("missing conflict message: %s", errOut.String())
+	}
+}
+
+func TestRunImportEncryptedWithoutKeyErrors(t *testing.T) {
+	home := t.TempDir()
+	enc := filepath.Join(t.TempDir(), "b.codexbundle.age")
+	if err := os.WriteFile(enc, []byte("not really age, but .age suffix"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	code := Run([]string{"import", enc, "--codex-home", home}, &out, &errOut)
+	if code != 2 {
+		t.Fatalf("exit code = %d, want 2; stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "encrypted bundle") {
+		t.Errorf("missing encrypted-bundle guidance: %s", errOut.String())
+	}
+}
+
+func TestRunInspectEncryptedWithoutKeyErrors(t *testing.T) {
+	enc := filepath.Join(t.TempDir(), "b.CODEXBUNDLE.AGE")
+	if err := os.WriteFile(enc, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	code := Run([]string{"inspect", enc}, &out, &errOut)
+	if code != 2 {
+		t.Fatalf("exit code = %d, want 2; stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "encrypted bundle") {
+		t.Errorf("missing encrypted-bundle guidance: %s", errOut.String())
+	}
+}
+
+// TestRunExportImportEncryptedRoundTrip exercises the full encrypt-on-export /
+// decrypt-on-import path. It is skipped when age/age-keygen are unavailable.
+func TestRunExportImportEncryptedRoundTrip(t *testing.T) {
+	if _, err := exec.LookPath("age"); err != nil {
+		t.Skip("age not installed; skipping encrypted round-trip")
+	}
+	if _, err := exec.LookPath("age-keygen"); err != nil {
+		t.Skip("age-keygen not installed; skipping encrypted round-trip")
+	}
+
+	src := t.TempDir()
+	writeSession(t, src, "ffff1111-2222-3333-4444-555566667777", "/Users/example/dev/project")
+
+	work := t.TempDir()
+	keyFile := filepath.Join(work, "key.txt")
+	if out, err := exec.Command("age-keygen", "-o", keyFile).CombinedOutput(); err != nil {
+		t.Fatalf("age-keygen: %v: %s", err, out)
+	}
+	keyData, err := os.ReadFile(keyFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const marker = "# public key: "
+	var recipient string
+	for _, line := range strings.Split(string(keyData), "\n") {
+		line = strings.TrimRight(line, "\r")
+		if strings.HasPrefix(line, marker) {
+			recipient = strings.TrimPrefix(line, marker)
+		}
+	}
+	if recipient == "" {
+		t.Fatal("no recipient in key file")
+	}
+
+	bundle := filepath.Join(work, "out.codexbundle")
+	var out, errOut bytes.Buffer
+	code := Run([]string{"export", "--all", "--codex-home", src,
+		"--encrypt-to", recipient, "-o", bundle}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("export exit=%d stderr=%s", code, errOut.String())
+	}
+	enc := bundle + ".age"
+	if _, err := os.Stat(enc); err != nil {
+		t.Fatalf("encrypted bundle missing: %v", err)
+	}
+	if _, err := os.Stat(bundle); !os.IsNotExist(err) {
+		t.Fatalf("plaintext bundle was left behind: %v", err)
+	}
+
+	dst := t.TempDir()
+	out.Reset()
+	errOut.Reset()
+	code = Run([]string{"import", enc, "--codex-home", dst, "--identity", keyFile}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("import exit=%d stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "New sessions: 1") {
+		t.Errorf("expected 1 imported session: %s", out.String())
+	}
+}

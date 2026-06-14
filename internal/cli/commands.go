@@ -6,6 +6,7 @@ package cli
 import (
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/ahmojo/Codex_Sync/internal/bundle"
 	"github.com/ahmojo/Codex_Sync/internal/codexhome"
+	"github.com/ahmojo/Codex_Sync/internal/crypt"
 	"github.com/ahmojo/Codex_Sync/internal/doctor"
 	"github.com/ahmojo/Codex_Sync/internal/git"
 	"github.com/ahmojo/Codex_Sync/internal/sessions"
@@ -63,6 +65,10 @@ type commonFlags struct {
 	withGit         bool
 	cloneDir        string
 	mapCWD          []string
+	encryptTo       []string
+	recipientsFile  string
+	passphrase      bool
+	identity        string
 	positional      []string
 }
 
@@ -133,6 +139,32 @@ func parseFlags(args []string) (commonFlags, error) {
 			f.cloneDir = val
 		case hasPrefix(arg, "--clone="):
 			f.cloneDir = arg[len("--clone="):]
+		case arg == "--encrypt-to":
+			val, err := takeValue(args, &i, "--encrypt-to")
+			if err != nil {
+				return f, err
+			}
+			f.encryptTo = append(f.encryptTo, val)
+		case hasPrefix(arg, "--encrypt-to="):
+			f.encryptTo = append(f.encryptTo, arg[len("--encrypt-to="):])
+		case arg == "--recipients-file":
+			val, err := takeValue(args, &i, "--recipients-file")
+			if err != nil {
+				return f, err
+			}
+			f.recipientsFile = val
+		case hasPrefix(arg, "--recipients-file="):
+			f.recipientsFile = arg[len("--recipients-file="):]
+		case arg == "--passphrase":
+			f.passphrase = true
+		case arg == "--identity":
+			val, err := takeValue(args, &i, "--identity")
+			if err != nil {
+				return f, err
+			}
+			f.identity = val
+		case hasPrefix(arg, "--identity="):
+			f.identity = arg[len("--identity="):]
 		case arg == "--include-archived":
 			f.includeArchived = true
 		case arg == "--dry-run":
@@ -218,6 +250,16 @@ func runExport(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
+	encryptRequested := len(f.encryptTo) > 0 || f.recipientsFile != "" || f.passphrase
+	if f.passphrase && (len(f.encryptTo) > 0 || f.recipientsFile != "") {
+		fmt.Fprintln(stderr, "error: --passphrase cannot be combined with --encrypt-to or --recipients-file")
+		return 2
+	}
+	if encryptRequested && !crypt.Available() {
+		fmt.Fprintln(stderr, "error: "+ageMissingMessage)
+		return 1
+	}
+
 	var since time.Time
 	if f.since != "" {
 		since, err = parseSince(f.since)
@@ -270,9 +312,32 @@ func runExport(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "error: export failed: %v\n", err)
 		return 1
 	}
+
+	if encryptRequested {
+		encPath := output + crypt.Extension
+		err := crypt.Encrypt(output, encPath, crypt.EncryptOptions{
+			Recipients:     f.encryptTo,
+			RecipientsFile: f.recipientsFile,
+			Passphrase:     f.passphrase,
+		})
+		// The plaintext bundle is intermediate; remove it whether or not
+		// encryption succeeded so a clear bundle is never left behind.
+		os.Remove(output)
+		if err != nil {
+			os.Remove(encPath)
+			fmt.Fprintf(stderr, "error: encrypt failed: %v\n", err)
+			return 1
+		}
+		result.BundlePath = encPath
+	}
+
 	printExport(stdout, absProject, f.session, result)
 	return 0
 }
+
+// ageMissingMessage is the shared guidance shown when encryption/decryption is
+// requested but the age binary is not installed.
+const ageMissingMessage = "age is not installed or not on PATH; install age (https://github.com/FiloSottile/age) to use bundle encryption"
 
 // parseSince accepts either an absolute date (YYYY-MM-DD, interpreted as UTC
 // midnight) or a relative duration ending in d/h/m (e.g. 7d, 48h, 90m) measured
@@ -343,13 +408,57 @@ func runInspect(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "usage: codex-sync inspect <file.codexbundle>")
 		return 2
 	}
-	res, err := bundle.Inspect(f.positional[0])
+	bundlePath, cleanup, code := resolveBundlePath(f, stderr)
+	if code != 0 {
+		return code
+	}
+	defer cleanup()
+
+	res, err := bundle.Inspect(bundlePath)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
 	}
 	printInspect(stdout, f.positional[0], res)
 	return 0
+}
+
+// resolveBundlePath returns a plaintext bundle path usable by inspect/import. If
+// the positional input is an encrypted (.age) bundle, it is decrypted to a
+// temporary file (requiring --identity or --passphrase) and the returned cleanup
+// removes that temporary file. For a plain bundle the input is returned as-is
+// with a no-op cleanup. The returned code is non-zero on error.
+func resolveBundlePath(f commonFlags, stderr io.Writer) (string, func(), int) {
+	in := f.positional[0]
+	noop := func() {}
+	if !strings.EqualFold(filepath.Ext(in), crypt.Extension) {
+		return in, noop, 0
+	}
+	if f.identity == "" && !f.passphrase {
+		fmt.Fprintln(stderr, "error: "+in+" is an encrypted bundle; pass --identity <file> or --passphrase to decrypt it")
+		return "", noop, 2
+	}
+	if !crypt.Available() {
+		fmt.Fprintln(stderr, "error: "+ageMissingMessage)
+		return "", noop, 1
+	}
+	tmpDir, err := os.MkdirTemp("", "codex-sync-dec-")
+	if err != nil {
+		fmt.Fprintf(stderr, "error: cannot create temp dir: %v\n", err)
+		return "", noop, 1
+	}
+	cleanup := func() { os.RemoveAll(tmpDir) }
+	// Fixed inner name in a fresh dir so age never refuses to overwrite.
+	out := filepath.Join(tmpDir, "bundle.codexbundle")
+	if err := crypt.Decrypt(in, out, crypt.DecryptOptions{
+		IdentityFile: f.identity,
+		Passphrase:   f.passphrase,
+	}); err != nil {
+		cleanup()
+		fmt.Fprintf(stderr, "error: decrypt failed: %v\n", err)
+		return "", noop, 1
+	}
+	return out, cleanup, 0
 }
 
 func runImport(args []string, stdout, stderr io.Writer) int {
@@ -382,8 +491,14 @@ func runImport(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
+	bundlePath, cleanup, code := resolveBundlePath(f, stderr)
+	if code != 0 {
+		return code
+	}
+	defer cleanup()
+
 	res, err := bundle.Import(home, bundle.ImportOptions{
-		BundlePath:  f.positional[0],
+		BundlePath:  bundlePath,
 		DryRun:      f.dryRun,
 		ProjectPath: absProject,
 		MapCWD:      mappings,
@@ -474,6 +589,16 @@ Flags:
                         plain .jsonl only — .zst sessions are not rewritten)
   --clone <dir>         import: after importing, clone the bundle's recorded git
                         remote into <dir> and check out the recorded commit
+  --encrypt-to <rcpt>   export: encrypt the bundle to an age recipient
+                        (age1.../ssh-ed25519 ...) -> <output>.age (repeatable)
+  --recipients-file <f> export: encrypt to every age recipient listed in <f>
+  --passphrase          export: encrypt with an interactive passphrase
+                        import/inspect: decrypt a passphrase-encrypted bundle
+  --identity <file>     import/inspect: age identity (private key) file used to
+                        decrypt a .age bundle
+
+Encryption requires the external 'age' tool (https://github.com/FiloSottile/age).
+.age bundles are auto-detected on import/inspect.
 
 Examples:
   codex-sync doctor
@@ -489,6 +614,10 @@ Examples:
   codex-sync import ./my-project.codexbundle
   codex-sync import ./my-project.codexbundle --map-cwd "/old/path=/new/path"
   codex-sync import ./my-project.codexbundle --clone ~/dev/project
+  codex-sync export --project . --encrypt-to age1qz...   # -> <project>.codexbundle.age
+  codex-sync export --all --passphrase                   # passphrase-encrypted
+  codex-sync import ./my-project.codexbundle.age --identity ~/.age/key.txt
+  codex-sync inspect ./my-project.codexbundle.age --passphrase
 
 After importing, restart the Codex App (or run Codex again) so it scans and
 reconciles the imported rollout files.

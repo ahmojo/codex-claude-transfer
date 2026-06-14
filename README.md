@@ -5,7 +5,7 @@
 ![CI](https://github.com/ahmojo/Codex_Sync/actions/workflows/ci.yml/badge.svg)
 ![Go](https://img.shields.io/badge/Go-1.22%2B-00ADD8?logo=go)
 ![License](https://img.shields.io/badge/license-MIT-blue)
-![Status](https://img.shields.io/badge/status-v0.1.3-orange)
+![Status](https://img.shields.io/badge/status-v0.1.4-orange)
 
 > ⚠️ **Unofficial tool.** Not affiliated with or endorsed by OpenAI. Codex's
 > internals can change at any time and break this tool. Use at your own risk.
@@ -189,6 +189,31 @@ Export a single conversation by its thread id (a unique prefix is enough):
 codex-sync export --session 9f3c1a2b   # → session-9f3c1a2b.codexbundle
 ```
 
+### Encrypting a bundle
+
+Because a `.codexbundle` can contain prompts, code, and accidentally-printed
+secrets (see the safety model), you can encrypt it before it ever leaves your
+machine. codex-sync shells out to [`age`](https://github.com/FiloSottile/age) —
+the same single-binary, dependency-free philosophy as the git integration — so
+you need `age` on your `PATH`:
+
+```bash
+# Encrypt to an age public key (repeatable) → project.codexbundle.age
+codex-sync export --project . --encrypt-to age1qz...
+
+# Or encrypt with an interactive passphrase
+codex-sync export --all --passphrase
+
+# inspect/import auto-detect a .age bundle and decrypt it
+codex-sync import ./project.codexbundle.age --identity ~/.age/key.txt
+codex-sync inspect ./project.codexbundle.age --passphrase
+```
+
+The plaintext bundle is removed after encryption, and decryption happens into a
+temporary file that is deleted when the command finishes. If `age` is not
+installed, encryption/decryption fails with install guidance and nothing else is
+affected. codex-sync still never uploads anything.
+
 ## 8. Commands
 
 | Command | Description |
@@ -199,6 +224,7 @@ codex-sync export --session 9f3c1a2b   # → session-9f3c1a2b.codexbundle
 | `codex-sync export --all` | Exports every session regardless of recorded cwd (includes compressed `.jsonl.zst`) into `codex-sessions.codexbundle`. |
 | `codex-sync export --session <thread-id>` | Exports a single session by thread id (a unique prefix is enough) into `session-<id>.codexbundle`. |
 | `codex-sync export --project . --with-git` | Exports and records the project's git remote/branch/commit (and dirty/unpushed status) in the bundle. |
+| `codex-sync export --project . --encrypt-to <recipient>` | Exports and encrypts the bundle to an `age` recipient, writing `<output>.age`. |
 | `codex-sync import <file.codexbundle> --clone <dir>` | Imports, then clones the bundle's recorded git remote into `<dir>` and checks out the recorded commit. |
 | `codex-sync inspect <file.codexbundle>` | Shows a bundle's manifest and contents without extracting anything. |
 | `codex-sync import <file.codexbundle>` | Imports rollout files into your Codex home. Never overwrites; verifies checksums first. |
@@ -221,6 +247,10 @@ codex-sync export --session 9f3c1a2b   # → session-9f3c1a2b.codexbundle
 | `--dry-run` | import | Write nothing; just report. |
 | `--map-cwd OLD=NEW` | import | Opt-in cwd rewrite for matching plain `.jsonl` sessions. Does not rewrite `.jsonl.zst`. |
 | `--clone <dir>` | import | After importing, clone the bundle's recorded git remote into `<dir>` and check out the recorded commit. Opt-in; needs `--with-git` data in the bundle. |
+| `--encrypt-to <recipient>` | export | Encrypt the bundle to an `age` recipient (`age1...`/`ssh-ed25519 ...`); repeatable. Writes `<output>.age`. Requires `age` on `PATH`. |
+| `--recipients-file <file>` | export | Encrypt to every `age` recipient listed in `<file>`. |
+| `--passphrase` | export, import, inspect | Export: encrypt with an interactive passphrase. Import/inspect: decrypt a passphrase-encrypted bundle. |
+| `--identity <file>` | import, inspect | `age` identity (private key) file used to decrypt a `.age` bundle. |
 
 ## 9. Safety model
 
@@ -295,19 +325,18 @@ project.codexbundle
 - **No cloud sync.**
 - **No GUI yet.**
 - **No Claude support yet.**
-- **No encrypted bundles yet.**
+- **Encryption requires the external `age` tool** (no crypto is embedded).
 
 ## 12. Roadmap
 
 Already shipped since v0.1.0: `--map-cwd` (v0.1.1), `export --all` and
 `export --since` (v0.1.2), `export --session`, `export --with-git` and
-`import --clone` (v0.1.3).
+`import --clone` (v0.1.3), optional `age` bundle encryption (v0.1.4).
 
 Planned, explicitly **not** in v0.1.x:
 
 - Optional `git push`/repo-creation on export (the upload half of handoff),
   clearly separated and opt-in — codex-sync does not upload anything today
-- Optional encrypted bundles (still no accounts, no hosting)
 - Better `.jsonl.zst` handling, including metadata parsing and possible safe cwd
   mapping after decompression/recompression is researched
 - Safer mapping UX around `--map-cwd` (clearer previews, examples, and possibly

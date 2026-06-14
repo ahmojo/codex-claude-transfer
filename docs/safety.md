@@ -45,6 +45,10 @@ That has two consequences for bundles:
 - **Do not commit bundles to a repository.** Add `*.codexbundle` to your `.gitignore`.
 - Move bundles over channels you trust (USB stick, `scp`/`rsync` over SSH,
   Syncthing, an encrypted drive).
+- **Encrypt the bundle** if it must travel over a channel you do not fully
+  control: `codex-sync export … --encrypt-to <age-recipient>` (or
+  `--passphrase`) produces a `.codexbundle.age` that only the holder of the key
+  or passphrase can read (see §11).
 - If you must share a bundle for debugging, **inspect it first**
   (`codex-sync inspect bundle.codexbundle`) and assume the JSONL inside contains
   everything from those sessions.
@@ -225,7 +229,34 @@ whatever URL the manifest contains.
 
 ---
 
-## 11. Dry run
+## 11. Encryption is optional, opt-in, and external
+
+A `.codexbundle` is plaintext by default (see §1). When you must move one over a
+channel you do not fully control, codex-sync can encrypt it for you. Like the git
+integration, it does **not** embed a crypto library: it shells out to the
+well-known [`age`](https://github.com/FiloSottile/age) tool, keeping codex-sync a
+single, dependency-free binary.
+
+- **On export**, `--encrypt-to <recipient>` (repeatable), `--recipients-file`,
+  or `--passphrase` write the bundle to `<output>.age`. The intermediate
+  plaintext bundle is **removed** afterward, so a clear copy is not left behind.
+- **On import/inspect**, a `.age` input is auto-detected and decrypted to a
+  **temporary file** (requiring `--identity <file>` or `--passphrase`). That
+  temporary plaintext is deleted when the command finishes.
+- `--passphrase` is mutually exclusive with `--encrypt-to`/`--recipients-file`
+  (age cannot mix the two).
+- If `age` is not installed, encryption/decryption **fails with install
+  guidance** and changes nothing else.
+
+Encryption only protects the bundle **in transit and at rest**. Once decrypted
+for import, the sessions are written to your Codex home in the clear, exactly as
+an unencrypted bundle would be. It does not scrub secrets from the transcript
+(see §1); it only controls **who can open the file**. And it does not change the
+"never uploads" guarantee — encrypting still happens entirely on your machine.
+
+---
+
+## 12. Dry run
 
 Use `codex-sync import bundle.codexbundle --dry-run` to validate a bundle and see
 exactly what *would* happen — new vs. already-present vs. conflict, and how many
@@ -234,7 +265,7 @@ to preview an import.
 
 ---
 
-## 12. What codex-sync deliberately does NOT do
+## 13. What codex-sync deliberately does NOT do
 
 These are intentional non-goals. They keep the tool small, predictable, and safe:
 
@@ -253,18 +284,24 @@ These are intentional non-goals. They keep the tool small, predictable, and safe
   `git clone` (see §10).
 - **Does not require accounts, servers, or a background daemon.**
 - **Does not scrub secrets from bundles.** It cannot tell what is sensitive — that
-  responsibility stays with you (see §1).
+  responsibility stays with you (see §1). Optional `age` encryption (§11)
+  controls *who can open* a bundle, but it does not remove secrets from the
+  transcript inside.
+- **Does not embed a crypto library.** Encryption shells out to the external
+  `age` tool; without `age` installed, encryption simply errors.
 
 ---
 
-## 13. Recommended safe workflow
+## 14. Recommended safe workflow
 
 1. On the source machine, run `codex-sync export --project .` from your project
    directory.
 2. **Inspect the bundle** before moving it: `codex-sync inspect ./project.codexbundle`.
    Remember the JSONL inside contains the full session transcript.
 3. Move the bundle over a channel you trust (USB, `scp`/`rsync` over SSH,
-   Syncthing, an encrypted drive). Do **not** post it publicly.
+   Syncthing, an encrypted drive). Do **not** post it publicly. If the channel
+   is not fully trusted, export with `--encrypt-to <recipient>` (or
+   `--passphrase`) and move the resulting `.age` file instead (see §11).
 4. On the destination machine, **dry-run first**:
    `codex-sync import ./project.codexbundle --dry-run`.
 5. If the project path differs, dry-run with an explicit mapping:
@@ -291,3 +328,6 @@ These are intentional non-goals. They keep the tool small, predictable, and safe
 - A **cwd mismatch** can hide a correctly-imported session from a project view.
 - `--map-cwd` can fix path mismatch for plain `.jsonl` sessions, but only by
   rewriting the canonical `cwd` field in `session_meta`.
+- Bundles can be **encrypted** with the external `age` tool (`--encrypt-to` /
+  `--passphrase`); this controls who can open a bundle but does not scrub the
+  secrets inside it, and codex-sync still never uploads anything.
