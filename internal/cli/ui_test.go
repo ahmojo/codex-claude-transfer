@@ -132,6 +132,21 @@ func TestBuildImportArgsStripsQuotedBundle(t *testing.T) {
 	}
 }
 
+func TestMustBeAbsolutePath(t *testing.T) {
+	if err := mustBeAbsolutePath(""); err == nil {
+		t.Error("empty path should be rejected")
+	}
+	if err := mustBeAbsolutePath("relative/dir"); err == nil {
+		t.Error("relative path should be rejected")
+	}
+	// A quoted absolute path should be accepted (quotes stripped first). Use a
+	// host-absolute path so this holds on Windows (needs a drive) and Unix alike.
+	abs := t.TempDir()
+	if err := mustBeAbsolutePath(`"` + abs + `"`); err != nil {
+		t.Errorf("quoted absolute path %q should be accepted, got %v", abs, err)
+	}
+}
+
 func TestFormatArgv(t *testing.T) {
 	got := formatArgv([]string{"export", "--project", "/path with space", "--all"})
 	want := `export --project "/path with space" --all`

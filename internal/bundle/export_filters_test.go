@@ -3,6 +3,7 @@ package bundle
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -75,6 +76,33 @@ func TestExportSinceFiltersOlder(t *testing.T) {
 	}
 	if res.Manifest.Sessions[0].ThreadID != "ffff1111-2222-3333-4444-555566667777" {
 		t.Errorf("wrong session survived since filter: %q", res.Manifest.Sessions[0].ThreadID)
+	}
+}
+
+func TestExportWithGitNonRepoWarns(t *testing.T) {
+	home := fakeHome(t)
+	day := filepath.Join(home.SessionsDir, "2026", "06", "13")
+	// A plain temp dir that is not a git repository.
+	proj := t.TempDir()
+	writeSession(t, day, "rollout-2026-06-13T18-22-01-aaaa1111-2222-3333-4444-555566667777.jsonl",
+		"aaaa1111-2222-3333-4444-555566667777", proj)
+
+	out := filepath.Join(t.TempDir(), "git.codexbundle")
+	res, err := Export(home, ExportOptions{ProjectPath: proj, OutputPath: out, WithGit: true})
+	if err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	if res.Manifest.Git != nil {
+		t.Errorf("expected no git metadata for a non-repo, got %+v", res.Manifest.Git)
+	}
+	var warned bool
+	for _, w := range res.Warnings {
+		if strings.Contains(w, "not a git repository") || strings.Contains(w, "git is not installed") {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Errorf("expected a warning that no git was found; warnings = %v", res.Warnings)
 	}
 }
 

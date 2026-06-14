@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
+	"github.com/ahmojo/Codex_Sync/internal/bundle"
 	"github.com/ahmojo/Codex_Sync/internal/codexhome"
+	"github.com/ahmojo/Codex_Sync/internal/git"
 	"github.com/ahmojo/Codex_Sync/internal/sessions"
 	"github.com/charmbracelet/huh"
 	"github.com/mattn/go-isatty"
@@ -237,10 +240,10 @@ func uiExport(f commonFlags, stdout, stderr io.Writer) {
 	if !runField(huh.NewSelect[string]().
 		Title("What do you want to export?").
 		Options(
-			huh.NewOption("This project (current directory)", "current"),
+			huh.NewOption("Sessions from one project folder (pick from a list)", "project"),
 			huh.NewOption("Everything (all sessions)", "all"),
 			huh.NewOption("One session (pick from a list)", "session"),
-			huh.NewOption("A specific project path", "project"),
+			huh.NewOption("This project (the folder I'm running from)", "current"),
 		).
 		Value(&c.mode), stderr) {
 		return
@@ -248,9 +251,11 @@ func uiExport(f commonFlags, stdout, stderr io.Writer) {
 
 	switch c.mode {
 	case "project":
-		if !runField(huh.NewInput().Title("Project path").Value(&c.projectPath), stderr) {
+		path, ok := pickProjectFolder(f, stdout, stderr)
+		if !ok {
 			return
 		}
+		c.projectPath = path
 	case "session":
 		id, ok := pickSession(f, stdout, stderr)
 		if !ok {
@@ -259,12 +264,23 @@ func uiExport(f commonFlags, stdout, stderr io.Writer) {
 		c.sessionID = id
 	}
 
-	ok := runField(huh.NewConfirm().
+	if !runField(huh.NewConfirm().
 		Title("Also record the project's git remote/commit? (--with-git)").
-		Value(&c.withGit), stderr) &&
-		runField(huh.NewInput().
-			Title("Only sessions updated since? (blank = all; e.g. 7d or 2026-06-01)").
-			Value(&c.since), stderr) &&
+		Value(&c.withGit), stderr) {
+		return
+	}
+	// Give immediate feedback: if we know the project folder and it is not a git
+	// repository, there is nothing to record — say so now rather than after the
+	// export runs, so the user is not surprised by a missing clone option later.
+	if c.withGit {
+		if dir := exportGitDir(c); dir != "" && !git.IsRepo(dir) {
+			fmt.Fprintf(stdout, "\nNote: %s is not a git repository, so no git remote/commit\nwill be recorded (the import side will have nothing to clone).\n\n", dir)
+		}
+	}
+
+	ok := runField(huh.NewInput().
+		Title("Only sessions updated since? (blank = all; e.g. 7d or 2026-06-01)").
+		Value(&c.since), stderr) &&
 		runField(huh.NewSelect[string]().
 			Title("Encrypt the bundle?").
 			Options(
@@ -294,45 +310,18 @@ func uiExport(f commonFlags, stdout, stderr io.Writer) {
 
 func uiImport(f commonFlags, stdout, stderr io.Writer) {
 	c := importChoices{codexHome: f.codexHome}
+
+	// 1) Which bundle? (Tolerate a path pasted with surrounding quotes.)
 	if !runField(huh.NewInput().
-		Title("Bundle file to import (.codexbundle or .age)").
+		Title("Bundle file to import\n(drag the .codexbundle or .age file into this window, or paste its path)").
 		Value(&c.bundle).
 		Validate(fileMustExist), stderr) {
 		return
 	}
 	c.bundle = stripQuotes(c.bundle)
-	ok := runField(huh.NewConfirm().
-		Title("If a local session conflicts, replace it (keeping a backup)? (--replace-with-backup)").
-		Value(&c.replaceBackup), stderr) &&
-		runField(huh.NewInput().
-			Title("Project path for cwd-mismatch check (blank = none)").
-			Value(&c.project), stderr)
-	if !ok {
-		return
-	}
 
-	// Optional cwd remapping, one or more OLD=NEW pairs.
-	for {
-		var add bool
-		if !runField(huh.NewConfirm().
-			Title("Remap a recorded cwd to a local path? (--map-cwd)").
-			Value(&add), stderr) {
-			return
-		}
-		if !add {
-			break
-		}
-		var mapping string
-		if !runField(huh.NewInput().
-			Title("Mapping as OLD=NEW (e.g. /old/path=/new/local/path)").
-			Value(&mapping), stderr) {
-			return
-		}
-		if mapping != "" {
-			c.mapCWD = append(c.mapCWD, mapping)
-		}
-	}
-
+	// 2) If the bundle is encrypted, we need to know how to decrypt it before we
+	//    can read it and guide the rest of the wizard.
 	if strings.HasSuffix(strings.ToLower(c.bundle), ".age") {
 		if !runField(huh.NewSelect[string]().
 			Title("This bundle is encrypted. Decrypt with?").
@@ -350,26 +339,251 @@ func uiImport(f commonFlags, stdout, stderr io.Writer) {
 				Validate(fileMustExist), stderr) {
 				return
 			}
+			c.identity = stripQuotes(c.identity)
 		}
 	}
 
-	// Safety first: always preview with --dry-run, then confirm the real run.
-	fmt.Fprintln(stdout, "\nPreviewing the import (no files will be changed):")
-	runBuilt(buildImportArgs(c, true), stdout, stderr)
+	// 3) Read the bundle (decrypting to a temp file if needed) so we can guide
+	//    the user with real data instead of asking them to type paths from memory.
+	plain, cleanup, ok := resolveBundleForRead(c, stderr)
+	if !ok {
+		return
+	}
+	defer cleanup()
 
+	res, err := bundle.Inspect(plain)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: cannot read bundle: %v\n", err)
+		return
+	}
+	summary := bundle.SummarizeCWDs(res.Manifest.Sessions, bundle.DirExists)
+
+	fmt.Fprintf(stdout, "\nThis bundle contains %s from %s:\n",
+		plural(len(res.Manifest.Sessions), "session"), plural(len(summary.Dirs), "project folder"))
+	for _, d := range summary.Dirs {
+		where := "found on this computer"
+		if !d.ExistsLocal {
+			where = "NOT on this computer"
+		}
+		fmt.Fprintf(stdout, "  - %s\n      %s, %s\n", d.Path, plural(d.Count, "session"), where)
+	}
+	if summary.UnknownCWD > 0 {
+		fmt.Fprintf(stdout, "  - %s with no recorded folder (compressed/unknown)\n", plural(summary.UnknownCWD, "session"))
+	}
+	fmt.Fprintln(stdout)
+
+	// 4) For every missing folder, offer a clear fix in plain language. The user
+	//    never types the OLD path — it comes straight from the bundle.
+	if summary.MissingCount == 0 && len(summary.Dirs) > 0 {
+		fmt.Fprintln(stdout, "All project folders already exist here — your sessions will")
+		fmt.Fprintln(stdout, "show up in Codex automatically after import.")
+	}
+	for _, d := range summary.Dirs {
+		if d.ExistsLocal {
+			continue
+		}
+		var choice string
+		if !runField(huh.NewSelect[string]().
+			Title(fmt.Sprintf("%s recorded in this folder, which is NOT on this computer:\n  %s\nWhat should I do so these sessions appear in Codex?",
+				plural(d.Count, "session"), d.Path)).
+			Options(
+				huh.NewOption("Create that exact folder here (keep the original path)", "create"),
+				huh.NewOption("Point these sessions to a different folder on this computer", "remap"),
+				huh.NewOption("Skip for now (they stay hidden until the folder exists)", "skip"),
+			).
+			Value(&choice), stderr) {
+			return
+		}
+		switch choice {
+		case "create":
+			if err := os.MkdirAll(d.Path, 0o755); err != nil {
+				fmt.Fprintf(stderr, "  could not create %s: %v\n  (these sessions will stay hidden until that folder exists)\n", d.Path, err)
+			} else {
+				fmt.Fprintf(stdout, "  Created folder: %s\n", d.Path)
+			}
+		case "remap":
+			var np string
+			if !runField(huh.NewInput().
+				Title("Folder on THIS computer where these sessions should appear\n(full path, e.g. C:\\Users\\you\\Desktop\\project)").
+				Value(&np).
+				Validate(mustBeAbsolutePath), stderr) {
+				return
+			}
+			np = stripQuotes(np)
+			if !bundle.DirExists(np) {
+				var mk bool
+				if !runField(huh.NewConfirm().
+					Title(fmt.Sprintf("%s doesn't exist yet. Create it?", np)).
+					Value(&mk), stderr) {
+					return
+				}
+				if mk {
+					if err := os.MkdirAll(np, 0o755); err != nil {
+						fmt.Fprintf(stderr, "  could not create %s: %v\n", np, err)
+					} else {
+						fmt.Fprintf(stdout, "  Created folder: %s\n", np)
+					}
+				}
+			}
+			c.mapCWD = append(c.mapCWD, d.Path+"="+np)
+		}
+	}
+
+	// 5) Quietly dry-run the import so we can show a clean, accurate preview and
+	//    only ask about conflicts if there really are any.
+	home, err := codexhome.Detect(c.codexHome)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: cannot determine Codex home: %v\n", err)
+		return
+	}
+	mappings, err := bundle.ParseCWDMappings(c.mapCWD)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return
+	}
+	dry, err := bundle.Import(home, bundle.ImportOptions{BundlePath: plain, DryRun: true, MapCWD: mappings})
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return
+	}
+
+	fmt.Fprintln(stdout, "\nHere's what will happen:")
+	fmt.Fprintf(stdout, "  New sessions to add:        %d\n", dry.Imported)
+	fmt.Fprintf(stdout, "  Already on this computer:   %d\n", dry.SkippedIdentical)
+	if dry.Mapped > 0 {
+		fmt.Fprintf(stdout, "  Redirected to a new folder: %d\n", dry.Mapped)
+	}
+	if dry.Conflicts > 0 {
+		fmt.Fprintf(stdout, "  Differ from a local copy:   %d\n", dry.Conflicts)
+	}
+	fmt.Fprintln(stdout)
+
+	if dry.Conflicts > 0 {
+		if !runField(huh.NewConfirm().
+			Title(fmt.Sprintf("%s already exist here but differ from the bundle.\nReplace them with the bundle's version? (a backup of each local file is kept)", plural(dry.Conflicts, "session"))).
+			Affirmative("Replace (keep backups)").
+			Negative("Keep mine (skip them)").
+			Value(&c.replaceBackup), stderr) {
+			return
+		}
+	}
+
+	// 6) If the bundle recorded a git remote, offer to clone the code too.
+	if gi := res.Manifest.Git; gi != nil && !gi.Empty() && gi.RemoteURL != "" {
+		var doClone bool
+		if !runField(huh.NewConfirm().
+			Title(fmt.Sprintf("This bundle also records the project's git remote:\n  %s\nClone the code onto this computer too?", gi.RemoteURL)).
+			Value(&doClone), stderr) {
+			return
+		}
+		if doClone {
+			var dir string
+			if !runField(huh.NewInput().
+				Title("Folder to clone the code into (full path)").
+				Value(&dir).
+				Validate(mustBeAbsolutePath), stderr) {
+				return
+			}
+			c.clone = stripQuotes(dir)
+		}
+	}
+
+	// 7) Final confirmation, then run the real command (echoed for transparency).
 	var proceed bool
 	if !runField(huh.NewConfirm().
-		Title("Apply this import for real now?").
+		Title("Import now?").
 		Affirmative("Import").
 		Negative("Cancel").
 		Value(&proceed), stderr) {
 		return
 	}
-	if proceed {
-		runBuilt(buildImportArgs(c, false), stdout, stderr)
-	} else {
+	if !proceed {
 		fmt.Fprintln(stdout, "Cancelled; nothing was changed.")
+		return
 	}
+	runBuilt(buildImportArgs(c, false), stdout, stderr)
+}
+
+// resolveBundleForRead returns a plaintext bundle path the wizard can read
+// (Inspect / dry-run Import) without writing anything, decrypting a .age bundle
+// to a temp file when needed. The returned cleanup removes any temp file.
+func resolveBundleForRead(c importChoices, stderr io.Writer) (string, func(), bool) {
+	f := commonFlags{
+		positional: []string{c.bundle},
+		identity:   c.identity,
+		passphrase: c.decryptMode == "passphrase",
+	}
+	path, cleanup, code := resolveBundlePath(f, stderr)
+	if code != 0 {
+		return "", func() {}, false
+	}
+	return path, cleanup, true
+}
+
+// exportGitDir returns the local folder git discovery will run against for an
+// export, when it is knowable up front: the picked project folder, or the
+// current directory. For "all"/"session" exports the folder comes from a
+// session's recorded cwd at export time, so we cannot pre-check it and return "".
+func exportGitDir(c exportChoices) string {
+	switch c.mode {
+	case "project":
+		return stripQuotes(c.projectPath)
+	case "current":
+		if wd, err := os.Getwd(); err == nil {
+			return wd
+		}
+	}
+	return ""
+}
+
+// pickProjectFolder scans local sessions, groups them by recorded project folder,
+// and lets the user pick one to export — so they choose from a list instead of
+// typing a path. ok is false if the user aborted or there is nothing to pick.
+func pickProjectFolder(f commonFlags, stdout, stderr io.Writer) (string, bool) {
+	home, err := codexhome.Detect(f.codexHome)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: cannot determine Codex home: %v\n", err)
+		return "", false
+	}
+	scan, err := sessions.Scan(home, sessions.ScanOptions{})
+	if err != nil {
+		fmt.Fprintf(stderr, "error: scan failed: %v\n", err)
+		return "", false
+	}
+	ms := make([]bundle.ManifestSession, 0, len(scan.Sessions))
+	for _, s := range scan.Sessions {
+		ms = append(ms, bundle.ManifestSession{OriginalCWD: s.CWD})
+	}
+	summary := bundle.SummarizeCWDs(ms, bundle.DirExists)
+	if len(summary.Dirs) == 0 {
+		fmt.Fprintln(stdout, "No project folders were found in your local sessions.")
+		return "", false
+	}
+	opts := make([]huh.Option[string], 0, len(summary.Dirs))
+	for _, d := range summary.Dirs {
+		opts = append(opts, huh.NewOption(fmt.Sprintf("%s  (%s)", d.Path, plural(d.Count, "session")), d.Path))
+	}
+	var chosen string
+	if !runField(huh.NewSelect[string]().
+		Title("Pick the project folder to export").
+		Options(opts...).
+		Value(&chosen), stderr) {
+		return "", false
+	}
+	return chosen, true
+}
+
+// mustBeAbsolutePath is a huh validator that requires a non-empty absolute path,
+// tolerating surrounding quotes the user may have pasted.
+func mustBeAbsolutePath(s string) error {
+	s = stripQuotes(s)
+	if s == "" {
+		return errors.New("a folder path is required")
+	}
+	if !filepath.IsAbs(s) {
+		return errors.New("please enter a full path, e.g. C:\\Users\\you\\project")
+	}
+	return nil
 }
 
 func uiInspect(f commonFlags, stdout, stderr io.Writer) {

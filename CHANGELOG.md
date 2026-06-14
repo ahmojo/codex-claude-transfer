@@ -2,6 +2,38 @@
 
 All notable changes to codex-sync are documented here.
 
+## [0.1.8] - 2026-06-14
+
+### Changed
+- `codex-sync ui` is much easier to use, especially for import:
+  - **Import now reads the bundle first** and shows, in plain language, which
+    project folders the sessions came from and which of those are missing on this
+    computer. For each missing folder it offers three clear choices — *create
+    that folder here*, *point the sessions to a different local folder*, or *skip*
+    — and **builds the `--map-cwd` mapping for you**. You never type the old path
+    (it comes from the bundle) and you are never asked to compose `OLD=NEW` by
+    hand. The wizard can also create the destination folder for you.
+  - Conflicts are detected automatically; the wizard only asks whether to replace
+    diverged local sessions (keeping backups) when conflicts actually exist.
+  - If the bundle recorded a git remote, the wizard offers to clone the code
+    (`--clone`), which the interactive flow previously did not expose.
+  - The import preview is now a short, plain-English summary (new / already here /
+    redirected / differing) instead of the raw dry-run report.
+  - Export's "specific project" choice now lets you **pick a project folder from a
+    list** (with session counts) instead of typing a path.
+
+### Fixed
+- The import wizard could append the same `--map-cwd` mapping several times when a
+  user re-entered the old remap loop, producing a "duplicate --map-cwd" error. The
+  remap loop is gone — each missing folder is handled exactly once.
+- `export --with-git` is no longer silent when the project folder is not a git
+  repository (or git is not installed). It now warns clearly that no git metadata
+  was recorded, so it is obvious why the imported bundle offers nothing to clone.
+  The export wizard also says this immediately when you enable "record git" for a
+  folder that is not a repository. (Previously any git warning that came without
+  git metadata — including this one and the "no recorded cwd" notice — was dropped
+  before reaching the user.)
+
 ## [0.1.7] - 2026-06-14
 
 ### Fixed

@@ -5,7 +5,7 @@
 ![CI](https://github.com/ahmojo/Codex_Sync/actions/workflows/ci.yml/badge.svg)
 ![Go](https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go)
 ![License](https://img.shields.io/badge/license-MIT-blue)
-![Status](https://img.shields.io/badge/status-v0.1.7-orange)
+![Status](https://img.shields.io/badge/status-v0.1.8-orange)
 
 > ⚠️ **Unofficial tool.** Not affiliated with or endorsed by OpenAI. Codex's
 > internals can change at any time and break this tool. Use at your own risk.
@@ -157,8 +157,17 @@ codex-sync ui
 
 It opens a guided menu (Export / Import / Inspect / List / Doctor), asks only the
 questions relevant to your choice, prints the exact `codex-sync …` command it
-built, and runs it. Imports are always previewed with `--dry-run` first and only
-applied after you confirm.
+built, and runs it. You pick project folders and sessions **from a list** instead
+of typing paths.
+
+On import the wizard reads the bundle first and tells you, in plain language,
+which project folders are missing on this computer — then for each one offers to
+**create the folder here**, **point the sessions to a different local folder**
+(it builds the `--map-cwd` mapping for you, so you never type the old path), or
+skip. It detects conflicts automatically and only asks about replacing them when
+they exist, and offers to clone the project's code if the bundle recorded a git
+remote. Imports are always previewed before anything is written and only applied
+after you confirm.
 
 Or use the commands directly:
 

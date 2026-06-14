@@ -89,10 +89,13 @@ func Export(home codexhome.Home, opts ExportOptions) (ExportResult, error) {
 	}
 
 	manifest := newManifest(home, opts)
-	if gi, warns := captureGit(opts, selected); gi != nil {
+	gi, gitWarns := captureGit(opts, selected)
+	if gi != nil {
 		manifest.Git = gi
-		result.Warnings = append(result.Warnings, warns...)
 	}
+	// Append git warnings whether or not metadata was found: the "no repository
+	// found" notice is itself returned with a nil Info, and must not be dropped.
+	result.Warnings = append(result.Warnings, gitWarns...)
 
 	if err := writeBundle(opts.OutputPath, selected, &manifest); err != nil {
 		return result, err
@@ -186,6 +189,16 @@ func captureGit(opts ExportOptions, selected []sessions.Session) (*git.Info, []s
 	}
 	gi := git.Discover(dir)
 	if gi.Empty() {
+		// Nothing was found. Stay quiet for automatic discovery (a plain
+		// --project export), but when the user explicitly opted into git
+		// (--with-git), tell them why no git metadata was recorded instead of
+		// silently producing a bundle with no git block.
+		if opts.WithGit {
+			if !git.Available() {
+				return nil, []string{"--with-git: git is not installed or not on PATH; no git metadata was recorded"}
+			}
+			return nil, []string{fmt.Sprintf("--with-git: %s is not a git repository; no git metadata was recorded", dir)}
+		}
 		return nil, nil
 	}
 	var warns []string

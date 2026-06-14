@@ -30,6 +30,21 @@ func (i Info) Empty() bool {
 	return i.Branch == "" && i.CommitSHA == "" && i.RemoteURL == ""
 }
 
+// Available reports whether the git executable is on PATH.
+func Available() bool {
+	_, err := exec.LookPath("git")
+	return err == nil
+}
+
+// IsRepo reports whether dir is inside a git working tree. It is best-effort:
+// a missing git binary or any failure yields false.
+func IsRepo(dir string) bool {
+	if dir == "" || !Available() {
+		return false
+	}
+	return isRepo(dir)
+}
+
 // Discover returns best-effort git metadata for dir. It never returns an error;
 // missing git or a non-repository simply yields an empty Info.
 func Discover(dir string) Info {
