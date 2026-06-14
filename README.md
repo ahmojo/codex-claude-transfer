@@ -333,7 +333,6 @@ project.codexbundle
 - **No automatic merge.** Sessions are copied, not merged.
 - **No cloud sync.**
 - **No GUI yet.**
-- **No Claude support yet.**
 - **Encryption requires the external `age` tool** (no crypto is embedded).
 
 ## 12. Roadmap
