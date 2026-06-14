@@ -43,5 +43,24 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      # Install age so the encryption round-trip tests actually run (they skip
+      # when age/age-keygen are absent). Best-effort: a package mirror hiccup
+      # must not fail CI, so these steps are allowed to fail and the tests then
+      # simply skip the round-trip.
+      - name: Install age (Linux)
+        if: runner.os == 'Linux'
+        continue-on-error: true
+        run: sudo apt-get update && sudo apt-get install -y age
+
+      - name: Install age (macOS)
+        if: runner.os == 'macOS'
+        continue-on-error: true
+        run: brew install age
+
+      - name: Install age (Windows)
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        run: choco install age.portable -y
+
       - name: Test
         run: go test ./...
