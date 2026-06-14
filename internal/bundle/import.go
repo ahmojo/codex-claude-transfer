@@ -24,6 +24,7 @@ const (
 	ActionSkipIdentical  Action = "skip-identical"   // target exists with same checksum
 	ActionConflict       Action = "conflict"         // target exists with different checksum; not overwritten
 	ActionReplace        Action = "replace"          // conflict, overwritten after backing up the local file
+	ActionImportCopy     Action = "import-copy"      // conflict, imported as a brand-new session (fresh id + filename)
 	ActionSkipArchived   Action = "skip-archived"    // archived_sessions entry; not imported in v0.1
 	ActionSkipNonSession Action = "skip-non-session" // unexpected non-session file
 )
@@ -37,6 +38,11 @@ type ImportItem struct {
 	CWDMismatch bool
 	// Mapped reports whether --map-cwd rewrote this session's cwd.
 	Mapped bool
+	// Copied reports whether this entry was imported as a brand-new session
+	// (ActionImportCopy, --import-as-copy) with NewThreadID as its fresh id.
+	Copied bool
+	// NewThreadID is the freshly assigned session id when Copied is true.
+	NewThreadID string
 	// BackupPath, when non-empty, is where the pre-existing local file was
 	// backed up before being replaced (ActionReplace, --replace-with-backup).
 	BackupPath string
@@ -61,6 +67,13 @@ type ImportOptions struct {
 	// to itself and then overwritten with the bundle's version. Without it,
 	// conflicts are reported and skipped (the default, never-overwrite behavior).
 	ReplaceWithBackup bool
+	// ImportAsCopy turns conflicts into a brand-new session: the bundle's
+	// version is assigned a fresh session id and written under a new rollout
+	// filename, so it coexists with the diverged local session rather than being
+	// skipped or replacing it. Only plain .jsonl files can be copied; a
+	// compressed (.jsonl.zst) conflict, or one without a session_meta id, stays a
+	// skipped conflict. Mutually exclusive with ReplaceWithBackup at the CLI.
+	ImportAsCopy bool
 }
 
 // ImportResult summarizes an import.
@@ -75,6 +88,9 @@ type ImportResult struct {
 	// Replaced counts conflicting sessions that were overwritten after the local
 	// file was backed up (--replace-with-backup).
 	Replaced int
+	// ImportedCopies counts conflicting sessions imported as brand-new sessions
+	// (--import-as-copy).
+	ImportedCopies int
 	// Mapped counts imported sessions whose cwd was rewritten by --map-cwd.
 	Mapped int
 	// MappedCompressedSkipped counts compressed sessions that matched a
@@ -196,16 +212,28 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 		if err != nil {
 			return result, err
 		}
-		// A conflict becomes a replace when the caller opted in. The local file
-		// is preserved as a backup before being overwritten (done in the write
-		// phase below); nothing is lost.
+		// A conflict can be resolved in one of two opt-in ways. With
+		// --replace-with-backup the local file is preserved as a backup and then
+		// overwritten (write phase below). With --import-as-copy the bundle's
+		// version is imported as a brand-new session, leaving the local file
+		// untouched. The CLI keeps the two flags mutually exclusive.
 		if action == ActionConflict && opts.ReplaceWithBackup {
 			action = ActionReplace
+		} else if action == ActionConflict && opts.ImportAsCopy {
+			action, err = planImportCopy(&zr.Reader, &item, rel, home.Root, &result)
+			if err != nil {
+				return result, err
+			}
 		}
 		item.Action = action
 		switch action {
 		case ActionImport:
 			result.Imported++
+			if item.Mapped {
+				result.Mapped++
+			}
+		case ActionImportCopy:
+			result.ImportedCopies++
 			if item.Mapped {
 				result.Mapped++
 			}
@@ -224,7 +252,7 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 		result.Items = append(result.Items, item)
 	}
 
-	if !result.ProjectProvided && result.Imported > 0 {
+	if !result.ProjectProvided && (result.Imported > 0 || result.ImportedCopies > 0) {
 		result.Warnings = append(result.Warnings,
 			"no --project given: whether imported sessions show in a project's sidebar depends on Codex's cwd filtering; if the project path differs from the source device they may be hidden from that project view")
 	}
@@ -235,7 +263,7 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 	}
 	for i := range result.Items {
 		item := &result.Items[i]
-		if item.Action != ActionImport && item.Action != ActionReplace {
+		if item.Action != ActionImport && item.Action != ActionReplace && item.Action != ActionImportCopy {
 			continue
 		}
 		// For a replace, back up the existing local file first so nothing is
@@ -287,6 +315,71 @@ func backupFile(dest string) (string, error) {
 		return "", err
 	}
 	return backup, nil
+}
+
+// planImportCopy turns a conflict into an import-as-copy when possible. It
+// assigns a fresh session id to the bundle's (plain .jsonl) version, derives a
+// new, non-colliding rollout destination from that id, validates the rewrite,
+// and stages the new bytes/destination on item. It returns ActionImportCopy on
+// success, or leaves the entry a skipped ActionConflict (with an explanatory
+// warning) when the session cannot be safely copied — a compressed file or one
+// without a session_meta id. A hard error is only returned for internal/IO
+// failures, in which case the whole import aborts before writing anything.
+func planImportCopy(zr *zip.Reader, item *ImportItem, rel, root string, result *ImportResult) (Action, error) {
+	if strings.HasSuffix(rel, compressedSessionSuffix) {
+		result.Warnings = append(result.Warnings,
+			fmt.Sprintf("%s: compressed session cannot be imported as a copy in v0.1; skipped (conflict)", rel))
+		return ActionConflict, nil
+	}
+	base := item.content // may already be cwd-mapped bytes
+	if base == nil {
+		b, err := readEntryBytes(zr, rel)
+		if err != nil {
+			return "", err
+		}
+		base = b
+	}
+	// Try a few fresh ids in the astronomically unlikely event a destination
+	// already exists; we never overwrite when importing as a copy.
+	for attempt := 0; attempt < 5; attempt++ {
+		newID, err := newSessionID()
+		if err != nil {
+			return "", err
+		}
+		copied, oldID, changed, err := rewriteSessionMetaID(base, newID)
+		if err != nil {
+			return "", fmt.Errorf("assign new session id for %s: %w", rel, err)
+		}
+		if !changed {
+			result.Warnings = append(result.Warnings,
+				fmt.Sprintf("%s: no session_meta id to reassign; cannot import as a copy; skipped (conflict)", rel))
+			return ActionConflict, nil
+		}
+		if err := validateCopiedJSONL(base, copied, newID); err != nil {
+			return "", fmt.Errorf("copied %s failed validation: %w", rel, err)
+		}
+		newRel := copyDestRel(rel, oldID, newID)
+		if !safety.IsSessionEntry(newRel) {
+			return "", fmt.Errorf("internal: copy destination %q is not a valid session path", newRel)
+		}
+		newDest, err := safety.DestPath(root, newRel)
+		if err != nil {
+			return "", err
+		}
+		if _, statErr := os.Stat(newDest); statErr == nil {
+			continue // destination taken; regenerate
+		} else if !os.IsNotExist(statErr) {
+			return "", statErr
+		}
+		item.content = copied
+		item.DestPath = newDest
+		item.Copied = true
+		item.NewThreadID = newID
+		result.Warnings = append(result.Warnings,
+			fmt.Sprintf("%s: target exists with different content; importing as a new session (id %s)", rel, newID))
+		return ActionImportCopy, nil
+	}
+	return "", fmt.Errorf("could not find a free destination to import a copy of %s", rel)
 }
 
 // compressedSessionSuffix is the extension of compressed rollout files, which

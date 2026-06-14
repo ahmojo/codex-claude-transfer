@@ -2,11 +2,14 @@ package sessions
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"strings"
+
+	"github.com/ahmojo/Codex_Sync/internal/zstdcli"
 )
 
 // Scan limits, mirroring the spirit of Codex's own head/event scan limits. We
@@ -73,8 +76,16 @@ func parsePlainRollout(path string) (meta parsedMeta, warnings []string, err err
 		return parsedMeta{}, nil, err
 	}
 	defer f.Close()
+	meta, warnings = parseRolloutReader(f)
+	return meta, warnings, nil
+}
 
-	reader := bufio.NewReader(f)
+// parseRolloutReader extracts metadata from a JSONL rollout stream. It is shared
+// by the plain-file path and the decompressed-compressed path, so both recover
+// the same SessionMeta/first-user-message in the same defensive way. It never
+// loads the whole stream and stops early once it has what it needs.
+func parseRolloutReader(r io.Reader) (meta parsedMeta, warnings []string) {
+	reader := bufio.NewReader(r)
 	lineNo := 0
 	for lineNo < maxLinesScanned {
 		raw, readErr := readLine(reader)
@@ -98,6 +109,22 @@ func parsePlainRollout(path string) (meta parsedMeta, warnings []string, err err
 			break
 		}
 	}
+	return meta, warnings
+}
+
+// parseCompressedHead recovers metadata from a .jsonl.zst rollout by
+// decompressing its head with the external `zstd` tool and parsing the JSONL.
+// It returns an error when zstd is unavailable or the file cannot be
+// decompressed; the caller then falls back to treating the file as unparsed.
+func parseCompressedHead(path string) (parsedMeta, []string, error) {
+	if !zstdcli.Available() {
+		return parsedMeta{}, nil, fmt.Errorf("zstd not available")
+	}
+	data, err := zstdcli.DecompressHead(path, zstdcli.DefaultHeadBytes)
+	if err != nil {
+		return parsedMeta{}, nil, err
+	}
+	meta, warnings := parseRolloutReader(bytes.NewReader(data))
 	return meta, warnings, nil
 }
 

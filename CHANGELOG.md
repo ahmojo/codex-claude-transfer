@@ -2,6 +2,30 @@
 
 All notable changes to codex-sync are documented here.
 
+## [0.1.9] - 2026-06-14
+
+### Added
+- `import --import-as-copy`: opt-in conflict resolution that imports the bundle's
+  version of a diverged session as a brand-new session — a fresh session id and a
+  new rollout filename — instead of skipping it, leaving your local session
+  untouched. Like `--map-cwd`, the only mutation is one canonical `session_meta`
+  field (here the `id`); every other line is preserved byte-for-byte and the
+  result is validated before writing. Compressed (`.jsonl.zst`) conflicts, or
+  sessions without a `session_meta` id, stay skipped. Mutually exclusive with
+  `--replace-with-backup`. Reported as "Imported as new copies: N" and skipped
+  under `--dry-run`. The interactive `ui` now offers it as a third choice when
+  conflicts are detected ("keep both").
+- Compressed (`.jsonl.zst`) metadata recovery via the external `zstd` tool.
+  `export` and `list` now decompress the head of each compressed rollout (when
+  `zstd` is on `PATH`) to recover its recorded cwd, thread id, and preview. As a
+  result, `export --project` now includes matching compressed sessions (which
+  were previously always skipped because their cwd was unknown), and
+  `list`/`inspect` show their details and project folders. The compressed files
+  are only read, never recompressed or modified, and they are still copied into
+  bundles byte-for-byte. When `zstd` is not installed, behavior is unchanged
+  (compressed sessions are reported as metadata-unknown). `--map-cwd` still does
+  not rewrite compressed sessions (that would require recompression).
+
 ## [0.1.8] - 2026-06-14
 
 ### Changed

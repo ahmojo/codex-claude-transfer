@@ -52,8 +52,17 @@ func printList(w io.Writer, scan sessions.ScanResult) {
 		fmt.Fprintln(w)
 	}
 
+	// Compressed sessions may now be parsed (via zstd), so they can be Valid and
+	// Compressed at once. Count the genuinely unparsed (non-compressed) files
+	// directly from the sessions to avoid a misleading or negative number.
+	unparsed := 0
+	for _, s := range scan.Sessions {
+		if !s.Parsed && !s.Compressed {
+			unparsed++
+		}
+	}
 	fmt.Fprintf(w, "Files: %d  Valid: %d  Compressed: %d  Unparsed/invalid: %d\n",
-		scan.Files, scan.Valid, scan.Compressed, scan.Invalid-scan.Compressed)
+		scan.Files, scan.Valid, scan.Compressed, unparsed)
 }
 
 func printExport(w io.Writer, project, session string, result bundle.ExportResult) {
@@ -163,6 +172,9 @@ func printImport(w io.Writer, path string, res bundle.ImportResult) {
 	if res.Replaced > 0 {
 		fmt.Fprintf(w, "Replaced (backup kept): %d\n", res.Replaced)
 	}
+	if res.ImportedCopies > 0 {
+		fmt.Fprintf(w, "Imported as new copies: %d\n", res.ImportedCopies)
+	}
 	if res.SkippedOther > 0 {
 		fmt.Fprintf(w, "Other skipped (archived/non-session): %d\n", res.SkippedOther)
 	}
@@ -222,7 +234,7 @@ func printImport(w io.Writer, path string, res bundle.ImportResult) {
 		fmt.Fprintln(w, "No files were changed because --dry-run was used.")
 		return
 	}
-	if res.Imported > 0 || res.Replaced > 0 {
+	if res.Imported > 0 || res.Replaced > 0 || res.ImportedCopies > 0 {
 		fmt.Fprintln(w, "Import complete.")
 		fmt.Fprintln(w, "Next: restart the Codex App (or run Codex again) so it scans and")
 		fmt.Fprintln(w, "reconciles the imported rollout files. codex-sync does not modify Codex's SQLite.")
@@ -236,7 +248,7 @@ func title(s sessions.Session) string {
 	case s.Preview != "":
 		return s.Preview
 	case s.Compressed:
-		return "(compressed session — not parsed in v0.1)"
+		return "(compressed session — metadata not recovered; install zstd)"
 	case !s.Parsed:
 		return "(unparsed session)"
 	default:

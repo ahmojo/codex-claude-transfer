@@ -72,6 +72,7 @@ type commonFlags struct {
 	passphrase      bool
 	identity        string
 	replaceBackup   bool
+	importAsCopy    bool
 	positional      []string
 }
 
@@ -170,6 +171,8 @@ func parseFlags(args []string) (commonFlags, error) {
 			f.identity = arg[len("--identity="):]
 		case arg == "--replace-with-backup":
 			f.replaceBackup = true
+		case arg == "--import-as-copy":
+			f.importAsCopy = true
 		case arg == "--include-archived":
 			f.includeArchived = true
 		case arg == "--dry-run":
@@ -226,7 +229,10 @@ func runList(args []string, stdout, stderr io.Writer) int {
 	if !ok {
 		return 1
 	}
-	scan, err := sessions.Scan(home, sessions.ScanOptions{IncludeArchived: f.includeArchived})
+	scan, err := sessions.Scan(home, sessions.ScanOptions{
+		IncludeArchived:      f.includeArchived,
+		DecompressCompressed: true,
+	})
 	if err != nil {
 		fmt.Fprintf(stderr, "error: scan failed: %v\n", err)
 		return 1
@@ -473,7 +479,11 @@ func runImport(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if len(f.positional) != 1 {
-		fmt.Fprintln(stderr, "usage: codex-sync import <file.codexbundle> [--dry-run] [--project <path>] [--map-cwd OLD=NEW] [--replace-with-backup] [--clone <dir>]")
+		fmt.Fprintln(stderr, "usage: codex-sync import <file.codexbundle> [--dry-run] [--project <path>] [--map-cwd OLD=NEW] [--replace-with-backup] [--import-as-copy] [--clone <dir>]")
+		return 2
+	}
+	if f.replaceBackup && f.importAsCopy {
+		fmt.Fprintln(stderr, "error: --replace-with-backup and --import-as-copy are mutually exclusive (they resolve conflicts in opposite ways)")
 		return 2
 	}
 	home, ok := resolveHome(f, stderr)
@@ -508,6 +518,7 @@ func runImport(args []string, stdout, stderr io.Writer) int {
 		ProjectPath:       absProject,
 		MapCWD:            mappings,
 		ReplaceWithBackup: f.replaceBackup,
+		ImportAsCopy:      f.importAsCopy,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "error: import failed: %v\n", err)
@@ -599,6 +610,11 @@ Flags:
                         previous import), overwrite the local file with the
                         bundle's version after saving a backup next to it
                         (default is to skip conflicts and never overwrite)
+  --import-as-copy      import: on a conflict, import the bundle's version as a
+                        brand-new session (fresh id + filename) instead of
+                        skipping it, leaving the local session untouched
+                        (mutually exclusive with --replace-with-backup;
+                        plain .jsonl only — .zst conflicts stay skipped)
   --clone <dir>         import: after importing, clone the bundle's recorded git
                         remote into <dir> and check out the recorded commit
   --encrypt-to <rcpt>   export: encrypt the bundle to an age recipient
@@ -609,8 +625,15 @@ Flags:
   --identity <file>     import/inspect: age identity (private key) file used to
                         decrypt a .age bundle
 
-Encryption requires the external 'age' tool (https://github.com/FiloSottile/age).
-.age bundles are auto-detected on import/inspect.
+Optional external tools (only needed for the matching feature; the core commands
+need none):
+  age   encryption (--encrypt-to/--passphrase, decrypting .age bundles)
+        https://github.com/FiloSottile/age
+  git   --with-git on export and --clone on import
+  zstd  reading metadata of compressed .jsonl.zst sessions (export/list/inspect)
+        https://github.com/facebook/zstd
+If a tool is missing, the matching feature errors with guidance or is skipped;
+nothing else is affected. .age bundles are auto-detected on import/inspect.
 
 Examples:
   codex-sync ui                            # interactive, guided menu
@@ -627,6 +650,7 @@ Examples:
   codex-sync import ./my-project.codexbundle
   codex-sync import ./my-project.codexbundle --map-cwd "/old/path=/new/path"
   codex-sync import ./my-project.codexbundle --replace-with-backup
+  codex-sync import ./my-project.codexbundle --import-as-copy
   codex-sync import ./my-project.codexbundle --clone ~/dev/project
   codex-sync export --project . --encrypt-to age1qz...   # -> <project>.codexbundle.age
   codex-sync export --all --passphrase                   # passphrase-encrypted

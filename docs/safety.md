@@ -69,7 +69,7 @@ of these happens:
 | --------- | ---------------------- |
 | The session does **not** exist locally | **Imported** (new file written). |
 | The session exists locally and is **identical to the effective import content** | **Skipped** (already present). |
-| The session exists locally but **differs** | **Reported as a conflict and skipped** by default — your local file is left untouched. With `--replace-with-backup`, the local file is first backed up and then overwritten (see below). |
+| The session exists locally but **differs** | **Reported as a conflict and skipped** by default — your local file is left untouched. With `--replace-with-backup`, the local file is first backed up and then overwritten; with `--import-as-copy`, the bundle's version is imported as a brand-new session and your local file is left untouched (see below). |
 
 For normal imports, the effective import content is the byte-for-byte bundle
 entry. For `--map-cwd` imports, the effective content is the safely rewritten
@@ -94,6 +94,27 @@ bundle's version to win, pass `--replace-with-backup`. For each conflicting file
 The previous content is therefore always recoverable from the backup. The flag
 is opt-in, is reported as "Replaced (backup kept): N", and writes nothing under
 `--dry-run`. Without the flag, the default never-overwrite behavior is unchanged.
+
+### Importing a conflict as a new session (`--import-as-copy`)
+
+If you would rather **keep both** versions of a diverged session, pass
+`--import-as-copy` instead. For each conflicting plain `.jsonl` session,
+`codex-sync`:
+
+1. assigns the bundle's version a **fresh session id** (a new random UUID),
+   rewriting only the canonical `id` field of the `session_meta` line — every
+   other line is preserved byte-for-byte and the result is validated before it is
+   written (the same narrow-mutation discipline as `--map-cwd`, see §8);
+2. writes it under a **new rollout filename** derived from that id, so it never
+   collides with the existing local file.
+
+Your diverged local session is left completely untouched; the bundle's version
+appears alongside it in Codex as a separate conversation. It is reported as
+"Imported as new copies: N", writes nothing under `--dry-run`, and is **mutually
+exclusive** with `--replace-with-backup` (they resolve a conflict in opposite
+ways). A compressed (`.jsonl.zst`) conflict, or a session without a
+`session_meta` id, cannot be safely re-identified and so stays a skipped
+conflict.
 
 ---
 
@@ -213,19 +234,36 @@ When a mapping matches a plain `.jsonl` session:
 - compressed `.jsonl.zst` sessions
 
 If a `.jsonl.zst` session matches a mapping, it is copied byte-for-byte and
-reported as not remapped. `codex-sync` does not decompress or recompress sessions
-in v0.1.x.
+reported as not remapped. `codex-sync` may **read** (decompress) a compressed
+session to recover its metadata (see §9), but it never **recompresses or
+rewrites** one, so `--map-cwd` cannot apply to compressed sessions.
 
 ---
 
-## 9. Compressed sessions are copied byte-for-byte
+## 9. Compressed sessions: read-only metadata recovery, copied byte-for-byte
 
-Compressed rollout files (`.jsonl.zst`) are **never parsed or decompressed** by
-`codex-sync` in v0.1.x. When included in a bundle they are copied
-**byte-for-byte** and verified by checksum like any other file. Because their
-contents are not read, their recorded cwd is unknown, so they are skipped by the
-`--project` cwd filter on export (and reported), and they cannot be rewritten by
-`--map-cwd`.
+Compressed rollout files (`.jsonl.zst`) are always copied into a bundle
+**byte-for-byte** and verified by checksum like any other file. `codex-sync`
+never recompresses, rewrites, or otherwise modifies them.
+
+To make them more useful, `export` and `list` can **read** (decompress) the head
+of a compressed rollout to recover its metadata — the recorded cwd, thread id,
+and preview. This is done by shelling out to the external
+[`zstd`](https://github.com/facebook/zstd) tool, in the same single-binary,
+dependency-free spirit as the git and `age` integrations. It is:
+
+- **Read-only.** The compressed file is only decompressed into memory to read its
+  first lines; the file on disk is never changed, and the byte-for-byte copy into
+  a bundle is unaffected.
+- **Best-effort and graceful.** If `zstd` is not installed, or a file is not
+  valid zstd, the compressed session is simply reported as metadata-unknown,
+  exactly as before — nothing fails.
+
+With recovered metadata, a compressed session whose cwd matches `--project` is
+now included in the export (previously it was always skipped because its cwd was
+unknown), and `list`/`inspect` show its details and project folder. Rewriting a
+compressed session's cwd with `--map-cwd` is still **not** supported, because
+that would require recompressing it (see §8).
 
 ---
 
@@ -296,13 +334,20 @@ These are intentional non-goals. They keep the tool small, predictable, and safe
 - **Does not modify Codex's SQLite database.** Ever. It only works with rollout
   files.
 - **Does not rewrite session content by default.** Normal import is byte-for-byte.
+  The only content mutations are opt-in and narrow: `--map-cwd` (the `cwd` field)
+  and `--import-as-copy` (the `id` field), each touching a single `session_meta`
+  field and validating the result before writing.
 - **Does not globally rewrite paths.** `--map-cwd` only changes the canonical
   `cwd` field inside `session_meta` for matching plain `.jsonl` files.
 - **Does not overwrite or merge existing sessions by default.** Conflicts are
-  reported and skipped. The only way to overwrite is the opt-in
-  `--replace-with-backup`, which keeps a recoverable backup of the local file
-  first (see §2); even then nothing is merged.
-- **Does not decompress `.jsonl.zst` files.** They are copied byte-for-byte.
+  reported and skipped. The only ways to act on a conflict are the opt-in
+  `--replace-with-backup` (overwrite, keeping a recoverable backup of the local
+  file first) and `--import-as-copy` (import the bundle's version as a brand-new
+  session, leaving the local file untouched); see §2. Even then nothing is merged.
+- **Does not recompress or rewrite `.jsonl.zst` files.** They are copied
+  byte-for-byte; their contents may be decompressed read-only to recover metadata
+  when the external `zstd` tool is available (see §9), but the files are never
+  modified.
 - **Does not upload anything.** It never sends your sessions, code, or any other
   data off your machine — no cloud, no telemetry, no `git push`, no repo
   creation. The one outbound network action is `import --clone`, which you opt
@@ -352,7 +397,9 @@ These are intentional non-goals. They keep the tool small, predictable, and safe
 - Bundles can contain **prompts, code, terminal output, paths, and secrets** —
   do not share them publicly.
 - Import **never** overwrites silently; conflicts are reported and skipped unless
-  you opt in with `--replace-with-backup`, which keeps a recoverable backup.
+  you opt in with `--replace-with-backup` (overwrite, keeping a recoverable
+  backup) or `--import-as-copy` (import the bundle's version as a new session,
+  leaving yours untouched).
 - Checksums are verified **before** any write; a bad bundle changes nothing.
 - Path traversal and non-session entries are rejected.
 - **SQLite is never touched**; Codex rebuilds its index itself.

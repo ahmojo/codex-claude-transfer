@@ -34,6 +34,7 @@ type exportChoices struct {
 type importChoices struct {
 	bundle        string
 	replaceBackup bool
+	importAsCopy  bool
 	project       string
 	mapCWD        []string
 	clone         string
@@ -90,6 +91,9 @@ func buildImportArgs(c importChoices, dryRun bool) []string {
 	}
 	if c.replaceBackup {
 		args = append(args, "--replace-with-backup")
+	}
+	if c.importAsCopy {
+		args = append(args, "--import-as-copy")
 	}
 	if c.project != "" {
 		args = append(args, "--project", stripQuotes(c.project))
@@ -459,12 +463,22 @@ func uiImport(f commonFlags, stdout, stderr io.Writer) {
 	fmt.Fprintln(stdout)
 
 	if dry.Conflicts > 0 {
-		if !runField(huh.NewConfirm().
-			Title(fmt.Sprintf("%s already exist here but differ from the bundle.\nReplace them with the bundle's version? (a backup of each local file is kept)", plural(dry.Conflicts, "session"))).
-			Affirmative("Replace (keep backups)").
-			Negative("Keep mine (skip them)").
-			Value(&c.replaceBackup), stderr) {
+		var conflictChoice string
+		if !runField(huh.NewSelect[string]().
+			Title(fmt.Sprintf("%s already exist here but differ from the bundle.\nWhat should I do with them?", plural(dry.Conflicts, "session"))).
+			Options(
+				huh.NewOption("Keep mine (skip the bundle's versions)", "skip"),
+				huh.NewOption("Replace mine with the bundle's version (keep a backup of each)", "replace"),
+				huh.NewOption("Keep both — import the bundle's versions as new sessions", "copy"),
+			).
+			Value(&conflictChoice), stderr) {
 			return
+		}
+		switch conflictChoice {
+		case "replace":
+			c.replaceBackup = true
+		case "copy":
+			c.importAsCopy = true
 		}
 	}
 

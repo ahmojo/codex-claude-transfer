@@ -59,7 +59,7 @@ func Run(home codexhome.Home) Report {
 	r.ok(fmt.Sprintf("%d rollout files detected", scan.Files))
 	r.ok(fmt.Sprintf("%d valid sessions", scan.Valid))
 	if scan.Compressed > 0 {
-		r.info(fmt.Sprintf("%d compressed (.jsonl.zst) rollout files detected (not parsed in v0.1)", scan.Compressed))
+		r.info(fmt.Sprintf("%d compressed (.jsonl.zst) rollout files detected (export/list recover their metadata when the 'zstd' tool is installed)", scan.Compressed))
 	}
 	invalidPlain := scan.Invalid - scan.Compressed
 	if invalidPlain > 0 {

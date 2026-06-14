@@ -85,6 +85,11 @@ func TestBuildImportArgs(t *testing.T) {
 	if want := []string{"import", "b.age", "--passphrase"}; !reflect.DeepEqual(pass, want) {
 		t.Errorf("passphrase import args = %v, want %v", pass, want)
 	}
+
+	copyArgs := buildImportArgs(importChoices{bundle: "b.codexbundle", importAsCopy: true}, false)
+	if want := []string{"import", "b.codexbundle", "--import-as-copy"}; !reflect.DeepEqual(copyArgs, want) {
+		t.Errorf("import-as-copy args = %v, want %v", copyArgs, want)
+	}
 }
 
 func TestBuildInspectArgs(t *testing.T) {

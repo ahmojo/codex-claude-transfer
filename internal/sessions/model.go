@@ -24,7 +24,8 @@ const (
 
 // Session is a single discovered rollout file plus any metadata that could be
 // extracted from it. Metadata fields are best-effort and may be empty when a
-// file is compressed (not parsed in v0.1) or when parsing was incomplete.
+// file is compressed (and zstd-based recovery was unavailable) or when parsing
+// was incomplete.
 type Session struct {
 	// File location.
 	Path     string // absolute path on this device
@@ -69,7 +70,8 @@ type ScanResult struct {
 	Valid int
 	// Invalid is the number of files that produced no usable SessionMeta.
 	Invalid int
-	// Compressed is the number of .jsonl.zst files detected (not parsed in v0.1).
+	// Compressed is the number of .jsonl.zst files detected (regardless of whether
+	// their metadata was recovered via zstd).
 	Compressed int
 	// Warnings are scan-level warnings (e.g. unreadable directories).
 	Warnings []string

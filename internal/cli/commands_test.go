@@ -352,6 +352,71 @@ func TestRunImportReplaceWithBackup(t *testing.T) {
 	}
 }
 
+func TestRunImportAsCopy(t *testing.T) {
+	tmp := t.TempDir()
+	id := "abcd1111-2222-3333-4444-555566667777"
+
+	srcHome := filepath.Join(tmp, "home")
+	writeSessionCWD(t, srcHome, id, "/proj/a")
+	bundle := filepath.Join(tmp, "p.codexbundle")
+	var out, errOut bytes.Buffer
+	if code := Run([]string{"export", "--all", "--codex-home", srcHome, "-o", bundle}, &out, &errOut); code != 0 {
+		t.Fatalf("export exit = %d, stderr=%s", code, errOut.String())
+	}
+
+	// In the destination home the same session exists but has diverged.
+	dstHome := filepath.Join(tmp, "home2")
+	writeSessionCWD(t, dstHome, id, "/proj/a")
+	dest := filepath.Join(dstHome, "sessions", "2026", "06", "13",
+		"rollout-2026-06-13T18-22-01-"+id+".jsonl")
+	const diverged = "locally diverged content\n"
+	if err := os.WriteFile(dest, []byte(diverged), 0o644); err != nil {
+		t.Fatalf("diverge: %v", err)
+	}
+
+	out.Reset()
+	errOut.Reset()
+	code := Run([]string{"import", bundle, "--import-as-copy", "--codex-home", dstHome}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("import exit = %d, stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "Imported as new copies: 1") {
+		t.Errorf("missing copy count in output:\n%s", out.String())
+	}
+	// The diverged local file must be untouched.
+	if b, _ := os.ReadFile(dest); string(b) != diverged {
+		t.Errorf("local diverged file was modified: %q", string(b))
+	}
+	// A second rollout file (the copy, with a different id) must now exist.
+	var rolloutCount int
+	_ = filepath.WalkDir(filepath.Join(dstHome, "sessions"), func(p string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if strings.HasPrefix(d.Name(), "rollout-") && strings.HasSuffix(d.Name(), ".jsonl") {
+			rolloutCount++
+		}
+		return nil
+	})
+	if rolloutCount != 2 {
+		t.Errorf("expected 2 rollout files (original + copy), got %d", rolloutCount)
+	}
+}
+
+func TestRunImportReplaceAndCopyMutuallyExclusive(t *testing.T) {
+	tmp := t.TempDir()
+	bundle := filepath.Join(tmp, "p.codexbundle")
+	// The flags are rejected before the bundle is even read, so an empty path is fine.
+	var out, errOut bytes.Buffer
+	code := Run([]string{"import", bundle, "--replace-with-backup", "--import-as-copy"}, &out, &errOut)
+	if code != 2 {
+		t.Fatalf("exit code = %d, want 2; stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "mutually exclusive") {
+		t.Errorf("missing mutual-exclusivity message: %s", errOut.String())
+	}
+}
+
 func TestRunInspectShowsMissingCWD(t *testing.T) {
 	tmp := t.TempDir()
 	srcHome := filepath.Join(tmp, "home")

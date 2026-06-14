@@ -59,7 +59,10 @@ type ExportResult struct {
 func Export(home codexhome.Home, opts ExportOptions) (ExportResult, error) {
 	var result ExportResult
 
-	scan, err := sessions.Scan(home, sessions.ScanOptions{IncludeArchived: opts.IncludeArchived})
+	scan, err := sessions.Scan(home, sessions.ScanOptions{
+		IncludeArchived:      opts.IncludeArchived,
+		DecompressCompressed: true,
+	})
 	if err != nil {
 		return result, fmt.Errorf("scan sessions: %w", err)
 	}
@@ -109,7 +112,7 @@ func Export(home codexhome.Home, opts ExportOptions) (ExportResult, error) {
 
 // selectSessions filters by project cwd when projectPath is set. It returns the
 // chosen sessions, how many compressed sessions were skipped because their cwd
-// is unknown (not parsed in v0.1), and any warnings.
+// is unknown (could not be recovered), and any warnings.
 func selectSessions(all []sessions.Session, projectPath string) (selected []sessions.Session, compressedSkipped int, warnings []string) {
 	if projectPath == "" {
 		return all, 0, nil

@@ -16,12 +16,21 @@ type ScanOptions struct {
 	// IncludeArchived also scans the archived_sessions/ directory. By default
 	// (false) only active sessions are scanned.
 	IncludeArchived bool
+	// DecompressCompressed, when true, attempts to recover metadata (cwd, thread
+	// id, preview, ...) from .jsonl.zst rollout files by decompressing their head
+	// with the external `zstd` tool. It is opt-in and degrades gracefully: when
+	// `zstd` is not installed or a file cannot be decompressed, the compressed
+	// file is reported as metadata-unknown exactly as when this is false. The
+	// compressed files themselves are only read, never modified.
+	DecompressCompressed bool
 }
 
 // Scan discovers rollout files under the given Codex home. It walks the active
 // sessions directory (and, if requested, the archived sessions directory),
 // detecting both .jsonl and .jsonl.zst files. Plain files are parsed for
-// metadata; compressed files are detected and reported but not parsed in v0.1.
+// metadata; compressed files are detected and, when ScanOptions.DecompressCompressed
+// is set and the external `zstd` tool is available, decompressed read-only to
+// recover their metadata (otherwise reported as metadata-unknown).
 //
 // Scan is defensive: an unreadable directory or a single unparseable file
 // produces a warning and is otherwise skipped, never aborting the whole scan.
@@ -29,9 +38,9 @@ type ScanOptions struct {
 func Scan(home codexhome.Home, opts ScanOptions) (ScanResult, error) {
 	var result ScanResult
 
-	scanRoot(home.SessionsDir, false, &result)
+	scanRoot(home.SessionsDir, false, opts, &result)
 	if opts.IncludeArchived {
-		scanRoot(home.ArchivedSessionsDir, true, &result)
+		scanRoot(home.ArchivedSessionsDir, true, opts, &result)
 	}
 
 	sort.Slice(result.Sessions, func(i, j int) bool {
@@ -40,7 +49,7 @@ func Scan(home codexhome.Home, opts ScanOptions) (ScanResult, error) {
 	return result, nil
 }
 
-func scanRoot(root string, archived bool, result *ScanResult) {
+func scanRoot(root string, archived bool, opts ScanOptions, result *ScanResult) {
 	// A missing sessions directory is normal (e.g. fresh Codex install); skip
 	// it silently rather than warning.
 	if _, err := os.Stat(root); err != nil {
@@ -61,7 +70,7 @@ func scanRoot(root string, archived bool, result *ScanResult) {
 		if !isRolloutFile(d.Name()) {
 			return nil
 		}
-		s, ok := newSession(root, path, d, archived, result)
+		s, ok := newSession(root, path, d, archived, opts, result)
 		if ok {
 			result.Sessions = append(result.Sessions, s)
 		}
@@ -72,7 +81,7 @@ func scanRoot(root string, archived bool, result *ScanResult) {
 	}
 }
 
-func newSession(root, path string, d fs.DirEntry, archived bool, result *ScanResult) (Session, bool) {
+func newSession(root, path string, d fs.DirEntry, archived bool, opts ScanOptions, result *ScanResult) (Session, bool) {
 	info, err := d.Info()
 	if err != nil {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("cannot stat %s: %v", path, err))
@@ -99,9 +108,19 @@ func newSession(root, path string, d fs.DirEntry, archived bool, result *ScanRes
 	result.Files++
 
 	if compressed {
-		// v0.1: detect but do not parse compressed rollouts.
 		result.Compressed++
-		s.Warnings = append(s.Warnings, "compressed (.jsonl.zst) rollout detected; metadata not parsed in v0.1")
+		// Opt-in: recover metadata by decompressing the head with `zstd`. The
+		// compressed file is only read, never modified. Any failure (zstd missing,
+		// not valid zstd, no SessionMeta) falls through to the unparsed behavior.
+		if opts.DecompressCompressed {
+			if meta, warns, err := parseCompressedHead(path); err == nil && meta.FoundSessionMeta {
+				applyMeta(&s, meta, d.Name())
+				s.Warnings = append(s.Warnings, warns...)
+				result.Valid++
+				return s, true
+			}
+		}
+		s.Warnings = append(s.Warnings, "compressed (.jsonl.zst) rollout detected; metadata not parsed")
 		// Best-effort created_at from the filename timestamp.
 		s.CreatedAt = createdAtFromName(d.Name())
 		result.Invalid++
