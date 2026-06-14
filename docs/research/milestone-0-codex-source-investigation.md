@@ -3,6 +3,10 @@
 > Status: **Complete**. This document records the verified findings from inspecting the
 > open-source [`openai/codex`](https://github.com/openai/codex) repository and the resulting
 > technical direction for `codex-sync` v0.1.
+>
+> Update: v0.1.1 later added the opt-in `--map-cwd` import flag. That feature is intentionally
+> narrow: it rewrites only the canonical `cwd` field inside plain `.jsonl` `session_meta` lines
+> and still never touches SQLite.
 
 `codex-sync` is an **unofficial** tool. Codex internals may change at any time; everything below
 reflects the source as inspected and should be re-verified when Codex changes its storage format.
@@ -85,12 +89,15 @@ message, and a preview.
 
 ## 2. Final recommendation: Option A/C — file-based JSONL (incl. `.jsonl.zst`) export/import
 
-Export and import operate purely on the JSONL rollout files:
+Export and import operate primarily on the JSONL rollout files:
 
 - **Export:** discover relevant rollout files (both `.jsonl` and `.jsonl.zst`), record their
   metadata, and package them in a `.codexbundle` ZIP preserving the `YYYY/MM/DD` layout.
 - **Import:** copy rollout files back into `~/.codex/sessions/YYYY/MM/DD/`, never overwriting,
   never touching SQLite, then let Codex's native scan-and-reconcile rebuild the index on next run.
+- **Optional v0.1.1 cwd mapping:** when explicitly requested with `--map-cwd`, rewrite only the
+  canonical `cwd` field in a matching plain `.jsonl` `session_meta` line before writing. This is
+  not a general JSONL/path rewrite and does not apply to compressed `.jsonl.zst` sessions.
 
 Options A (raw JSONL copy) and C (copy + rely on scan-repair) **converge**: copying the JSONL files
 *is* the trigger for Codex's own reconcile. We do nothing extra and call no private API.
@@ -126,12 +133,16 @@ Options A (raw JSONL copy) and C (copy + rely on scan-repair) **converge**: copy
 
 ## 5. Risks and compatibility concerns
 
-- **`.jsonl.zst` compression:** rollout files may be zstd-compressed. Scanning, parsing, bundling,
-  and importing must all handle both `.jsonl` and `.jsonl.zst`.
+- **`.jsonl.zst` compression:** rollout files may be zstd-compressed. v0.1.x copies compressed
+  sessions byte-for-byte but does not parse, decompress, or rewrite them.
 - **cwd-based project filtering (the #1 portability gotcha):** the per-project sidebar view filters
   by `cwd`. If the project path differs between devices (e.g. `~/dev/x` vs `~/projects/x`), an
-  imported session may be hidden from the project view even though it imported correctly. v0.1
-  detects and warns; it does **not** rewrite JSONL. `--map-cwd` is deferred until proven safe.
+  imported session may be hidden from the project view even though it imported correctly. v0.1.1
+  adds an explicit `--map-cwd OLD=NEW` escape hatch for plain `.jsonl` sessions. It rewrites only
+  the canonical `cwd` field inside `session_meta`, validates the result, and still never touches
+  SQLite.
+- **Do not do global path replacement:** prompts, messages, tool output, and other JSONL lines may
+  contain paths as normal content. Those must remain unchanged.
 - **`source` / `model_provider` filters:** sessions can be filtered out if their `source` or
   provider is not in the allowed set. We preserve original metadata; we never normalize it.
 - **JSONL schema drift:** the Codex format can change. Parsing must be defensive — line-by-line,
@@ -139,13 +150,17 @@ Options A (raw JSONL copy) and C (copy + rely on scan-repair) **converge**: copy
 
 ---
 
-## 6. v0.1 decisions (locked)
+## 6. v0.1.x decisions
 
 - **Go CLI** — single binary, fast, GitHub-release friendly; reusable core library + thin CLI.
 - **Codex only** — no Claude support yet.
 - **No hosting** — no accounts, no cloud, no server, no subscriptions, no background sync.
 - **No SQLite writes** — never modify Codex's `state_db`.
-- **No automatic JSONL rewriting** — no silent cwd/path rewrites in v0.1.
+- **No default JSONL rewriting** — normal import is byte-for-byte. The only mutation path is the
+  explicit v0.1.1 `--map-cwd` option, which changes only `session_meta.payload.cwd` for matching
+  plain `.jsonl` files.
+- **No global path rewriting** — never replace path strings throughout prompts, messages, tool
+  output, or other session content.
 - **No GUI yet** — CLI first; desktop app (e.g. Wails) reusing the same Go core comes later.
 - **Safe export/import only** — never overwrite existing session files silently; conflicts are
   reported and skipped by default.
