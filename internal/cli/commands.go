@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/ahmojo/Codex_Sync/internal/bundle"
 	"github.com/ahmojo/Codex_Sync/internal/codexhome"
@@ -53,6 +56,8 @@ type commonFlags struct {
 	project         string
 	output          string
 	dryRun          bool
+	all             bool
+	since           string
 	mapCWD          []string
 	positional      []string
 }
@@ -96,6 +101,16 @@ func parseFlags(args []string) (commonFlags, error) {
 			f.mapCWD = append(f.mapCWD, val)
 		case hasPrefix(arg, "--map-cwd="):
 			f.mapCWD = append(f.mapCWD, arg[len("--map-cwd="):])
+		case arg == "--all":
+			f.all = true
+		case arg == "--since":
+			val, err := takeValue(args, &i, "--since")
+			if err != nil {
+				return f, err
+			}
+			f.since = val
+		case hasPrefix(arg, "--since="):
+			f.since = arg[len("--since="):]
 		case arg == "--include-archived":
 			f.includeArchived = true
 		case arg == "--dry-run":
@@ -172,25 +187,49 @@ func runExport(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	project := f.project
-	if project == "" {
-		project = "."
+	if f.all && f.project != "" {
+		fmt.Fprintln(stderr, "error: --all and --project are mutually exclusive")
+		return 2
 	}
-	absProject, err := filepath.Abs(project)
-	if err != nil {
-		fmt.Fprintf(stderr, "error: cannot resolve project path %q: %v\n", project, err)
-		return 1
+
+	var since time.Time
+	if f.since != "" {
+		since, err = parseSince(f.since)
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 2
+		}
+	}
+
+	// Without --all, export the current project by default (cwd). With --all,
+	// the project path is empty so every session is considered.
+	var absProject string
+	if !f.all {
+		project := f.project
+		if project == "" {
+			project = "."
+		}
+		absProject, err = filepath.Abs(project)
+		if err != nil {
+			fmt.Fprintf(stderr, "error: cannot resolve project path %q: %v\n", project, err)
+			return 1
+		}
 	}
 
 	output := f.output
 	if output == "" {
-		output = defaultBundleName(absProject)
+		if f.all {
+			output = "codex-sessions.codexbundle"
+		} else {
+			output = defaultBundleName(absProject)
+		}
 	}
 
 	result, err := bundle.Export(home, bundle.ExportOptions{
 		ProjectPath:     absProject,
 		OutputPath:      output,
 		IncludeArchived: f.includeArchived,
+		Since:           since,
 	})
 	if err != nil {
 		for _, w := range result.Warnings {
@@ -201,6 +240,37 @@ func runExport(args []string, stdout, stderr io.Writer) int {
 	}
 	printExport(stdout, absProject, result)
 	return 0
+}
+
+// parseSince accepts either an absolute date (YYYY-MM-DD, interpreted as UTC
+// midnight) or a relative duration ending in d/h/m (e.g. 7d, 48h, 90m) measured
+// back from now. It returns the cutoff instant; sessions updated at or after it
+// are exported.
+func parseSince(s string) (time.Time, error) {
+	if t, err := time.Parse("2006-01-02", s); err == nil {
+		return t, nil
+	}
+	if d, err := parseDayDuration(s); err == nil {
+		return time.Now().Add(-d), nil
+	}
+	return time.Time{}, fmt.Errorf("invalid --since %q: use a date (YYYY-MM-DD) or a duration like 7d, 48h, 90m", s)
+}
+
+// parseDayDuration extends time.ParseDuration with a "d" (days) unit, which the
+// standard library does not support.
+func parseDayDuration(s string) (time.Duration, error) {
+	if days, ok := strings.CutSuffix(s, "d"); ok {
+		n, err := strconv.Atoi(days)
+		if err != nil || n < 0 {
+			return 0, fmt.Errorf("invalid day duration %q", s)
+		}
+		return time.Duration(n) * 24 * time.Hour, nil
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil || d < 0 {
+		return 0, fmt.Errorf("invalid duration %q", s)
+	}
+	return d, nil
 }
 
 // defaultBundleName derives <project-base>.codexbundle in the current directory.
@@ -302,6 +372,10 @@ Flags:
   --include-archived    list, export: also consider archived sessions
   --project <path>      export: filter sessions by recorded cwd
                         import: warn on cwd mismatch (never rewrites paths)
+  --all                 export: include every session (no cwd filter);
+                        mutually exclusive with --project
+  --since <when>        export: only sessions updated at/after <when>, where
+                        <when> is a date (YYYY-MM-DD) or a duration (7d, 48h, 90m)
   --output, -o <path>   export: bundle output path (default <project>.codexbundle)
   --dry-run             import: validate and report only, write nothing
   --map-cwd OLD=NEW     import: rewrite a session's recorded cwd from OLD to NEW
@@ -312,6 +386,9 @@ Examples:
   codex-sync doctor
   codex-sync list
   codex-sync export --project .            # -> <project>.codexbundle
+  codex-sync export --all                  # -> codex-sessions.codexbundle
+  codex-sync export --all --since 7d       # everything updated in the last 7 days
+  codex-sync export --project . --since 2026-06-01
   codex-sync inspect ./my-project.codexbundle
   codex-sync import ./my-project.codexbundle --dry-run
   codex-sync import ./my-project.codexbundle

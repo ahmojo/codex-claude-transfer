@@ -22,12 +22,16 @@ import (
 // ExportOptions configures an export.
 type ExportOptions struct {
 	// ProjectPath, when non-empty, restricts the export to sessions whose
-	// SessionMeta cwd matches this (already absolute) path.
+	// SessionMeta cwd matches this (already absolute) path. Leave empty to
+	// export every session regardless of cwd (the `--all` behavior).
 	ProjectPath string
 	// OutputPath is the .codexbundle file to write.
 	OutputPath string
 	// IncludeArchived also considers archived sessions.
 	IncludeArchived bool
+	// Since, when non-zero, restricts the export to sessions whose file
+	// modification time is at or after this instant.
+	Since time.Time
 }
 
 // ExportResult summarizes what was exported.
@@ -53,7 +57,12 @@ func Export(home codexhome.Home, opts ExportOptions) (ExportResult, error) {
 	result.TotalScanned = scan.Files
 	result.Warnings = append(result.Warnings, scan.Warnings...)
 
-	selected, compressedSkipped, warns := selectSessions(scan.Sessions, opts.ProjectPath)
+	candidates := scan.Sessions
+	if !opts.Since.IsZero() {
+		candidates = filterSince(candidates, opts.Since)
+	}
+
+	selected, compressedSkipped, warns := selectSessions(candidates, opts.ProjectPath)
 	result.CompressedSkipped = compressedSkipped
 	result.Warnings = append(result.Warnings, warns...)
 	if len(selected) == 0 {
@@ -98,9 +107,21 @@ func selectSessions(all []sessions.Session, projectPath string) (selected []sess
 		warnings = append(warnings, fmt.Sprintf("no sessions have a cwd matching %s", projectPath))
 	}
 	if compressedSkipped > 0 {
-		warnings = append(warnings, fmt.Sprintf("%d compressed session(s) skipped: cwd is unknown for .jsonl.zst in v0.1 (use --all later to include them)", compressedSkipped))
+		warnings = append(warnings, fmt.Sprintf("%d compressed session(s) skipped: cwd is unknown for .jsonl.zst in v0.1 (use --all to include them)", compressedSkipped))
 	}
 	return selected, compressedSkipped, warnings
+}
+
+// filterSince returns sessions whose file modification time is at or after the
+// given instant. It is applied before cwd selection.
+func filterSince(all []sessions.Session, since time.Time) []sessions.Session {
+	var out []sessions.Session
+	for _, s := range all {
+		if !s.ModTime.Before(since) {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func newManifest(home codexhome.Home, opts ExportOptions) Manifest {

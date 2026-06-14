@@ -17,6 +17,7 @@ files are a full transcript of a session, so a bundle can contain:
 - **Model output** — including code, explanations, and suggested commands.
 - **Source code** — snippets and files that were read into or written during the session.
 - **Terminal output** — command results that Codex captured.
+- **Uploaded images and attachments** — anything you dropped into a session.
 - **Absolute filesystem paths** — revealing your username, directory layout, and project names.
 - **Git metadata** — branch names, commit SHAs, and remote URLs.
 - **Secrets that were accidentally printed** — API keys, tokens, passwords, or
@@ -25,6 +26,19 @@ files are a full transcript of a session, so a bundle can contain:
 
 > **Treat a `.codexbundle` like you would treat your shell history plus your
 > source tree.** It is at least as sensitive as both.
+
+### A note on images and attachments
+
+Images you upload into a session are stored **inline, base64-encoded, inside the
+rollout JSONL** — they are not separate files. This has two consequences:
+
+- **They travel with the bundle.** Exporting a session that contains an image
+  carries that image with it; importing it restores the image.
+- **They inflate bundle size.** A few screenshots can make a single session's
+  JSONL several megabytes. This is expected, not a bug.
+
+Because images are part of the transcript, the same privacy rules apply: an
+image in a bundle is as shareable (or unshareable) as the rest of that session.
 
 ### Practical guidance
 
@@ -121,14 +135,25 @@ If your project lives at a different path on the two machines — for example
 imported session is stored correctly and is fully intact, but Codex may **not
 show it under that project's view**, because the recorded cwd no longer matches.
 
-In v0.1, `codex-sync`:
+`codex-sync` handles this in two ways:
 
-- **Detects** this and **warns** you (especially with `--project`).
-- Does **not** rewrite the recorded cwd or any other part of the JSONL.
+- **By default** it only **detects and warns** (especially with `--project`).
+  It does **not** change anything in the JSONL.
+- **Opt-in**, you can pass `--map-cwd OLD=NEW` on import to rewrite the recorded
+  working directory of matching sessions so they land in the right local
+  project. This is the **only** feature that mutates session content, and it
+  changes **only** the canonical `cwd` field of the `session_meta` line —
+  nothing else (see §10). Compressed `.jsonl.zst` sessions are never rewritten;
+  if they match a mapping they are copied byte-for-byte and reported.
 
-**Recommendation:** use the same project path on both machines if you want
-imported sessions to appear in the project-specific sidebar. Path rewriting is a
-roadmap item and will only ship once it is proven safe.
+**Recommendations:**
+
+- Use the same project path on both machines, **or**
+- Create an empty folder at the recorded path on the target machine and open it
+  in Codex, **or**
+- Use `--map-cwd "/old/path=/new/path"` to point the sessions at the new path.
+
+You can preview any mapping safely with `--dry-run` before writing anything.
 
 ---
 
@@ -156,8 +181,11 @@ These are intentional non-goals. They keep the tool small, predictable, and safe
 
 - **Does not modify Codex's SQLite database.** Ever. It only reads/writes JSONL
   rollout files.
-- **Does not rewrite the contents of any session.** JSONL files are copied
-  verbatim; the recorded cwd and all other fields are left untouched.
+- **Does not rewrite session contents by default.** JSONL files are copied
+  verbatim. The **only** exception is the opt-in `--map-cwd` flag, which rewrites
+  exactly one field — the recorded `cwd` of matching plain `.jsonl` sessions —
+  and nothing else. `.jsonl.zst` files are never rewritten. Without `--map-cwd`,
+  every byte of every session is preserved.
 - **Does not overwrite or merge existing sessions.** Conflicts are reported and
   skipped.
 - **Does not decompress `.jsonl.zst` files.** They are copied byte-for-byte.
@@ -181,7 +209,8 @@ These are intentional non-goals. They keep the tool small, predictable, and safe
 6. **Restart the Codex App (or run Codex again)** so it scans and reconciles the
    imported files.
 7. For best project-sidebar visibility, use the **same project path** on both
-   machines.
+   machines, or remap it on import with
+   `--map-cwd "/old/path=/new/path"` (preview with `--dry-run` first).
 8. **Delete the bundle** once you no longer need it.
 
 ## Summary

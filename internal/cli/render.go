@@ -57,7 +57,11 @@ func printList(w io.Writer, scan sessions.ScanResult) {
 }
 
 func printExport(w io.Writer, project string, result bundle.ExportResult) {
-	fmt.Fprintf(w, "Exporting Codex sessions for project:\n%s\n\n", project)
+	if project == "" {
+		fmt.Fprintf(w, "Exporting all Codex sessions\n\n")
+	} else {
+		fmt.Fprintf(w, "Exporting Codex sessions for project:\n%s\n\n", project)
+	}
 	for _, warn := range result.Warnings {
 		fmt.Fprintf(w, "warning: %s\n", warn)
 	}

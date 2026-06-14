@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func writeSession(t *testing.T, home, threadID, cwd string) {
@@ -96,5 +97,55 @@ func TestRunEmptyHomeListsNothing(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "No Codex sessions found") {
 		t.Errorf("expected empty message, got: %s", out.String())
+	}
+}
+
+func TestParseSinceDate(t *testing.T) {
+	got, err := parseSince("2026-06-01")
+	if err != nil {
+		t.Fatalf("parseSince date: %v", err)
+	}
+	want := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	if !got.Equal(want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestParseSinceDuration(t *testing.T) {
+	before := time.Now()
+	got, err := parseSince("7d")
+	if err != nil {
+		t.Fatalf("parseSince duration: %v", err)
+	}
+	want := before.Add(-7 * 24 * time.Hour)
+	if diff := got.Sub(want); diff > time.Minute || diff < -time.Minute {
+		t.Errorf("7d cutoff off by %v (got %v want ~%v)", diff, got, want)
+	}
+}
+
+func TestParseSinceInvalid(t *testing.T) {
+	for _, s := range []string{"", "notadate", "7x", "-3d", "2026/06/01"} {
+		if _, err := parseSince(s); err == nil {
+			t.Errorf("expected error for %q", s)
+		}
+	}
+}
+
+func TestRunExportAllProjectConflict(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := Run([]string{"export", "--all", "--project", ".", "--codex-home", t.TempDir()}, &out, &errOut)
+	if code != 2 {
+		t.Errorf("expected exit 2 for --all + --project, got %d", code)
+	}
+	if !strings.Contains(errOut.String(), "mutually exclusive") {
+		t.Errorf("expected mutual-exclusion error, got: %s", errOut.String())
+	}
+}
+
+func TestRunExportBadSince(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := Run([]string{"export", "--all", "--since", "garbage", "--codex-home", t.TempDir()}, &out, &errOut)
+	if code != 2 {
+		t.Errorf("expected exit 2 for invalid --since, got %d", code)
 	}
 }

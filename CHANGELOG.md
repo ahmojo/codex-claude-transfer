@@ -2,6 +2,24 @@
 
 All notable changes to codex-sync are documented here.
 
+## [0.1.2] - 2026-06-14
+
+### Added
+- `export --all`: export every session regardless of recorded cwd, into
+  `codex-sessions.codexbundle` by default. Compressed `.jsonl.zst` sessions
+  (whose cwd is unknown) are included by `--all`, unlike the `--project` filter.
+  Mutually exclusive with `--project`.
+- `export --since <when>`: only export sessions whose file was updated at or
+  after `<when>`. Accepts an absolute date (`YYYY-MM-DD`, UTC midnight) or a
+  relative duration (`7d`, `48h`, `90m`). Combines with `--project` or `--all`.
+
+### Documentation
+- `docs/safety.md`: documented that `--map-cwd` is the single opt-in exception to
+  the "contents are never rewritten" rule, and that uploaded images/attachments
+  travel inline (base64) inside the bundle (size + privacy implications).
+- `README.md`: documented `--map-cwd`, `--all`, and `--since`; updated the
+  limitations and roadmap to reflect what has shipped.
+
 ## [0.1.1] - 2026-06-14
 
 ### Added
