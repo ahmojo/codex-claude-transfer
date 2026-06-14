@@ -5,7 +5,7 @@
 ![CI](https://github.com/ahmojo/Codex_Sync/actions/workflows/ci.yml/badge.svg)
 ![Go](https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go)
 ![License](https://img.shields.io/badge/license-MIT-blue)
-![Status](https://img.shields.io/badge/status-v0.1.6-orange)
+![Status](https://img.shields.io/badge/status-v0.1.7-orange)
 
 > ⚠️ **Unofficial tool.** Not affiliated with or endorsed by OpenAI. Codex's
 > internals can change at any time and break this tool. Use at your own risk.

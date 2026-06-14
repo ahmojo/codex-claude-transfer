@@ -50,7 +50,7 @@ func buildExportArgs(c exportChoices) []string {
 	case "session":
 		args = append(args, "--session", c.sessionID)
 	case "project":
-		args = append(args, "--project", c.projectPath)
+		args = append(args, "--project", stripQuotes(c.projectPath))
 	default: // "current"
 		args = append(args, "--project", ".")
 	}
@@ -69,7 +69,7 @@ func buildExportArgs(c exportChoices) []string {
 		}
 	}
 	if c.output != "" {
-		args = append(args, "--output", c.output)
+		args = append(args, "--output", stripQuotes(c.output))
 	}
 	if c.codexHome != "" {
 		args = append(args, "--codex-home", c.codexHome)
@@ -81,7 +81,7 @@ func buildExportArgs(c exportChoices) []string {
 // dryRun controls whether --dry-run is appended, so the same answers can drive
 // both the safety preview and the real run.
 func buildImportArgs(c importChoices, dryRun bool) []string {
-	args := []string{"import", c.bundle}
+	args := []string{"import", stripQuotes(c.bundle)}
 	if dryRun {
 		args = append(args, "--dry-run")
 	}
@@ -89,7 +89,7 @@ func buildImportArgs(c importChoices, dryRun bool) []string {
 		args = append(args, "--replace-with-backup")
 	}
 	if c.project != "" {
-		args = append(args, "--project", c.project)
+		args = append(args, "--project", stripQuotes(c.project))
 	}
 	for _, m := range c.mapCWD {
 		if m != "" {
@@ -97,14 +97,14 @@ func buildImportArgs(c importChoices, dryRun bool) []string {
 		}
 	}
 	if c.clone != "" {
-		args = append(args, "--clone", c.clone)
+		args = append(args, "--clone", stripQuotes(c.clone))
 	}
 	switch c.decryptMode {
 	case "passphrase":
 		args = append(args, "--passphrase")
 	case "identity":
 		if c.identity != "" {
-			args = append(args, "--identity", c.identity)
+			args = append(args, "--identity", stripQuotes(c.identity))
 		}
 	}
 	if c.codexHome != "" {
@@ -115,16 +115,32 @@ func buildImportArgs(c importChoices, dryRun bool) []string {
 
 // buildInspectArgs turns an inspect selection into the equivalent CLI argv.
 func buildInspectArgs(path, decryptMode, identity string) []string {
-	args := []string{"inspect", path}
+	args := []string{"inspect", stripQuotes(path)}
 	switch decryptMode {
 	case "passphrase":
 		args = append(args, "--passphrase")
 	case "identity":
 		if identity != "" {
-			args = append(args, "--identity", identity)
+			args = append(args, "--identity", stripQuotes(identity))
 		}
 	}
 	return args
+}
+
+// stripQuotes removes a single pair of matching surrounding quotes (and trims
+// whitespace) from a path the user typed. In a shell the shell removes quotes,
+// but inside an interactive text field they survive as literal characters and
+// would corrupt the path (e.g. turn an absolute path into a relative one). This
+// makes the wizard forgiving of a habitually quoted Windows path.
+func stripQuotes(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) >= 2 {
+		first, last := s[0], s[len(s)-1]
+		if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
+			return strings.TrimSpace(s[1 : len(s)-1])
+		}
+	}
+	return s
 }
 
 // formatArgv renders an argv the way a user would type it, quoting any argument
@@ -284,6 +300,7 @@ func uiImport(f commonFlags, stdout, stderr io.Writer) {
 		Validate(fileMustExist), stderr) {
 		return
 	}
+	c.bundle = stripQuotes(c.bundle)
 	ok := runField(huh.NewConfirm().
 		Title("If a local session conflicts, replace it (keeping a backup)? (--replace-with-backup)").
 		Value(&c.replaceBackup), stderr) &&
@@ -363,6 +380,7 @@ func uiInspect(f commonFlags, stdout, stderr io.Writer) {
 		Validate(fileMustExist), stderr) {
 		return
 	}
+	path = stripQuotes(path)
 	decryptMode, identity := "", ""
 	if strings.HasSuffix(strings.ToLower(path), ".age") {
 		if !runField(huh.NewSelect[string]().
@@ -450,6 +468,7 @@ func truncate(s string, n int) string {
 // fileMustExist is a huh validator that rejects a path that is not an existing
 // file, so the wizard fails fast instead of deep inside a command.
 func fileMustExist(s string) error {
+	s = stripQuotes(s)
 	if s == "" {
 		return errors.New("a file path is required")
 	}

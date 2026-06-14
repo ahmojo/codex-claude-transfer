@@ -2,6 +2,17 @@
 
 All notable changes to codex-sync are documented here.
 
+## [0.1.7] - 2026-06-14
+
+### Fixed
+- `codex-sync ui`: path prompts (project, bundle, output, clone, identity) now
+  tolerate a path typed with surrounding quotes. Previously a quoted Windows
+  path like `"C:\Users\you\project"` kept its literal quotes, so it was treated
+  as a relative path and prefixed with the current directory — producing a
+  corrupted path such as `C:\Users\you\"C:\Users\you\project"` and "no sessions
+  selected". The wizard now strips a single pair of surrounding quotes, and the
+  `.age` auto-detection works on quoted bundle paths too.
+
 ## [0.1.6] - 2026-06-14
 
 ### Added

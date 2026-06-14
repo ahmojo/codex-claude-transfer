@@ -99,6 +99,39 @@ func TestBuildInspectArgs(t *testing.T) {
 	}
 }
 
+func TestStripQuotes(t *testing.T) {
+	cases := map[string]string{
+		`"C:\Users\faruk\OneDrive\Desktop\server"`: `C:\Users\faruk\OneDrive\Desktop\server`,
+		`'C:\Users\faruk\server'`:                  `C:\Users\faruk\server`,
+		`  "C:\with spaces\x"  `:                   `C:\with spaces\x`,
+		`C:\no\quotes`:                             `C:\no\quotes`,
+		`"unbalanced`:                              `"unbalanced`,
+		`""`:                                       ``,
+		``:                                         ``,
+	}
+	for in, want := range cases {
+		if got := stripQuotes(in); got != want {
+			t.Errorf("stripQuotes(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestBuildExportArgsStripsQuotedProject(t *testing.T) {
+	got := buildExportArgs(exportChoices{mode: "project", projectPath: `"C:\Users\faruk\OneDrive\Desktop\server"`})
+	want := []string{"export", "--project", `C:\Users\faruk\OneDrive\Desktop\server`}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("quoted project not stripped: got %v, want %v", got, want)
+	}
+}
+
+func TestBuildImportArgsStripsQuotedBundle(t *testing.T) {
+	got := buildImportArgs(importChoices{bundle: `"C:\path\b.codexbundle"`}, true)
+	want := []string{"import", `C:\path\b.codexbundle`, "--dry-run"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("quoted bundle not stripped: got %v, want %v", got, want)
+	}
+}
+
 func TestFormatArgv(t *testing.T) {
 	got := formatArgv([]string{"export", "--project", "/path with space", "--all"})
 	want := `export --project "/path with space" --all`
