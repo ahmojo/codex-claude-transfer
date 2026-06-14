@@ -14,6 +14,7 @@ import (
 	"github.com/ahmojo/Codex_Sync/internal/bundle"
 	"github.com/ahmojo/Codex_Sync/internal/codexhome"
 	"github.com/ahmojo/Codex_Sync/internal/doctor"
+	"github.com/ahmojo/Codex_Sync/internal/git"
 	"github.com/ahmojo/Codex_Sync/internal/sessions"
 )
 
@@ -58,6 +59,9 @@ type commonFlags struct {
 	dryRun          bool
 	all             bool
 	since           string
+	session         string
+	withGit         bool
+	cloneDir        string
 	mapCWD          []string
 	positional      []string
 }
@@ -111,6 +115,24 @@ func parseFlags(args []string) (commonFlags, error) {
 			f.since = val
 		case hasPrefix(arg, "--since="):
 			f.since = arg[len("--since="):]
+		case arg == "--session":
+			val, err := takeValue(args, &i, "--session")
+			if err != nil {
+				return f, err
+			}
+			f.session = val
+		case hasPrefix(arg, "--session="):
+			f.session = arg[len("--session="):]
+		case arg == "--with-git":
+			f.withGit = true
+		case arg == "--clone":
+			val, err := takeValue(args, &i, "--clone")
+			if err != nil {
+				return f, err
+			}
+			f.cloneDir = val
+		case hasPrefix(arg, "--clone="):
+			f.cloneDir = arg[len("--clone="):]
 		case arg == "--include-archived":
 			f.includeArchived = true
 		case arg == "--dry-run":
@@ -191,6 +213,10 @@ func runExport(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "error: --all and --project are mutually exclusive")
 		return 2
 	}
+	if f.session != "" && (f.all || f.project != "") {
+		fmt.Fprintln(stderr, "error: --session cannot be combined with --all or --project")
+		return 2
+	}
 
 	var since time.Time
 	if f.since != "" {
@@ -201,10 +227,11 @@ func runExport(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
-	// Without --all, export the current project by default (cwd). With --all,
-	// the project path is empty so every session is considered.
+	// Without --all or --session, export the current project by default (cwd).
+	// With --all the project path is empty so every session is considered;
+	// with --session the single matching session is selected regardless of cwd.
 	var absProject string
-	if !f.all {
+	if !f.all && f.session == "" {
 		project := f.project
 		if project == "" {
 			project = "."
@@ -218,9 +245,12 @@ func runExport(args []string, stdout, stderr io.Writer) int {
 
 	output := f.output
 	if output == "" {
-		if f.all {
+		switch {
+		case f.session != "":
+			output = "session-" + sanitizeForFilename(f.session) + ".codexbundle"
+		case f.all:
 			output = "codex-sessions.codexbundle"
-		} else {
+		default:
 			output = defaultBundleName(absProject)
 		}
 	}
@@ -230,6 +260,8 @@ func runExport(args []string, stdout, stderr io.Writer) int {
 		OutputPath:      output,
 		IncludeArchived: f.includeArchived,
 		Since:           since,
+		SessionID:       f.session,
+		WithGit:         f.withGit,
 	})
 	if err != nil {
 		for _, w := range result.Warnings {
@@ -238,7 +270,7 @@ func runExport(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "error: export failed: %v\n", err)
 		return 1
 	}
-	printExport(stdout, absProject, result)
+	printExport(stdout, absProject, f.session, result)
 	return 0
 }
 
@@ -271,6 +303,25 @@ func parseDayDuration(s string) (time.Duration, error) {
 		return 0, fmt.Errorf("invalid duration %q", s)
 	}
 	return d, nil
+}
+
+// sanitizeForFilename keeps only characters safe in a filename (thread ids are
+// UUIDs, so this is just a guard against an unexpected prefix value).
+func sanitizeForFilename(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('_')
+		}
+	}
+	out := b.String()
+	if out == "" {
+		return "codex-session"
+	}
+	return out
 }
 
 // defaultBundleName derives <project-base>.codexbundle in the current directory.
@@ -308,7 +359,7 @@ func runImport(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if len(f.positional) != 1 {
-		fmt.Fprintln(stderr, "usage: codex-sync import <file.codexbundle> [--dry-run] [--project <path>] [--map-cwd OLD=NEW]")
+		fmt.Fprintln(stderr, "usage: codex-sync import <file.codexbundle> [--dry-run] [--project <path>] [--map-cwd OLD=NEW] [--clone <dir>]")
 		return 2
 	}
 	home, ok := resolveHome(f, stderr)
@@ -342,6 +393,41 @@ func runImport(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	printImport(stdout, f.positional[0], res)
+
+	if f.cloneDir != "" {
+		if code := cloneProject(f, res, stdout, stderr); code != 0 {
+			return code
+		}
+	}
+	return 0
+}
+
+// cloneProject handles the opt-in --clone step: it clones the bundle's recorded
+// git remote into the target directory. It is intentionally separate from the
+// session import (which never touches the network or files outside Codex home).
+func cloneProject(f commonFlags, res bundle.ImportResult, stdout, stderr io.Writer) int {
+	if f.dryRun {
+		fmt.Fprintln(stdout, "\n--clone skipped because --dry-run was used.")
+		return 0
+	}
+	gi := res.Manifest.Git
+	if gi == nil || gi.RemoteURL == "" {
+		fmt.Fprintln(stderr, "error: --clone given but the bundle records no git remote URL")
+		return 1
+	}
+	fmt.Fprintf(stdout, "\nCloning %s into %s ...\n", gi.RemoteURL, f.cloneDir)
+	if err := git.Clone(gi.RemoteURL, f.cloneDir, gi.CommitSHA); err != nil {
+		fmt.Fprintf(stderr, "error: clone failed: %v\n", err)
+		return 1
+	}
+	fmt.Fprintln(stdout, "Clone complete.")
+	if gi.CommitSHA != "" {
+		fmt.Fprintf(stdout, "Checked out commit %s.\n", gi.CommitSHA)
+	}
+	abs, err := filepath.Abs(f.cloneDir)
+	if err == nil {
+		fmt.Fprintf(stdout, "If the session's recorded cwd differs from %s, re-import with\n--map-cwd \"<old-cwd>=%s\" so it appears under that project in Codex.\n", abs, abs)
+	}
 	return 0
 }
 
@@ -374,25 +460,35 @@ Flags:
                         import: warn on cwd mismatch (never rewrites paths)
   --all                 export: include every session (no cwd filter);
                         mutually exclusive with --project
+  --session <id>        export: export only the session with this thread id
+                        (a unique prefix is enough); ignores cwd filtering
   --since <when>        export: only sessions updated at/after <when>, where
                         <when> is a date (YYYY-MM-DD) or a duration (7d, 48h, 90m)
+  --with-git            export: also record the project's git remote/branch/
+                        commit (and dirty/unpushed status) in the bundle, even
+                        with --all or --session
   --output, -o <path>   export: bundle output path (default <project>.codexbundle)
   --dry-run             import: validate and report only, write nothing
   --map-cwd OLD=NEW     import: rewrite a session's recorded cwd from OLD to NEW
                         so it lands in the right local project (repeatable;
                         plain .jsonl only — .zst sessions are not rewritten)
+  --clone <dir>         import: after importing, clone the bundle's recorded git
+                        remote into <dir> and check out the recorded commit
 
 Examples:
   codex-sync doctor
   codex-sync list
   codex-sync export --project .            # -> <project>.codexbundle
+  codex-sync export --project . --with-git # also record git remote/commit
   codex-sync export --all                  # -> codex-sessions.codexbundle
   codex-sync export --all --since 7d       # everything updated in the last 7 days
   codex-sync export --project . --since 2026-06-01
+  codex-sync export --session 9f3c1a2b     # one session by thread-id prefix
   codex-sync inspect ./my-project.codexbundle
   codex-sync import ./my-project.codexbundle --dry-run
   codex-sync import ./my-project.codexbundle
   codex-sync import ./my-project.codexbundle --map-cwd "/old/path=/new/path"
+  codex-sync import ./my-project.codexbundle --clone ~/dev/project
 
 After importing, restart the Codex App (or run Codex again) so it scans and
 reconciles the imported rollout files.

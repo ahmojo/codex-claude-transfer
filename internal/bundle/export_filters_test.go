@@ -78,6 +78,74 @@ func TestExportSinceFiltersOlder(t *testing.T) {
 	}
 }
 
+func TestExportSessionByExactThreadID(t *testing.T) {
+	home := fakeHome(t)
+	day := filepath.Join(home.SessionsDir, "2026", "06", "13")
+	writeSession(t, day, "rollout-2026-06-13T18-22-01-aaaa1111-2222-3333-4444-555566667777.jsonl",
+		"aaaa1111-2222-3333-4444-555566667777", "/proj/a")
+	writeSession(t, day, "rollout-2026-06-13T19-00-00-bbbb1111-2222-3333-4444-555566667777.jsonl",
+		"bbbb1111-2222-3333-4444-555566667777", "/proj/b")
+
+	out := filepath.Join(t.TempDir(), "one.codexbundle")
+	res, err := Export(home, ExportOptions{SessionID: "bbbb1111-2222-3333-4444-555566667777", OutputPath: out})
+	if err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	if res.IncludedCount != 1 {
+		t.Fatalf("included = %d, want 1", res.IncludedCount)
+	}
+	if res.Manifest.Sessions[0].ThreadID != "bbbb1111-2222-3333-4444-555566667777" {
+		t.Errorf("wrong session: %q", res.Manifest.Sessions[0].ThreadID)
+	}
+}
+
+func TestExportSessionByPrefix(t *testing.T) {
+	home := fakeHome(t)
+	day := filepath.Join(home.SessionsDir, "2026", "06", "13")
+	writeSession(t, day, "rollout-2026-06-13T18-22-01-aaaa1111-2222-3333-4444-555566667777.jsonl",
+		"aaaa1111-2222-3333-4444-555566667777", "/proj/a")
+	writeSession(t, day, "rollout-2026-06-13T19-00-00-bbbb1111-2222-3333-4444-555566667777.jsonl",
+		"bbbb1111-2222-3333-4444-555566667777", "/proj/b")
+
+	out := filepath.Join(t.TempDir(), "pref.codexbundle")
+	res, err := Export(home, ExportOptions{SessionID: "bbbb1111", OutputPath: out})
+	if err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	if res.IncludedCount != 1 || res.Manifest.Sessions[0].ThreadID != "bbbb1111-2222-3333-4444-555566667777" {
+		t.Errorf("prefix selection failed: %+v", res.Manifest.Sessions)
+	}
+}
+
+func TestExportSessionNoMatchErrors(t *testing.T) {
+	home := fakeHome(t)
+	day := filepath.Join(home.SessionsDir, "2026", "06", "13")
+	writeSession(t, day, "rollout-2026-06-13T18-22-01-aaaa1111-2222-3333-4444-555566667777.jsonl",
+		"aaaa1111-2222-3333-4444-555566667777", "/proj/a")
+
+	out := filepath.Join(t.TempDir(), "nomatch.codexbundle")
+	if _, err := Export(home, ExportOptions{SessionID: "zzzz", OutputPath: out}); err == nil {
+		t.Fatalf("expected error for unmatched thread id")
+	}
+	if _, statErr := os.Stat(out); statErr == nil {
+		t.Errorf("no bundle should be written when nothing matches")
+	}
+}
+
+func TestExportSessionAmbiguousPrefixErrors(t *testing.T) {
+	home := fakeHome(t)
+	day := filepath.Join(home.SessionsDir, "2026", "06", "13")
+	writeSession(t, day, "rollout-2026-06-13T18-22-01-abcd1111-2222-3333-4444-555566667777.jsonl",
+		"abcd1111-2222-3333-4444-555566667777", "/proj/a")
+	writeSession(t, day, "rollout-2026-06-13T19-00-00-abcd2222-2222-3333-4444-555566667777.jsonl",
+		"abcd2222-2222-3333-4444-555566667777", "/proj/b")
+
+	out := filepath.Join(t.TempDir(), "ambig.codexbundle")
+	if _, err := Export(home, ExportOptions{SessionID: "abcd", OutputPath: out}); err == nil {
+		t.Fatalf("expected error for ambiguous prefix")
+	}
+}
+
 func TestExportSinceWithProject(t *testing.T) {
 	home := fakeHome(t)
 	day := filepath.Join(home.SessionsDir, "2026", "06", "13")

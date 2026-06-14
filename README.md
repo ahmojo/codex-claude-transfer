@@ -5,7 +5,7 @@
 ![CI](https://github.com/ahmojo/Codex_Sync/actions/workflows/ci.yml/badge.svg)
 ![Go](https://img.shields.io/badge/Go-1.22%2B-00ADD8?logo=go)
 ![License](https://img.shields.io/badge/license-MIT-blue)
-![Status](https://img.shields.io/badge/status-v0.1.2-orange)
+![Status](https://img.shields.io/badge/status-v0.1.3-orange)
 
 > ⚠️ **Unofficial tool.** Not affiliated with or endorsed by OpenAI. Codex's
 > internals can change at any time and break this tool. Use at your own risk.
@@ -161,6 +161,34 @@ codex-sync import ./project.codexbundle \
 After importing, **restart the Codex App (or run Codex again)** so it scans and
 reconciles the imported rollout files.
 
+### Git-assisted handoff
+
+A session is only useful on the other machine if the code it refers to is also
+there. `--with-git` records the project's git remote, branch, and commit (plus
+whether the working tree was dirty or the commit was unpushed) in the bundle, so
+the other machine knows exactly what to check out:
+
+```bash
+# Source machine — capture the git state alongside the sessions
+codex-sync export --project . --with-git
+# (warns if the working tree is dirty or HEAD isn't pushed to a remote)
+
+# Destination machine — import sessions AND clone the project in one step
+codex-sync import ./project.codexbundle --clone ~/dev/project
+```
+
+This stays within the tool's safety model: it only ever **reads** git on export
+and, with `--clone`, runs `git clone`/`git checkout` against the recorded remote
+on import. It never pushes, creates repositories, or uploads anything. If you
+omit `--clone`, import simply prints the `git clone … && git checkout <commit>`
+commands for you to run yourself.
+
+Export a single conversation by its thread id (a unique prefix is enough):
+
+```bash
+codex-sync export --session 9f3c1a2b   # → session-9f3c1a2b.codexbundle
+```
+
 ## 8. Commands
 
 | Command | Description |
@@ -169,6 +197,9 @@ reconciles the imported rollout files.
 | `codex-sync list` | Lists discovered Codex sessions (preview, thread id, cwd, source, updated time). |
 | `codex-sync export --project <path>` | Exports sessions whose recorded cwd matches `<path>` into a `.codexbundle`. |
 | `codex-sync export --all` | Exports every session regardless of recorded cwd (includes compressed `.jsonl.zst`) into `codex-sessions.codexbundle`. |
+| `codex-sync export --session <thread-id>` | Exports a single session by thread id (a unique prefix is enough) into `session-<id>.codexbundle`. |
+| `codex-sync export --project . --with-git` | Exports and records the project's git remote/branch/commit (and dirty/unpushed status) in the bundle. |
+| `codex-sync import <file.codexbundle> --clone <dir>` | Imports, then clones the bundle's recorded git remote into `<dir>` and checks out the recorded commit. |
 | `codex-sync inspect <file.codexbundle>` | Shows a bundle's manifest and contents without extracting anything. |
 | `codex-sync import <file.codexbundle>` | Imports rollout files into your Codex home. Never overwrites; verifies checksums first. |
 | `codex-sync import <file.codexbundle> --dry-run` | Validates and reports what *would* happen, writing nothing. |
@@ -182,11 +213,14 @@ reconciles the imported rollout files.
 | `--codex-home <path>` | all | Use a specific Codex home instead of the default (also honors `$CODEX_HOME`). |
 | `--project <path>` | export, import | Export: filter sessions by recorded cwd. Import: check for cwd mismatch. |
 | `--all` | export | Export every session regardless of cwd (includes compressed sessions). Mutually exclusive with `--project`. |
+| `--session <thread-id>` | export | Export exactly one session by thread id (a unique prefix is enough). Mutually exclusive with `--all` and `--project`. |
 | `--since <when>` | export | Only export sessions updated at/after `<when>`. Accepts a date (`YYYY-MM-DD`) or a duration (`7d`, `48h`, `90m`). Combines with `--project` or `--all`. |
-| `--output, -o <path>` | export | Bundle output path (default `<project>.codexbundle`, or `codex-sessions.codexbundle` with `--all`). |
+| `--with-git` | export | Also record the project's git remote/branch/commit (and dirty/unpushed status) in the bundle, even with `--all` or `--session`. |
+| `--output, -o <path>` | export | Bundle output path (default `<project>.codexbundle`, or `codex-sessions.codexbundle` with `--all`, or `session-<id>.codexbundle` with `--session`). |
 | `--include-archived` | list, export | Also consider archived sessions. |
 | `--dry-run` | import | Write nothing; just report. |
 | `--map-cwd OLD=NEW` | import | Opt-in cwd rewrite for matching plain `.jsonl` sessions. Does not rewrite `.jsonl.zst`. |
+| `--clone <dir>` | import | After importing, clone the bundle's recorded git remote into `<dir>` and check out the recorded commit. Opt-in; needs `--with-git` data in the bundle. |
 
 ## 9. Safety model
 
@@ -266,11 +300,13 @@ project.codexbundle
 ## 12. Roadmap
 
 Already shipped since v0.1.0: `--map-cwd` (v0.1.1), `export --all` and
-`export --since` (v0.1.2).
+`export --since` (v0.1.2), `export --session`, `export --with-git` and
+`import --clone` (v0.1.3).
 
 Planned, explicitly **not** in v0.1.x:
 
-- `export --session <thread-id>`
+- Optional `git push`/repo-creation on export (the upload half of handoff),
+  clearly separated and opt-in — codex-sync does not upload anything today
 - Optional encrypted bundles (still no accounts, no hosting)
 - Better `.jsonl.zst` handling, including metadata parsing and possible safe cwd
   mapping after decompression/recompression is researched

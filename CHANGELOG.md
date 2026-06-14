@@ -2,6 +2,25 @@
 
 All notable changes to codex-sync are documented here.
 
+## [0.1.3] - 2026-06-14
+
+### Added
+- `export --session <thread-id>`: export exactly one session by its thread id.
+  A unique prefix is enough (like a git short SHA); an ambiguous prefix or no
+  match is an error. Ignores cwd filtering and is mutually exclusive with
+  `--all` and `--project`. Defaults output to `session-<id>.codexbundle`.
+- Git-assisted handoff (read-only, opt-in):
+  - `export --with-git`: record the project's git remote, branch, commit, and
+    `dirty`/`unpushed` status in the bundle manifest, even with `--all` or
+    `--session`. When `--project` is used, git metadata is captured as before.
+    Warns when the working tree is dirty or the commit is not on any remote
+    (the other machine could not reproduce or fetch it).
+  - On `import`, when the bundle records a git remote, the recovery commands
+    (`git clone … && git checkout <commit>`) are printed.
+  - `import --clone <dir>`: after importing sessions, clone the bundle's
+    recorded remote into `<dir>` and check out the recorded commit. Opt-in;
+    skipped under `--dry-run`. codex-sync still never pushes or uploads.
+
 ## [0.1.2] - 2026-06-14
 
 ### Added

@@ -32,6 +32,15 @@ type ExportOptions struct {
 	// Since, when non-zero, restricts the export to sessions whose file
 	// modification time is at or after this instant.
 	Since time.Time
+	// SessionID, when non-empty, exports exactly the single session whose
+	// thread id equals (or uniquely begins with) this value, regardless of
+	// cwd. It is mutually exclusive with project/all filtering.
+	SessionID string
+	// WithGit forces capture of the project's git metadata (remote, branch,
+	// commit, dirty/unpushed) into the manifest even when ProjectPath is empty
+	// (e.g. with --all or --session). When ProjectPath is set, git metadata is
+	// always captured regardless of this flag.
+	WithGit bool
 }
 
 // ExportResult summarizes what was exported.
@@ -62,19 +71,27 @@ func Export(home codexhome.Home, opts ExportOptions) (ExportResult, error) {
 		candidates = filterSince(candidates, opts.Since)
 	}
 
-	selected, compressedSkipped, warns := selectSessions(candidates, opts.ProjectPath)
-	result.CompressedSkipped = compressedSkipped
-	result.Warnings = append(result.Warnings, warns...)
+	var selected []sessions.Session
+	if opts.SessionID != "" {
+		selected, err = selectByThreadID(candidates, opts.SessionID)
+		if err != nil {
+			return result, err
+		}
+	} else {
+		var compressedSkipped int
+		var warns []string
+		selected, compressedSkipped, warns = selectSessions(candidates, opts.ProjectPath)
+		result.CompressedSkipped = compressedSkipped
+		result.Warnings = append(result.Warnings, warns...)
+	}
 	if len(selected) == 0 {
 		return result, fmt.Errorf("no sessions selected for export")
 	}
 
 	manifest := newManifest(home, opts)
-	if opts.ProjectPath != "" {
-		gi := git.Discover(opts.ProjectPath)
-		if !gi.Empty() {
-			manifest.Git = &gi
-		}
+	if gi, warns := captureGit(opts, selected); gi != nil {
+		manifest.Git = gi
+		result.Warnings = append(result.Warnings, warns...)
 	}
 
 	if err := writeBundle(opts.OutputPath, selected, &manifest); err != nil {
@@ -122,6 +139,84 @@ func filterSince(all []sessions.Session, since time.Time) []sessions.Session {
 		}
 	}
 	return out
+}
+
+// selectByThreadID returns the single session whose thread id equals idPrefix,
+// or, failing an exact match, the single session whose thread id begins with
+// idPrefix. An empty prefix, no match, or an ambiguous prefix is an error.
+func selectByThreadID(all []sessions.Session, idPrefix string) ([]sessions.Session, error) {
+	if idPrefix == "" {
+		return nil, fmt.Errorf("empty thread id")
+	}
+	var prefixMatches []sessions.Session
+	for _, s := range all {
+		if s.ThreadID == idPrefix {
+			return []sessions.Session{s}, nil
+		}
+		if s.ThreadID != "" && strings.HasPrefix(s.ThreadID, idPrefix) {
+			prefixMatches = append(prefixMatches, s)
+		}
+	}
+	switch len(prefixMatches) {
+	case 0:
+		return nil, fmt.Errorf("no session matches thread id %q", idPrefix)
+	case 1:
+		return prefixMatches, nil
+	default:
+		return nil, fmt.Errorf("thread id %q is ambiguous: it matches %d sessions (use a longer prefix)", idPrefix, len(prefixMatches))
+	}
+}
+
+// captureGit discovers git metadata for the export when appropriate. It returns
+// nil when there is no repository to describe. Discovery runs against the
+// explicit project path when given, otherwise (with --with-git) against the
+// recorded cwd of the selected sessions. It also returns warnings when the
+// captured commit is dirty or unpushed, since the other machine then cannot
+// reproduce or fetch the exact state.
+func captureGit(opts ExportOptions, selected []sessions.Session) (*git.Info, []string) {
+	dir := opts.ProjectPath
+	if dir == "" {
+		if !opts.WithGit {
+			return nil, nil
+		}
+		dir = firstCWD(selected)
+		if dir == "" {
+			return nil, []string{"--with-git: no session has a recorded cwd to discover git metadata from"}
+		}
+	}
+	gi := git.Discover(dir)
+	if gi.Empty() {
+		return nil, nil
+	}
+	var warns []string
+	if gi.RemoteURL == "" {
+		warns = append(warns, "git: no remote configured; the other machine has no URL to clone or fetch from")
+	}
+	if gi.Dirty {
+		warns = append(warns, "git: the working tree has uncommitted changes; the recorded commit does not capture the exact state")
+	}
+	if gi.Unpushed {
+		warns = append(warns, fmt.Sprintf("git: commit %s is not on any remote; push it first or the other machine cannot fetch it", shortSHA(gi.CommitSHA)))
+	}
+	return &gi, warns
+}
+
+// firstCWD returns the recorded cwd of the first selected session that has one.
+func firstCWD(selected []sessions.Session) string {
+	for _, s := range selected {
+		if s.CWD != "" {
+			return s.CWD
+		}
+	}
+	return ""
+}
+
+// shortSHA abbreviates a commit SHA for human-readable messages.
+func shortSHA(sha string) string {
+	if len(sha) > 12 {
+		return sha[:12]
+	}
+	return sha
 }
 
 func newManifest(home codexhome.Home, opts ExportOptions) Manifest {

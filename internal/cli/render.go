@@ -56,10 +56,13 @@ func printList(w io.Writer, scan sessions.ScanResult) {
 		scan.Files, scan.Valid, scan.Compressed, scan.Invalid-scan.Compressed)
 }
 
-func printExport(w io.Writer, project string, result bundle.ExportResult) {
-	if project == "" {
+func printExport(w io.Writer, project, session string, result bundle.ExportResult) {
+	switch {
+	case session != "":
+		fmt.Fprintf(w, "Exporting one Codex session (thread id %s)\n\n", session)
+	case project == "":
 		fmt.Fprintf(w, "Exporting all Codex sessions\n\n")
-	} else {
+	default:
 		fmt.Fprintf(w, "Exporting Codex sessions for project:\n%s\n\n", project)
 	}
 	for _, warn := range result.Warnings {
@@ -133,6 +136,35 @@ func printImport(w io.Writer, path string, res bundle.ImportResult) {
 		fmt.Fprintln(w)
 		for _, warn := range res.Warnings {
 			fmt.Fprintf(w, "warning: %s\n", warn)
+		}
+	}
+
+	if gi := res.Manifest.Git; gi != nil && !gi.Empty() {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "This bundle records the project's git state:")
+		if gi.RemoteURL != "" {
+			fmt.Fprintf(w, "  remote: %s\n", gi.RemoteURL)
+		}
+		if gi.Branch != "" {
+			fmt.Fprintf(w, "  branch: %s\n", gi.Branch)
+		}
+		if gi.CommitSHA != "" {
+			fmt.Fprintf(w, "  commit: %s\n", gi.CommitSHA)
+		}
+		if gi.Dirty {
+			fmt.Fprintln(w, "  note: the working tree was dirty at export; the commit is not the exact state.")
+		}
+		if gi.Unpushed {
+			fmt.Fprintln(w, "  note: the commit was not pushed to any remote, so it may not be fetchable.")
+		}
+		if gi.RemoteURL != "" {
+			fmt.Fprintln(w, "To get the code on this machine:")
+			if gi.CommitSHA != "" {
+				fmt.Fprintf(w, "  git clone %s <dir> && (cd <dir> && git checkout %s)\n", gi.RemoteURL, gi.CommitSHA)
+			} else {
+				fmt.Fprintf(w, "  git clone %s <dir>\n", gi.RemoteURL)
+			}
+			fmt.Fprintln(w, "  or re-run import with: --clone <dir>")
 		}
 	}
 

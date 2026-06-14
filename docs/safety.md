@@ -201,7 +201,31 @@ contents are not read, their recorded cwd is unknown, so they are skipped by the
 
 ---
 
-## 10. Dry run
+## 10. Git-assisted handoff is read-only and opt-in
+
+`--with-git` (export) and `--clone` (import) help move the **project code** that
+a session refers to, without weakening the safety model.
+
+- **On export**, `--with-git` only **reads** git. It records the project's
+  remote URL, branch, commit SHA, and whether the tree was dirty/unpushed into
+  `manifest.json`. It never commits, pushes, or creates anything. The recorded
+  remote URL and branch names become part of the bundle, so treat them as you
+  would the rest of its contents (see §1).
+- **On import**, with no `--clone` flag, codex-sync only **prints** the
+  `git clone … && git checkout <commit>` commands. Nothing runs.
+- **`import --clone <dir>`** is the single feature that makes an outbound network
+  call: it runs `git clone <recorded-remote> <dir>` and then
+  `git checkout <recorded-commit>`. It is explicit, it only fetches (never
+  pushes), it is skipped under `--dry-run`, and it writes only inside the `<dir>`
+  you name — never into your Codex home.
+
+If a bundle came from an untrusted source, review the recorded remote URL with
+`codex-sync inspect` before using `--clone`, since cloning executes git against
+whatever URL the manifest contains.
+
+---
+
+## 11. Dry run
 
 Use `codex-sync import bundle.codexbundle --dry-run` to validate a bundle and see
 exactly what *would* happen — new vs. already-present vs. conflict, and how many
@@ -210,7 +234,7 @@ to preview an import.
 
 ---
 
-## 11. What codex-sync deliberately does NOT do
+## 12. What codex-sync deliberately does NOT do
 
 These are intentional non-goals. They keep the tool small, predictable, and safe:
 
@@ -222,14 +246,18 @@ These are intentional non-goals. They keep the tool small, predictable, and safe
 - **Does not overwrite or merge existing sessions.** Conflicts are reported and
   skipped.
 - **Does not decompress `.jsonl.zst` files.** They are copied byte-for-byte.
-- **Does not upload anything.** No network calls, no cloud, no telemetry.
+- **Does not upload anything.** It never sends your sessions, code, or any other
+  data off your machine — no cloud, no telemetry, no `git push`, no repo
+  creation. The one outbound network action is `import --clone`, which you opt
+  into explicitly and which only *fetches* the project code you asked for via
+  `git clone` (see §10).
 - **Does not require accounts, servers, or a background daemon.**
 - **Does not scrub secrets from bundles.** It cannot tell what is sensitive — that
   responsibility stays with you (see §1).
 
 ---
 
-## 12. Recommended safe workflow
+## 13. Recommended safe workflow
 
 1. On the source machine, run `codex-sync export --project .` from your project
    directory.
@@ -246,7 +274,11 @@ These are intentional non-goals. They keep the tool small, predictable, and safe
    `codex-sync import ./project.codexbundle --map-cwd "OLD=NEW"`.
 7. **Restart the Codex App (or run Codex again)** so it scans and reconciles the
    imported files.
-8. **Delete the bundle** once you no longer need it.
+8. If the session needs the project's code on this machine, either export with
+   `--with-git` and follow the printed `git clone …` commands, or import with
+   `--clone <dir>` to fetch the recorded commit (review the remote URL with
+   `inspect` first if the bundle is not from you).
+9. **Delete the bundle** once you no longer need it.
 
 ## Summary
 
