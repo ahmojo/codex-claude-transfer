@@ -3,9 +3,9 @@
 **Export. Move. Import. Continue your local Codex sessions anywhere.**
 
 ![CI](https://github.com/ahmojo/Codex_Sync/actions/workflows/ci.yml/badge.svg)
-![Go](https://img.shields.io/badge/Go-1.22%2B-00ADD8?logo=go)
+![Go](https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go)
 ![License](https://img.shields.io/badge/license-MIT-blue)
-![Status](https://img.shields.io/badge/status-v0.1.4-orange)
+![Status](https://img.shields.io/badge/status-v0.1.6-orange)
 
 > ⚠️ **Unofficial tool.** Not affiliated with or endorsed by OpenAI. Codex's
 > internals can change at any time and break this tool. Use at your own risk.
@@ -56,15 +56,25 @@ commands:
 - **Import** a bundle into another machine's Codex home, safely and without
   overwriting existing sessions.
 
-Three optional, opt-in helpers round it out, all keeping everything on your own
+A few optional, opt-in helpers round it out, all keeping everything on your own
 machines:
 
+- **See which project folders are missing** — `inspect` (and `import`) list the
+  recorded cwds and flag any that don't exist on this machine, the #1 reason an
+  imported session looks "missing" in Codex's sidebar.
 - **Map cwd paths on import** with `--map-cwd OLD=NEW`, so sessions created at
   one project path appear under the matching project path on the destination.
+- **Resolve conflicts** with `--replace-with-backup`, which overwrites a diverged
+  local session with the bundle's version while keeping a backup.
 - **Git-assisted handoff** (`--with-git` on export, `--clone` on import) to move
   the project's code alongside the sessions.
 - **Bundle encryption** (`--encrypt-to` / `--passphrase`, via `age`) to protect
   a bundle in transit.
+
+Prefer not to memorize flags? **`codex-sync ui`** opens an interactive, guided
+menu that asks only the relevant questions and then builds and runs the
+equivalent command for you (it prints the command each time, so you also learn
+the flags). Everything it does is still available as plain flags for scripting.
 
 It is intentionally small and predictable.
 
@@ -111,7 +121,7 @@ as soon as Codex next scans and reconciles them — typically on its next run.
 
 ## 6. Installation
 
-### From source (requires Go 1.22+)
+### From source (requires Go 1.23+)
 
 ```bash
 go install github.com/ahmojo/Codex_Sync/cmd/codex-sync@latest
@@ -125,6 +135,12 @@ cd Codex_Sync
 go build -o codex-sync ./cmd/codex-sync
 ```
 
+> **Dependencies.** The reusable core (`internal/bundle`, `sessions`,
+> `codexhome`, `safety`, `git`, `crypt`) is built only on the Go standard
+> library. The single binary depends on [`charmbracelet/huh`](https://github.com/charmbracelet/huh)
+> for the optional interactive `ui` command; the flag-based commands work
+> without ever invoking it.
+
 ### From releases
 
 Download a prebuilt binary for your OS from the
@@ -132,6 +148,19 @@ Download a prebuilt binary for your OS from the
 `PATH`.
 
 ## 7. Quickstart
+
+The fastest way to get going without learning the flags is interactive mode:
+
+```bash
+codex-sync ui
+```
+
+It opens a guided menu (Export / Import / Inspect / List / Doctor), asks only the
+questions relevant to your choice, prints the exact `codex-sync …` command it
+built, and runs it. Imports are always previewed with `--dry-run` first and only
+applied after you confirm.
+
+Or use the commands directly:
 
 ```bash
 # Check codex-sync can see your local Codex sessions
@@ -227,6 +256,7 @@ affected. codex-sync still never uploads anything.
 
 | Command | Description |
 | ------- | ----------- |
+| `codex-sync ui` | Interactive mode: a guided menu that asks only the relevant questions, prints the equivalent command, and runs it. Imports are previewed with `--dry-run` first. Requires an interactive terminal. |
 | `codex-sync doctor` | Read-only health check: finds your Codex home, counts sessions, warns about cwd/compressed files, and confirms SQLite will not be modified. |
 | `codex-sync list` | Lists discovered Codex sessions (preview, thread id, cwd, source, updated time). |
 | `codex-sync export --project <path>` | Exports sessions whose recorded cwd matches `<path>` into a `.codexbundle`. |
@@ -235,10 +265,11 @@ affected. codex-sync still never uploads anything.
 | `codex-sync export --project . --with-git` | Exports and records the project's git remote/branch/commit (and dirty/unpushed status) in the bundle. |
 | `codex-sync export --project . --encrypt-to <recipient>` | Exports and encrypts the bundle to an `age` recipient, writing `<output>.age`. |
 | `codex-sync import <file.codexbundle> --clone <dir>` | Imports, then clones the bundle's recorded git remote into `<dir>` and checks out the recorded commit. |
-| `codex-sync inspect <file.codexbundle>` | Shows a bundle's manifest and contents without extracting anything. |
+| `codex-sync inspect <file.codexbundle>` | Shows a bundle's manifest and contents without extracting anything, and lists the recorded project folders (cwds), flagging any that don't exist on this machine. |
 | `codex-sync import <file.codexbundle>` | Imports rollout files into your Codex home. Never overwrites; verifies checksums first. |
 | `codex-sync import <file.codexbundle> --dry-run` | Validates and reports what *would* happen, writing nothing. |
 | `codex-sync import <file.codexbundle> --map-cwd OLD=NEW` | Imports while rewriting matching plain `.jsonl` sessions' recorded cwd from `OLD` to `NEW`. Repeatable. |
+| `codex-sync import <file.codexbundle> --replace-with-backup` | On a conflict (a local session that diverged from the bundle), overwrites the local file with the bundle's version after saving a backup next to it. |
 | `codex-sync help` | Show help. |
 
 ### Common flags
@@ -255,6 +286,7 @@ affected. codex-sync still never uploads anything.
 | `--include-archived` | list, export | Also consider archived sessions. |
 | `--dry-run` | import | Write nothing; just report. |
 | `--map-cwd OLD=NEW` | import | Opt-in cwd rewrite for matching plain `.jsonl` sessions. Does not rewrite `.jsonl.zst`. |
+| `--replace-with-backup` | import | Opt-in. On a conflict, back up the local file (to a sibling `…jsonl.codexsync-bak-*` that Codex ignores) and overwrite it with the bundle's version. Default is to skip conflicts and never overwrite. |
 | `--clone <dir>` | import | After importing, clone the bundle's recorded git remote into `<dir>` and check out the recorded commit. Opt-in; needs a git remote recorded in the bundle (by `--project` or `--with-git` on export). |
 | `--encrypt-to <recipient>` | export | Encrypt the bundle to an `age` recipient (`age1...`/`ssh-ed25519 ...`); repeatable. Writes `<output>.age`. Requires `age` on `PATH`. |
 | `--recipients-file <file>` | export | Encrypt to every `age` recipient listed in `<file>`. |
@@ -271,9 +303,11 @@ affected. codex-sync still never uploads anything.
   happen without touching disk.
 - **No silent overwrites.** A new file is written, an identical file is skipped,
   and a file that differs is reported as a **conflict and skipped** — never
-  replaced.
+  replaced unless you opt in with `--replace-with-backup`.
 - **Conflicts are skipped by default.** Your existing local sessions are never
-  modified.
+  modified. With `--replace-with-backup`, a conflicting local file is first
+  copied to a sibling backup (which Codex ignores) and only then overwritten, so
+  the previous content is always recoverable.
 - **SQLite is never modified.** Codex rebuilds its own index from the JSONL files.
 - **Path-traversal / zip-slip and absolute paths are rejected.** Only
   `sessions/YYYY/MM/DD/` rollout files are imported.
@@ -332,15 +366,18 @@ project.codexbundle
   messages, terminal output, or other JSONL lines.
 - **No automatic merge.** Sessions are copied, not merged.
 - **No cloud sync.**
-- **No GUI yet.**
-- **No Claude support yet.**
+- **Terminal UI only, no desktop GUI yet.** `codex-sync ui` is an interactive
+  *terminal* wizard; there is no graphical desktop app (a Wails wrapper is on the
+  roadmap).
 - **Encryption requires the external `age` tool** (no crypto is embedded).
 
 ## 12. Roadmap
 
 Already shipped since v0.1.0: `--map-cwd` (v0.1.1), `export --all` and
 `export --since` (v0.1.2), `export --session`, `export --with-git` and
-`import --clone` (v0.1.3), optional `age` bundle encryption (v0.1.4).
+`import --clone` (v0.1.3), optional `age` bundle encryption (v0.1.4),
+cwd discovery in `inspect`/`import` and `import --replace-with-backup` (v0.1.5),
+an interactive `ui` mode (v0.1.6).
 
 Planned, explicitly **not** in v0.1.x:
 
@@ -348,8 +385,9 @@ Planned, explicitly **not** in v0.1.x:
   clearly separated and opt-in — codex-sync does not upload anything today
 - Better `.jsonl.zst` handling, including metadata parsing and possible safe cwd
   mapping after decompression/recompression is researched
-- Safer mapping UX around `--map-cwd` (clearer previews, examples, and possibly
-  bundle-level mapping reports)
+- `import --import-as-copy` (import a diverged session as a brand-new session
+  rather than skipping or replacing it) once Codex's session-identity/dedup
+  behavior is verified
 - A desktop app wrapper later, reusing the same Go core
 - Optional Claude support later (not in v0.1.x)
 

@@ -34,6 +34,11 @@ These are non-negotiable for this project:
   session silently (report it as a conflict and skip).
 - **Keep parsing defensive.** Tolerate unknown fields and malformed lines rather
   than crashing.
+- **Keep the reusable core dependency-free.** The `internal/bundle`, `sessions`,
+  `codexhome`, `safety`, `git`, and `crypt` packages must build on the Go
+  standard library alone. Third-party dependencies are confined to the CLI/TUI
+  layer (e.g. `charmbracelet/huh` powers the interactive `ui` command). New
+  dependencies should be discussed in an issue first.
 
 ## Scope
 

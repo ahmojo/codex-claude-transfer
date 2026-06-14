@@ -69,14 +69,31 @@ of these happens:
 | --------- | ---------------------- |
 | The session does **not** exist locally | **Imported** (new file written). |
 | The session exists locally and is **identical to the effective import content** | **Skipped** (already present). |
-| The session exists locally but **differs** | **Reported as a conflict and skipped** — your local file is left untouched. |
+| The session exists locally but **differs** | **Reported as a conflict and skipped** by default — your local file is left untouched. With `--replace-with-backup`, the local file is first backed up and then overwritten (see below). |
 
 For normal imports, the effective import content is the byte-for-byte bundle
 entry. For `--map-cwd` imports, the effective content is the safely rewritten
 plain `.jsonl` file.
 
-There is no force overwrite in v0.1.x. A differing file is **never** replaced. If
-you see conflicts reported, your existing sessions were not modified.
+By default there is no force overwrite: a differing file is **never** replaced,
+and if you see conflicts reported, your existing sessions were not modified.
+
+### Opting in to replacing a conflict (`--replace-with-backup`)
+
+A conflict means the same session exists on both machines but has diverged — for
+example you continued the chat locally after a previous import. If you want the
+bundle's version to win, pass `--replace-with-backup`. For each conflicting file
+`codex-sync` then:
+
+1. copies the existing local file to a sibling backup named
+   `…jsonl.codexsync-bak-<timestamp>`. That suffix does **not** match Codex's
+   `rollout-*.jsonl` pattern, so Codex ignores the backup on its next scan;
+2. overwrites the local file with the bundle's version using the same atomic
+   write (temp file + rename) as a normal import.
+
+The previous content is therefore always recoverable from the backup. The flag
+is opt-in, is reported as "Replaced (backup kept): N", and writes nothing under
+`--dry-run`. Without the flag, the default never-overwrite behavior is unchanged.
 
 ---
 
@@ -145,12 +162,19 @@ If your project lives at a different path on the two machines — for example
 imported session is stored correctly and is fully intact, but Codex may **not
 show it under that project's view**, because the recorded cwd no longer matches.
 
-`codex-sync` handles this in two ways:
+`codex-sync` helps you find and fix this:
 
-- Without `--map-cwd`, it detects mismatch and warns, but imports byte-for-byte.
+- **Discovery (read-only).** `inspect` lists the distinct project folders (cwds)
+  recorded in a bundle and flags any that do not exist on the current machine;
+  `import` shows the same summary when one or more are missing (including under
+  `--dry-run`). This only reads the filesystem (`os.Stat`) and creates nothing.
+  When something is missing, the output prints a ready-to-paste `--map-cwd` hint.
+- Without `--map-cwd`, import detects the mismatch and warns, but imports
+  byte-for-byte.
 - With `--map-cwd OLD=NEW`, it can rewrite the recorded cwd for matching plain
   `.jsonl` sessions during import so they point at the destination machine's
-  project path.
+  project path. (You can also simply create an empty folder at the recorded cwd
+  and restart Codex.)
 
 Example:
 
@@ -274,8 +298,10 @@ These are intentional non-goals. They keep the tool small, predictable, and safe
 - **Does not rewrite session content by default.** Normal import is byte-for-byte.
 - **Does not globally rewrite paths.** `--map-cwd` only changes the canonical
   `cwd` field inside `session_meta` for matching plain `.jsonl` files.
-- **Does not overwrite or merge existing sessions.** Conflicts are reported and
-  skipped.
+- **Does not overwrite or merge existing sessions by default.** Conflicts are
+  reported and skipped. The only way to overwrite is the opt-in
+  `--replace-with-backup`, which keeps a recoverable backup of the local file
+  first (see §2); even then nothing is merged.
 - **Does not decompress `.jsonl.zst` files.** They are copied byte-for-byte.
 - **Does not upload anything.** It never sends your sessions, code, or any other
   data off your machine — no cloud, no telemetry, no `git push`, no repo
@@ -303,12 +329,16 @@ These are intentional non-goals. They keep the tool small, predictable, and safe
    is not fully trusted, export with `--encrypt-to <recipient>` (or
    `--passphrase`) and move the resulting `.age` file instead (see §11).
 4. On the destination machine, **dry-run first**:
-   `codex-sync import ./project.codexbundle --dry-run`.
+   `codex-sync import ./project.codexbundle --dry-run`. Check the
+   **Project folders (recorded cwd)** summary: any folder flagged `[missing]`
+   will be hidden from Codex's sidebar until you create it or remap it.
 5. If the project path differs, dry-run with an explicit mapping:
    `codex-sync import ./project.codexbundle --map-cwd "OLD=NEW" --dry-run`.
 6. If the dry-run looks right, import for real:
    `codex-sync import ./project.codexbundle` or
-   `codex-sync import ./project.codexbundle --map-cwd "OLD=NEW"`.
+   `codex-sync import ./project.codexbundle --map-cwd "OLD=NEW"`. If a session
+   diverged on this machine and you want the bundle's version, add
+   `--replace-with-backup` (a backup of the local file is kept).
 7. **Restart the Codex App (or run Codex again)** so it scans and reconciles the
    imported files.
 8. If the session needs the project's code on this machine, either export with
@@ -321,11 +351,13 @@ These are intentional non-goals. They keep the tool small, predictable, and safe
 
 - Bundles can contain **prompts, code, terminal output, paths, and secrets** —
   do not share them publicly.
-- Import **never** overwrites silently; conflicts are reported and skipped.
+- Import **never** overwrites silently; conflicts are reported and skipped unless
+  you opt in with `--replace-with-backup`, which keeps a recoverable backup.
 - Checksums are verified **before** any write; a bad bundle changes nothing.
 - Path traversal and non-session entries are rejected.
 - **SQLite is never touched**; Codex rebuilds its index itself.
-- A **cwd mismatch** can hide a correctly-imported session from a project view.
+- A **cwd mismatch** can hide a correctly-imported session from a project view;
+  `inspect`/`import` flag missing project folders so you can spot this.
 - `--map-cwd` can fix path mismatch for plain `.jsonl` sessions, but only by
   rewriting the canonical `cwd` field in `session_meta`.
 - Bundles can be **encrypted** with the external `age` tool (`--encrypt-to` /

@@ -303,6 +303,84 @@ func TestRunImportCloneWithoutGitRemoteErrors(t *testing.T) {
 	}
 }
 
+func TestRunImportReplaceWithBackup(t *testing.T) {
+	tmp := t.TempDir()
+	id := "abcd1111-2222-3333-4444-555566667777"
+
+	// Export a session from the source home.
+	srcHome := filepath.Join(tmp, "home")
+	writeSessionCWD(t, srcHome, id, "/proj/a")
+	bundle := filepath.Join(tmp, "p.codexbundle")
+	var out, errOut bytes.Buffer
+	if code := Run([]string{"export", "--all", "--codex-home", srcHome, "-o", bundle}, &out, &errOut); code != 0 {
+		t.Fatalf("export exit = %d, stderr=%s", code, errOut.String())
+	}
+
+	// In the destination home, the same session exists but has diverged.
+	dstHome := filepath.Join(tmp, "home2")
+	writeSessionCWD(t, dstHome, id, "/proj/a")
+	dest := filepath.Join(dstHome, "sessions", "2026", "06", "13",
+		"rollout-2026-06-13T18-22-01-"+id+".jsonl")
+	if err := os.WriteFile(dest, []byte("locally diverged content\n"), 0o644); err != nil {
+		t.Fatalf("diverge: %v", err)
+	}
+
+	out.Reset()
+	errOut.Reset()
+	code := Run([]string{"import", bundle, "--replace-with-backup", "--codex-home", dstHome}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("import exit = %d, stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "Replaced (backup kept): 1") {
+		t.Errorf("missing replaced count in output:\n%s", out.String())
+	}
+	// The diverged content must survive as a backup somewhere in the home.
+	var foundBackup bool
+	_ = filepath.WalkDir(dstHome, func(p string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if strings.Contains(p, ".codexsync-bak-") {
+			if b, _ := os.ReadFile(p); string(b) == "locally diverged content\n" {
+				foundBackup = true
+			}
+		}
+		return nil
+	})
+	if !foundBackup {
+		t.Errorf("no backup with the diverged content was kept")
+	}
+}
+
+func TestRunInspectShowsMissingCWD(t *testing.T) {
+	tmp := t.TempDir()
+	srcHome := filepath.Join(tmp, "home")
+	// A cwd that does not exist on this machine -> should be flagged missing.
+	writeSessionCWD(t, srcHome, "abcd1111-2222-3333-4444-555566667777",
+		"/definitely/not/a/real/path/here")
+	bundle := filepath.Join(tmp, "p.codexbundle")
+	var out, errOut bytes.Buffer
+	if code := Run([]string{"export", "--all", "--codex-home", srcHome, "-o", bundle}, &out, &errOut); code != 0 {
+		t.Fatalf("export exit = %d, stderr=%s", code, errOut.String())
+	}
+
+	out.Reset()
+	errOut.Reset()
+	if code := Run([]string{"inspect", bundle}, &out, &errOut); code != 0 {
+		t.Fatalf("inspect exit = %d, stderr=%s", code, errOut.String())
+	}
+	s := out.String()
+	if !strings.Contains(s, "Project folders (recorded cwd)") {
+		t.Errorf("missing cwd summary section:\n%s", s)
+	}
+	if !strings.Contains(s, "[missing]") {
+		t.Errorf("missing folder not flagged:\n%s", s)
+	}
+	if !strings.Contains(s, "--map-cwd") {
+		t.Errorf("missing remap hint:\n%s", s)
+	}
+}
+
 func TestSanitizeForFilename(t *testing.T) {
 	cases := map[string]string{
 		"abcd1111-2222": "abcd1111-2222",

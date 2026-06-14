@@ -111,6 +111,47 @@ func printInspect(w io.Writer, path string, res bundle.InspectResult) {
 		}
 		fmt.Fprintln(w)
 	}
+	printCWDSummary(w, bundle.SummarizeCWDs(m.Sessions, bundle.DirExists), path, false)
+}
+
+// printCWDSummary renders the distinct recorded working directories in a bundle
+// and flags the ones that do not exist on this machine — the #1 reason imported
+// sessions appear "missing" in Codex (they are hidden from a project's sidebar
+// unless a folder at that exact cwd exists). When onlyIfMissing is true the
+// whole block is suppressed unless at least one folder is missing, so it does
+// not add noise to a clean import.
+func printCWDSummary(w io.Writer, summary bundle.CWDSummary, bundlePath string, onlyIfMissing bool) {
+	if onlyIfMissing && summary.MissingCount == 0 {
+		return
+	}
+	if len(summary.Dirs) == 0 && summary.UnknownCWD == 0 {
+		return
+	}
+	fmt.Fprintln(w, "Project folders (recorded cwd):")
+	for _, d := range summary.Dirs {
+		mark := "[ok]     "
+		if !d.ExistsLocal {
+			mark = "[missing]"
+		}
+		fmt.Fprintf(w, "  %s %s  (%s)\n", mark, d.Path, plural(d.Count, "session"))
+	}
+	if summary.UnknownCWD > 0 {
+		fmt.Fprintf(w, "  (%s have no recorded cwd — compressed or unknown)\n", plural(summary.UnknownCWD, "session"))
+	}
+	if summary.MissingCount > 0 {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "Some of these folders do not exist on this machine, so those sessions")
+		fmt.Fprintln(w, "will be hidden in Codex's sidebar until you create the folder (then")
+		fmt.Fprintln(w, "restart Codex) or remap the cwd on import, e.g.:")
+		fmt.Fprintf(w, "  codex-sync import %s --map-cwd \"<old-cwd>=<new-local-path>\"\n", bundlePath)
+	}
+}
+
+func plural(n int, noun string) string {
+	if n == 1 {
+		return fmt.Sprintf("1 %s", noun)
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
 }
 
 func printImport(w io.Writer, path string, res bundle.ImportResult) {
@@ -119,6 +160,9 @@ func printImport(w io.Writer, path string, res bundle.ImportResult) {
 	fmt.Fprintf(w, "New sessions: %d\n", res.Imported)
 	fmt.Fprintf(w, "Already existing: %d\n", res.SkippedIdentical)
 	fmt.Fprintf(w, "Conflicts: %d\n", res.Conflicts)
+	if res.Replaced > 0 {
+		fmt.Fprintf(w, "Replaced (backup kept): %d\n", res.Replaced)
+	}
 	if res.SkippedOther > 0 {
 		fmt.Fprintf(w, "Other skipped (archived/non-session): %d\n", res.SkippedOther)
 	}
@@ -168,12 +212,17 @@ func printImport(w io.Writer, path string, res bundle.ImportResult) {
 		}
 	}
 
+	if summary := bundle.SummarizeCWDs(res.Manifest.Sessions, bundle.DirExists); summary.MissingCount > 0 {
+		fmt.Fprintln(w)
+		printCWDSummary(w, summary, path, true)
+	}
+
 	fmt.Fprintln(w)
 	if res.DryRun {
 		fmt.Fprintln(w, "No files were changed because --dry-run was used.")
 		return
 	}
-	if res.Imported > 0 {
+	if res.Imported > 0 || res.Replaced > 0 {
 		fmt.Fprintln(w, "Import complete.")
 		fmt.Fprintln(w, "Next: restart the Codex App (or run Codex again) so it scans and")
 		fmt.Fprintln(w, "reconciles the imported rollout files. codex-sync does not modify Codex's SQLite.")

@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/ahmojo/Codex_Sync/internal/safety"
 )
 
 const sampleRel = "sessions/2026/06/13/rollout-2026-06-13T18-22-01-aaaa1111-2222-3333-4444-555566667777.jsonl"
@@ -155,6 +157,82 @@ func TestImportConflictNoOverwrite(t *testing.T) {
 	got, _ := os.ReadFile(dest)
 	if string(got) != "EXISTING different content" {
 		t.Errorf("conflict overwrote existing file: %q", string(got))
+	}
+}
+
+func TestImportReplaceWithBackup(t *testing.T) {
+	dir := t.TempDir()
+	bundlePath := buildBundle(t, dir, sampleRel, []byte("NEW content"), "/proj/x", nil)
+	target := fakeHome(t)
+
+	dest := filepath.Join(target.Root, filepath.FromSlash(sampleRel))
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const local = "EXISTING different content"
+	if err := os.WriteFile(dest, []byte(local), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := Import(target, ImportOptions{BundlePath: bundlePath, ReplaceWithBackup: true})
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	if res.Replaced != 1 || res.Conflicts != 0 || res.Imported != 0 {
+		t.Fatalf("counts: replaced=%d conflicts=%d imported=%d", res.Replaced, res.Conflicts, res.Imported)
+	}
+	// Target now holds the bundle's version.
+	if got, _ := os.ReadFile(dest); string(got) != "NEW content" {
+		t.Errorf("target not replaced: %q", string(got))
+	}
+	// A backup with the original local content must exist...
+	var backup string
+	for _, item := range res.Items {
+		if item.Action == ActionReplace {
+			backup = item.BackupPath
+		}
+	}
+	if backup == "" {
+		t.Fatalf("no BackupPath recorded on the replaced item")
+	}
+	if got, _ := os.ReadFile(backup); string(got) != local {
+		t.Errorf("backup content = %q, want original %q", string(got), local)
+	}
+	// ...and the backup must NOT look like an importable rollout file, so Codex
+	// ignores it on its next scan.
+	rel, _ := filepath.Rel(target.Root, backup)
+	if safety.IsSessionEntry(filepath.ToSlash(rel)) {
+		t.Errorf("backup path %q matches a session entry; Codex would treat it as a session", rel)
+	}
+}
+
+func TestImportReplaceWithBackupDryRunWritesNothing(t *testing.T) {
+	dir := t.TempDir()
+	bundlePath := buildBundle(t, dir, sampleRel, []byte("NEW content"), "/proj/x", nil)
+	target := fakeHome(t)
+
+	dest := filepath.Join(target.Root, filepath.FromSlash(sampleRel))
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const local = "EXISTING different content"
+	if err := os.WriteFile(dest, []byte(local), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	before := listFilesRel(t, target.Root)
+	res, err := Import(target, ImportOptions{BundlePath: bundlePath, ReplaceWithBackup: true, DryRun: true})
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	if res.Replaced != 1 {
+		t.Fatalf("replaced = %d, want 1 (planned)", res.Replaced)
+	}
+	if got, _ := os.ReadFile(dest); string(got) != local {
+		t.Errorf("dry-run replaced the file: %q", string(got))
+	}
+	if after := listFilesRel(t, target.Root); len(after) != len(before) {
+		t.Errorf("dry-run wrote/backed up files: before=%v after=%v", before, after)
 	}
 }
 

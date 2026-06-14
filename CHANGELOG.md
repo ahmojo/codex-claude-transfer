@@ -2,6 +2,45 @@
 
 All notable changes to codex-sync are documented here.
 
+## [0.1.6] - 2026-06-14
+
+### Added
+- Interactive mode: `codex-sync ui` opens a guided terminal menu
+  (Export / Import / Inspect / List / Doctor) that asks only the questions
+  relevant to your choice, populates the export "pick a session" list from your
+  local sessions, prints the exact equivalent `codex-sync …` command, and runs
+  it through the same code path as the flags (so behavior is identical and
+  nothing is hidden). Imports are always previewed with `--dry-run` first and
+  only applied after you confirm. Requires an interactive terminal; in a pipe or
+  CI it exits with guidance instead of blocking. Built with
+  [charmbracelet/huh](https://github.com/charmbracelet/huh).
+
+### Changed
+- The single binary now depends on `charmbracelet/huh` (and its dependencies)
+  for the `ui` command. The reusable core packages (`internal/bundle`,
+  `sessions`, `codexhome`, `safety`, `git`, `crypt`) remain built only on the Go
+  standard library, and the flag-based commands never invoke the TUI.
+- Minimum Go version is now 1.23 (required by the TUI dependency).
+
+## [0.1.5] - 2026-06-14
+
+### Added
+- cwd discovery: `inspect` now lists the distinct project folders (recorded
+  cwds) across a bundle's sessions and flags any that do not exist on the
+  current machine. `import` shows the same summary when one or more folders are
+  missing (including under `--dry-run`). A missing folder is the #1 reason an
+  imported session appears "missing" in Codex — it is hidden from a project's
+  sidebar unless a folder at that exact cwd exists — so the output includes a
+  ready-to-paste `--map-cwd "<old>=<new>"` hint. The check is read-only
+  (`os.Stat`); nothing is created.
+- `import --replace-with-backup`: opt-in conflict resolution. When a local
+  session has diverged from the bundle's version (a conflict), the local file is
+  copied to a sibling backup (`…jsonl.codexsync-bak-<nanos>`, a name Codex
+  ignores on its next scan) and then overwritten with the bundle's version, so
+  the previous content is always recoverable. Without the flag, conflicts are
+  still skipped and never overwritten (the default). Reported as
+  "Replaced (backup kept): N" and skipped under `--dry-run`.
+
 ## [0.1.4] - 2026-06-14
 
 ### Added

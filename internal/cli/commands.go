@@ -42,6 +42,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runInspect(rest, stdout, stderr)
 	case "import":
 		return runImport(rest, stdout, stderr)
+	case "ui":
+		return runUI(rest, stdout, stderr)
 	case "help", "-h", "--help":
 		printUsage(stdout)
 		return 0
@@ -69,6 +71,7 @@ type commonFlags struct {
 	recipientsFile  string
 	passphrase      bool
 	identity        string
+	replaceBackup   bool
 	positional      []string
 }
 
@@ -165,6 +168,8 @@ func parseFlags(args []string) (commonFlags, error) {
 			f.identity = val
 		case hasPrefix(arg, "--identity="):
 			f.identity = arg[len("--identity="):]
+		case arg == "--replace-with-backup":
+			f.replaceBackup = true
 		case arg == "--include-archived":
 			f.includeArchived = true
 		case arg == "--dry-run":
@@ -468,7 +473,7 @@ func runImport(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if len(f.positional) != 1 {
-		fmt.Fprintln(stderr, "usage: codex-sync import <file.codexbundle> [--dry-run] [--project <path>] [--map-cwd OLD=NEW] [--clone <dir>]")
+		fmt.Fprintln(stderr, "usage: codex-sync import <file.codexbundle> [--dry-run] [--project <path>] [--map-cwd OLD=NEW] [--replace-with-backup] [--clone <dir>]")
 		return 2
 	}
 	home, ok := resolveHome(f, stderr)
@@ -498,10 +503,11 @@ func runImport(args []string, stdout, stderr io.Writer) int {
 	defer cleanup()
 
 	res, err := bundle.Import(home, bundle.ImportOptions{
-		BundlePath:  bundlePath,
-		DryRun:      f.dryRun,
-		ProjectPath: absProject,
-		MapCWD:      mappings,
+		BundlePath:        bundlePath,
+		DryRun:            f.dryRun,
+		ProjectPath:       absProject,
+		MapCWD:            mappings,
+		ReplaceWithBackup: f.replaceBackup,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "error: import failed: %v\n", err)
@@ -565,6 +571,8 @@ Commands:
   export    Export sessions for a project into a .codexbundle
   inspect   Show a bundle's manifest and contents, read-only (no extraction)
   import    Import a .codexbundle into your Codex home (never overwrites)
+  ui        Interactive mode: a guided menu that builds and runs the commands
+            below for you (shows the equivalent command each time)
   help      Show this help
 
 Flags:
@@ -587,6 +595,10 @@ Flags:
   --map-cwd OLD=NEW     import: rewrite a session's recorded cwd from OLD to NEW
                         so it lands in the right local project (repeatable;
                         plain .jsonl only — .zst sessions are not rewritten)
+  --replace-with-backup import: on a conflict (a local session changed since a
+                        previous import), overwrite the local file with the
+                        bundle's version after saving a backup next to it
+                        (default is to skip conflicts and never overwrite)
   --clone <dir>         import: after importing, clone the bundle's recorded git
                         remote into <dir> and check out the recorded commit
   --encrypt-to <rcpt>   export: encrypt the bundle to an age recipient
@@ -601,6 +613,7 @@ Encryption requires the external 'age' tool (https://github.com/FiloSottile/age)
 .age bundles are auto-detected on import/inspect.
 
 Examples:
+  codex-sync ui                            # interactive, guided menu
   codex-sync doctor
   codex-sync list
   codex-sync export --project .            # -> <project>.codexbundle
@@ -613,6 +626,7 @@ Examples:
   codex-sync import ./my-project.codexbundle --dry-run
   codex-sync import ./my-project.codexbundle
   codex-sync import ./my-project.codexbundle --map-cwd "/old/path=/new/path"
+  codex-sync import ./my-project.codexbundle --replace-with-backup
   codex-sync import ./my-project.codexbundle --clone ~/dev/project
   codex-sync export --project . --encrypt-to age1qz...   # -> <project>.codexbundle.age
   codex-sync export --all --passphrase                   # passphrase-encrypted

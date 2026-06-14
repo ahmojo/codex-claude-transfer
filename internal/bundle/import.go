@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/ahmojo/Codex_Sync/internal/codexhome"
 	"github.com/ahmojo/Codex_Sync/internal/safety"
@@ -22,6 +23,7 @@ const (
 	ActionImport         Action = "import"           // new file; copied (unless dry-run)
 	ActionSkipIdentical  Action = "skip-identical"   // target exists with same checksum
 	ActionConflict       Action = "conflict"         // target exists with different checksum; not overwritten
+	ActionReplace        Action = "replace"          // conflict, overwritten after backing up the local file
 	ActionSkipArchived   Action = "skip-archived"    // archived_sessions entry; not imported in v0.1
 	ActionSkipNonSession Action = "skip-non-session" // unexpected non-session file
 )
@@ -35,6 +37,9 @@ type ImportItem struct {
 	CWDMismatch bool
 	// Mapped reports whether --map-cwd rewrote this session's cwd.
 	Mapped bool
+	// BackupPath, when non-empty, is where the pre-existing local file was
+	// backed up before being replaced (ActionReplace, --replace-with-backup).
+	BackupPath string
 	// content, when non-nil, is the (cwd-mapped) bytes to write instead of
 	// streaming the entry verbatim from the bundle.
 	content []byte
@@ -51,6 +56,11 @@ type ImportOptions struct {
 	// Only plain .jsonl files are rewritten; .jsonl.zst files that match a
 	// mapping are copied byte-for-byte and reported as unmappable.
 	MapCWD []CWDMapping
+	// ReplaceWithBackup turns conflicts (a local file with different content
+	// for the same session) into a replace: the local file is backed up next
+	// to itself and then overwritten with the bundle's version. Without it,
+	// conflicts are reported and skipped (the default, never-overwrite behavior).
+	ReplaceWithBackup bool
 }
 
 // ImportResult summarizes an import.
@@ -62,6 +72,9 @@ type ImportResult struct {
 	Conflicts        int
 	SkippedOther     int
 	CWDMismatchCount int
+	// Replaced counts conflicting sessions that were overwritten after the local
+	// file was backed up (--replace-with-backup).
+	Replaced int
 	// Mapped counts imported sessions whose cwd was rewritten by --map-cwd.
 	Mapped int
 	// MappedCompressedSkipped counts compressed sessions that matched a
@@ -183,6 +196,12 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 		if err != nil {
 			return result, err
 		}
+		// A conflict becomes a replace when the caller opted in. The local file
+		// is preserved as a backup before being overwritten (done in the write
+		// phase below); nothing is lost.
+		if action == ActionConflict && opts.ReplaceWithBackup {
+			action = ActionReplace
+		}
 		item.Action = action
 		switch action {
 		case ActionImport:
@@ -190,11 +209,17 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 			if item.Mapped {
 				result.Mapped++
 			}
+		case ActionReplace:
+			result.Replaced++
+			if item.Mapped {
+				result.Mapped++
+			}
+			result.Warnings = append(result.Warnings, fmt.Sprintf("%s: target exists with different content; the local file will be backed up and replaced", rel))
 		case ActionSkipIdentical:
 			result.SkippedIdentical++
 		case ActionConflict:
 			result.Conflicts++
-			result.Warnings = append(result.Warnings, fmt.Sprintf("%s: target exists with different content; skipped (conflict)", rel))
+			result.Warnings = append(result.Warnings, fmt.Sprintf("%s: target exists with different content; skipped (conflict). Use --replace-with-backup to overwrite while keeping a backup of the local file", rel))
 		}
 		result.Items = append(result.Items, item)
 	}
@@ -208,9 +233,21 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 	if opts.DryRun {
 		return result, nil
 	}
-	for _, item := range result.Items {
-		if item.Action != ActionImport {
+	for i := range result.Items {
+		item := &result.Items[i]
+		if item.Action != ActionImport && item.Action != ActionReplace {
 			continue
+		}
+		// For a replace, back up the existing local file first so nothing is
+		// lost. The backup keeps a suffix that does not match Codex's rollout
+		// pattern, so Codex ignores it on its next scan.
+		if item.Action == ActionReplace {
+			backup, err := backupFile(item.DestPath)
+			if err != nil {
+				return result, fmt.Errorf("back up %s before replacing: %w", item.BundlePath, err)
+			}
+			item.BackupPath = backup
+			result.Warnings = append(result.Warnings, fmt.Sprintf("%s: backed up local file to %s", item.BundlePath, backup))
 		}
 		if item.content != nil {
 			if err := safety.CopyAtomic(item.DestPath, bytes.NewReader(item.content)); err != nil {
@@ -223,6 +260,33 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 		}
 	}
 	return result, nil
+}
+
+// backupFile copies an existing file to a sibling backup path before it is
+// overwritten. The backup name ends in ".codexsync-bak-<unix-nanos>", which does
+// not match Codex's rollout-*.jsonl pattern, so Codex will not treat the backup
+// as a session. A fresh, non-existing name is chosen to avoid clobbering a prior
+// backup.
+func backupFile(dest string) (string, error) {
+	base := fmt.Sprintf("%s.codexsync-bak-%d", dest, time.Now().UnixNano())
+	backup := base
+	for n := 1; ; n++ {
+		if _, err := os.Stat(backup); os.IsNotExist(err) {
+			break
+		} else if err != nil {
+			return "", err
+		}
+		backup = fmt.Sprintf("%s.%d", base, n)
+	}
+	src, err := os.Open(dest)
+	if err != nil {
+		return "", err
+	}
+	defer src.Close()
+	if err := safety.CopyAtomic(backup, src); err != nil {
+		return "", err
+	}
+	return backup, nil
 }
 
 // compressedSessionSuffix is the extension of compressed rollout files, which
