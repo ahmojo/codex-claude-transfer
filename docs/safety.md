@@ -409,6 +409,29 @@ These are intentional non-goals. They keep the tool small, predictable, and safe
    `inspect` first if the bundle is not from you).
 9. **Delete the bundle** once you no longer need it.
 
+---
+
+## 15. The desktop GUI (`codex-sync app`) is local-only
+
+`codex-sync app` is a convenience face over the same operations, not a new trust
+boundary. It runs a small web server **on your machine only** and is built to stay
+there:
+
+- **Loopback-only.** It binds to `127.0.0.1`, never a routable address, so it is
+  not reachable from the network.
+- **Token-gated.** Every `/api` call requires a random token generated fresh each
+  launch. The token is delivered only through the URL the app opens in your
+  browser; the served HTML/JS contain no token, so another local process cannot
+  read it from the page. Requests without the right token are rejected.
+- **Host-checked.** Requests whose `Host` header is not a loopback name are
+  refused, mitigating DNS-rebinding from a malicious web page.
+- **Same safety model.** Export/import go through the exact same core code as the
+  CLI: checksums verified before writes, no silent overwrites, SQLite untouched,
+  and it **never uploads anything**. The browser is just the UI.
+
+It is still a local tool operating on sensitive session files, so run it on a
+machine you trust, and stop it (Ctrl-C) when you are done.
+
 ## Summary
 
 - Bundles can contain **prompts, code, terminal output, paths, and secrets** —

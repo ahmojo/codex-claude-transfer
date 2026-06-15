@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>codex-sync</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">codex&#8209;sync <span class="tag">desktop</span></div>
+    <div class="muted">Local only &mdash; nothing is uploaded.</div>
+  </header>
+
+  <div class="layout">
+    <nav class="sidebar">
+      <button class="nav active" data-view="doctor">Doctor</button>
+      <button class="nav" data-view="sessions">Sessions</button>
+      <button class="nav" data-view="export">Export</button>
+      <button class="nav" data-view="inspect">Inspect</button>
+      <button class="nav" data-view="import">Import</button>
+    </nav>
+
+    <main class="content">
+      <!-- Doctor -->
+      <section id="view-doctor" class="view">
+        <h1>Health check</h1>
+        <p class="muted">Confirms codex-sync can see your local Codex sessions, and which optional tools are installed.</p>
+        <button class="primary" id="doctor-refresh">Run check</button>
+        <div id="doctor-out" class="out"></div>
+      </section>
+
+      <!-- Sessions -->
+      <section id="view-sessions" class="view hidden">
+        <h1>Your sessions</h1>
+        <p class="muted">Codex sessions discovered on this machine.</p>
+        <button class="primary" id="sessions-refresh">Refresh</button>
+        <div id="sessions-out" class="out"></div>
+      </section>
+
+      <!-- Export -->
+      <section id="view-export" class="view hidden">
+        <h1>Export a bundle</h1>
+        <p class="muted">Package sessions into one <code>.codexbundle</code> file to move to another machine.</p>
+        <label class="field">
+          <span>What to export</span>
+          <select id="export-mode">
+            <option value="project">One project folder</option>
+            <option value="all">Everything (all sessions)</option>
+          </select>
+        </label>
+        <div id="export-project-row" class="field">
+          <span>Project folder</span>
+          <select id="export-project"></select>
+        </div>
+        <label class="field">
+          <span>Output file (blank = default name)</span>
+          <input id="export-output" type="text" placeholder="e.g. C:\Users\you\project.codexbundle" />
+        </label>
+        <label class="check"><input type="checkbox" id="export-archived" /> Include archived sessions</label>
+        <label class="check"><input type="checkbox" id="export-withgit" /> Record git remote/commit (--with-git)</label>
+        <label class="check"><input type="checkbox" id="export-gitpush" /> Also push my code to its git remote first (--git-push)</label>
+        <button class="primary" id="export-run">Export</button>
+        <div id="export-out" class="out"></div>
+      </section>
+
+      <!-- Inspect -->
+      <section id="view-inspect" class="view hidden">
+        <h1>Inspect a bundle</h1>
+        <p class="muted">Read a <code>.codexbundle</code> without extracting anything.</p>
+        <label class="field">
+          <span>Bundle file</span>
+          <input id="inspect-path" type="text" placeholder="path to .codexbundle" />
+        </label>
+        <button class="primary" id="inspect-run">Inspect</button>
+        <div id="inspect-out" class="out"></div>
+      </section>
+
+      <!-- Import -->
+      <section id="view-import" class="view hidden">
+        <h1>Import a bundle</h1>
+        <p class="muted">Bring sessions from a bundle into this machine's Codex home. Always previewed first.</p>
+        <label class="field">
+          <span>Bundle file</span>
+          <input id="import-path" type="text" placeholder="path to .codexbundle" />
+        </label>
+        <button class="primary" id="import-preview">Preview (dry run)</button>
+        <div id="import-preview-out" class="out"></div>
+
+        <div id="import-options" class="hidden">
+          <h2>Options</h2>
+          <div id="import-maps"></div>
+          <button class="ghost" id="import-add-map">+ Redirect a folder (map cwd)</button>
+          <label class="check"><input type="radio" name="conflict" value="skip" checked /> Skip sessions that differ (default)</label>
+          <label class="check"><input type="radio" name="conflict" value="replace" /> Replace them, keeping a backup</label>
+          <label class="check"><input type="radio" name="conflict" value="copy" /> Keep both &mdash; import differing ones as new sessions</label>
+          <button class="primary danger" id="import-run">Import for real</button>
+          <div id="import-out" class="out"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

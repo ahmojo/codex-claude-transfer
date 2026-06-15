@@ -18,6 +18,7 @@ import (
 	"github.com/ahmojo/Codex_Sync/internal/doctor"
 	"github.com/ahmojo/Codex_Sync/internal/git"
 	"github.com/ahmojo/Codex_Sync/internal/sessions"
+	"github.com/ahmojo/Codex_Sync/internal/webui"
 )
 
 // Run parses args (excluding the program name) and executes the requested
@@ -44,6 +45,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runImport(rest, stdout, stderr)
 	case "ui":
 		return runUI(rest, stdout, stderr)
+	case "app":
+		return runApp(rest, stdout, stderr)
 	case "version", "--version", "-V":
 		printVersion(stdout)
 		return 0
@@ -80,6 +83,8 @@ type commonFlags struct {
 	replaceBackup   bool
 	importAsCopy    bool
 	jsonOut         bool
+	port            int
+	noBrowser       bool
 	positional      []string
 }
 
@@ -186,6 +191,25 @@ func parseFlags(args []string) (commonFlags, error) {
 			f.includeArchived = true
 		case arg == "--json":
 			f.jsonOut = true
+		case arg == "--no-browser":
+			f.noBrowser = true
+		case arg == "--port":
+			val, err := takeValue(args, &i, "--port")
+			if err != nil {
+				return f, err
+			}
+			n, perr := strconv.Atoi(val)
+			if perr != nil || n < 0 || n > 65535 {
+				return f, fmt.Errorf("invalid --port %q", val)
+			}
+			f.port = n
+		case hasPrefix(arg, "--port="):
+			val := arg[len("--port="):]
+			n, perr := strconv.Atoi(val)
+			if perr != nil || n < 0 || n > 65535 {
+				return f, fmt.Errorf("invalid --port %q", val)
+			}
+			f.port = n
 		case arg == "--dry-run":
 			f.dryRun = true
 		case hasPrefix(arg, "-"):
@@ -213,6 +237,21 @@ func resolveHome(f commonFlags, stderr io.Writer) (codexhome.Home, bool) {
 		return codexhome.Home{}, false
 	}
 	return home, true
+}
+
+// runApp launches the local desktop GUI: a loopback-only web server the user
+// drives from their browser. It blocks until interrupted.
+func runApp(args []string, stdout, stderr io.Writer) int {
+	f, err := parseFlags(args)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 2
+	}
+	return webui.Run(webui.Options{
+		CodexHome: f.codexHome,
+		Port:      f.port,
+		NoBrowser: f.noBrowser,
+	}, stdout, stderr)
 }
 
 func runDoctor(args []string, stdout, stderr io.Writer) int {
@@ -673,6 +712,8 @@ Commands:
   import    Import a .codexbundle into your Codex home (never overwrites)
   ui        Interactive mode: a guided menu that builds and runs the commands
             below for you (shows the equivalent command each time)
+  app       Launch the local desktop GUI in your browser (loopback-only,
+            nothing is uploaded)
   version   Print the codex-sync version (also --version)
   completion Print a shell completion script (bash, zsh, or fish)
   help      Show this help
@@ -683,6 +724,9 @@ Flags:
   --include-archived    list, export: also consider archived sessions
   --json                doctor/list/inspect/export/import: print a machine-
                         readable JSON summary on stdout instead of human text
+  --port <n>            app: serve the desktop GUI on this port (default: a free
+                        port chosen automatically)
+  --no-browser          app: do not auto-open the browser; just print the URL
   --project <path>      export: filter sessions by recorded cwd
                         import: warn on cwd mismatch (never rewrites paths)
   --all                 export: include every session (no cwd filter);

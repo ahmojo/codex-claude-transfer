@@ -2,7 +2,19 @@
 
 All notable changes to codex-sync are documented here.
 
-## [0.1.12] - 2026-06-15
+## [0.1.13] - 2026-06-16
+
+### Added
+- `codex-sync app`: a desktop GUI. It launches a small **loopback-only** local web
+  server and opens your browser to a single-page app with Doctor, Sessions,
+  Export, Inspect, and Import views, all backed by the same core as the CLI. It is
+  pure standard library (no web framework, no build step), so it ships to every
+  platform through the existing release pipeline. Security: it binds to
+  `127.0.0.1` only, requires a per-launch random token on every API call (so other
+  local processes and web pages cannot drive it), and checks the Host header to
+  mitigate DNS-rebinding. It never uploads anything — it is just a local face over
+  the existing operations. Flags: `--port` (default: a free port) and
+  `--no-browser`.
 
 ### Added
 - `export --git-push`: opt-in completion of the git handoff. Before exporting, it

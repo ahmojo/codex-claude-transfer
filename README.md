@@ -5,7 +5,7 @@
 ![CI](https://github.com/ahmojo/Codex_Sync/actions/workflows/ci.yml/badge.svg)
 ![Go](https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go)
 ![License](https://img.shields.io/badge/license-MIT-blue)
-![Status](https://img.shields.io/badge/status-v0.1.12-orange)
+![Status](https://img.shields.io/badge/status-v0.1.13-orange)
 
 > ⚠️ **Unofficial.** Not affiliated with or endorsed by OpenAI. Codex's internals
 > can change at any time and break this tool. Use at your own risk — see the
@@ -73,10 +73,14 @@ encrypt/decrypt locally — they never change the "nothing is uploaded" guarante
 
 ## Quickstart
 
-New to it? **`codex-sync ui`** opens a guided menu that asks only the relevant
-questions, prints the exact command it builds, and runs it — you pick folders and
-sessions from a list instead of typing paths, and imports are always previewed
-first.
+Prefer a graphical app? **`codex-sync app`** opens a small desktop GUI in your
+browser (a loopback-only local server — nothing is uploaded) with Doctor,
+Sessions, Export, Inspect, and Import views.
+
+Prefer the terminal but not memorizing flags? **`codex-sync ui`** opens a guided
+menu that asks only the relevant questions, prints the exact command it builds,
+and runs it — you pick folders and sessions from a list instead of typing paths,
+and imports are always previewed first.
 
 Or drive the commands directly:
 
@@ -140,6 +144,7 @@ as a brand-new session, leaving yours untouched).
 
 | Command | Description |
 | ------- | ----------- |
+| `codex-sync app` | Launch the desktop GUI: a loopback-only local web app that opens in your browser. Nothing is uploaded. |
 | `codex-sync ui` | Interactive guided menu; builds and runs the commands below (and prints each one). Requires a terminal. |
 | `codex-sync doctor` | Read-only health check: Codex home, session counts, missing-cwd and optional-tool (`git`/`age`/`zstd`) status. |
 | `codex-sync list` | List discovered sessions (preview, thread id, cwd, source, updated time). |
@@ -222,8 +227,8 @@ read (decompressed) on export when `zstd` is installed.
   project until you `--map-cwd` it.
 - **No global path rewriting, no merge, no cloud sync.** `--map-cwd` only changes
   the `cwd` field in `session_meta`; sessions are copied, not merged.
-- **Terminal UI only** — `codex-sync ui` is a terminal wizard; there's no desktop
-  GUI (a Wails wrapper is on the roadmap).
+- **The desktop GUI runs in your browser**, not a native window — `codex-sync app`
+  serves a local, loopback-only web app (no native packaging, no extra toolchain).
 
 ## Roadmap
 
@@ -231,12 +236,12 @@ Shipped since v0.1.0: `--map-cwd`, `export --all`/`--since`/`--session`/`--with-
 `import --clone`, `age` encryption, cwd discovery, `--replace-with-backup`, an
 interactive `ui`, `--import-as-copy`, `zstd`-based compressed-session support,
 `doctor` tool checks, `--json` output, selective `import --session`,
-`version`/`completion` commands, and opt-in `export --git-push`.
+`version`/`completion` commands, opt-in `export --git-push`, and a desktop GUI
+(`codex-sync app`, a loopback-only local web app over the same Go core).
 
-Planned, explicitly **not** in v0.1.x: a desktop app wrapper over the same Go
-core, and optional Claude support. **Never** planned: cloud sync, accounts,
-hosting, background sync, direct SQLite writes, global path rewriting, automatic
-merge, or uploading your sessions anywhere.
+Planned, explicitly **not** in v0.1.x: optional Claude support. **Never** planned:
+cloud sync, accounts, hosting, background sync, direct SQLite writes, global path
+rewriting, automatic merge, or uploading your sessions anywhere.
 
 ## Built with AI assistance
 
