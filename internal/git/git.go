@@ -87,6 +87,48 @@ func Clone(remote, dir, commit string) error {
 	return nil
 }
 
+// Push pushes the current branch of the repo at dir to its remote. It is only
+// invoked when the user explicitly opts in (--git-push), so it surfaces errors
+// rather than swallowing them. It is deliberately conservative: it never
+// force-pushes, never pushes tags, and never creates a remote — it runs a plain
+// `git push <remote> <branch>`, so a diverged remote is rejected as a
+// non-fast-forward rather than overwritten. It returns the remote name and
+// branch that were pushed.
+func Push(dir string) (remote, branch string, err error) {
+	if _, err := exec.LookPath("git"); err != nil {
+		return "", "", fmt.Errorf("git not found in PATH")
+	}
+	if !isRepo(dir) {
+		return "", "", fmt.Errorf("%s is not a git repository", dir)
+	}
+	branch = run(dir, "rev-parse", "--abbrev-ref", "HEAD")
+	if branch == "" || branch == "HEAD" {
+		return "", "", fmt.Errorf("cannot push a detached HEAD; check out a branch first")
+	}
+	remote = pushRemote(dir, branch)
+	if remote == "" {
+		return "", "", fmt.Errorf("no git remote is configured to push to")
+	}
+	if err := runErr(dir, "push", remote, branch); err != nil {
+		return "", "", fmt.Errorf("git push %s %s: %w", remote, branch, err)
+	}
+	return remote, branch, nil
+}
+
+// pushRemote returns the remote to push branch to: the branch's configured
+// upstream remote if set, otherwise the first configured remote.
+func pushRemote(dir, branch string) string {
+	if up := run(dir, "rev-parse", "--abbrev-ref", branch+"@{upstream}"); up != "" {
+		if i := strings.Index(up, "/"); i > 0 {
+			return up[:i]
+		}
+	}
+	if remotes := run(dir, "remote"); remotes != "" {
+		return strings.Fields(remotes)[0]
+	}
+	return ""
+}
+
 func isRepo(dir string) bool {
 	return run(dir, "rev-parse", "--is-inside-work-tree") == "true"
 }

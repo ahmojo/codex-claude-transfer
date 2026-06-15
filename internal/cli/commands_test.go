@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ahmojo/Codex_Sync/internal/bundle"
 )
 
 func writeSession(t *testing.T, home, threadID, cwd string) {
@@ -212,6 +214,69 @@ func runGit(t *testing.T, dir string, args ...string) {
 		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e.com")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+func TestRunExportGitPush(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	tmp := t.TempDir()
+	// A project repo with a remote whose HEAD has NOT been pushed.
+	proj := filepath.Join(tmp, "proj")
+	if err := os.MkdirAll(proj, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	runGit(t, proj, "init")
+	if err := os.WriteFile(filepath.Join(proj, "f.txt"), []byte("payload"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	runGit(t, proj, "add", ".")
+	runGit(t, proj, "commit", "-m", "first")
+	bare := filepath.Join(tmp, "remote.git")
+	runGit(t, tmp, "init", "--bare", bare)
+	runGit(t, proj, "remote", "add", "origin", bare)
+
+	srcHome := filepath.Join(tmp, "home")
+	writeSessionCWD(t, srcHome, "abcd1111-2222-3333-4444-555566667777", proj)
+	bundlePath := filepath.Join(tmp, "p.codexbundle")
+
+	var out, errOut bytes.Buffer
+	code := Run([]string{"export", "--project", proj, "--git-push", "--codex-home", srcHome, "-o", bundlePath}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("export --git-push exit = %d, stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "Pushed branch") {
+		t.Errorf("missing push confirmation:\n%s", out.String())
+	}
+	// The bare remote must now contain the commit.
+	ls := exec.Command("git", "ls-remote", bare)
+	if o, err := ls.Output(); err != nil || strings.TrimSpace(string(o)) == "" {
+		t.Errorf("remote has no refs after --git-push (err=%v): %q", err, string(o))
+	}
+	// The bundle's recorded git state should no longer be unpushed (proving the
+	// push ran before git metadata was captured).
+	res, err := bundle.Inspect(bundlePath)
+	if err != nil {
+		t.Fatalf("inspect: %v", err)
+	}
+	if res.Manifest.Git == nil || res.Manifest.Git.Unpushed {
+		t.Errorf("bundle git should be recorded and not unpushed: %+v", res.Manifest.Git)
+	}
+}
+
+func TestRunExportGitPushRejectsAll(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	writeSessionCWD(t, home, "abcd1111-2222-3333-4444-555566667777", "/proj/a")
+	var out, errOut bytes.Buffer
+	code := Run([]string{"export", "--all", "--git-push", "--codex-home", home,
+		"-o", filepath.Join(tmp, "b.codexbundle")}, &out, &errOut)
+	if code != 2 {
+		t.Fatalf("expected exit 2, got %d; stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "not valid with --all") {
+		t.Errorf("missing --git-push/--all conflict message: %s", errOut.String())
 	}
 }
 

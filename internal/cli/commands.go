@@ -70,6 +70,7 @@ type commonFlags struct {
 	since           string
 	sessions        []string
 	withGit         bool
+	gitPush         bool
 	cloneDir        string
 	mapCWD          []string
 	encryptTo       []string
@@ -141,6 +142,8 @@ func parseFlags(args []string) (commonFlags, error) {
 			f.sessions = append(f.sessions, arg[len("--session="):])
 		case arg == "--with-git":
 			f.withGit = true
+		case arg == "--git-push":
+			f.gitPush = true
 		case arg == "--clone":
 			val, err := takeValue(args, &i, "--clone")
 			if err != nil {
@@ -319,6 +322,17 @@ func runExport(args []string, stdout, stderr io.Writer) int {
 		if err != nil {
 			fmt.Fprintf(stderr, "error: cannot resolve project path %q: %v\n", project, err)
 			return 1
+		}
+	}
+
+	// Opt-in --git-push completes the handoff: it pushes the project's code to its
+	// own git remote so the commit recorded in the bundle is actually fetchable on
+	// the other machine. It pushes CODE to YOUR remote only — never sessions, never
+	// to any codex-sync server — and runs before the export so the bundle records
+	// the now-pushed state. It is scoped to a single project (not --all/--session).
+	if f.gitPush {
+		if code := pushProject(absProject, session, f.all, stdout, stderr); code != 0 {
+			return code
 		}
 	}
 
@@ -578,6 +592,37 @@ func runImport(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+// pushProject handles the opt-in --git-push step on export: it pushes the
+// project's current branch to its git remote. This is the only outbound action
+// on export, it is explicit, and it uploads your code to your own remote — never
+// your sessions, and never to any codex-sync service. It returns a non-zero exit
+// code on failure so the export aborts before writing a bundle that would
+// misleadingly claim a commit is fetchable.
+func pushProject(absProject, session string, all bool, stdout, stderr io.Writer) int {
+	if all || session != "" {
+		fmt.Fprintln(stderr, "error: --git-push pushes one project's code, so it is not valid with --all or --session")
+		return 2
+	}
+	if !git.Available() {
+		fmt.Fprintln(stderr, "error: git is not installed or not on PATH; cannot --git-push")
+		return 1
+	}
+	if !git.IsRepo(absProject) {
+		fmt.Fprintf(stderr, "error: %s is not a git repository; nothing to --git-push\n", absProject)
+		return 1
+	}
+	fmt.Fprintln(stdout, "Pushing your project's code to its git remote (--git-push)…")
+	remote, branch, err := git.Push(absProject)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: git push failed: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "Pushed branch %q to remote %q.\n", branch, remote)
+	fmt.Fprintln(stdout, "(This uploads your code to your own git remote only — codex-sync never uploads your sessions.)")
+	fmt.Fprintln(stdout)
+	return 0
+}
+
 // cloneProject handles the opt-in --clone step: it clones the bundle's recorded
 // git remote into the target directory. It is intentionally separate from the
 // session import (which never touches the network or files outside Codex home).
@@ -651,6 +696,10 @@ Flags:
   --with-git            export: also record the project's git remote/branch/
                         commit (and dirty/unpushed status) in the bundle, even
                         with --all or --session
+  --git-push            export: push the project's current branch to its git
+                        remote first, so the recorded commit is fetchable on the
+                        other machine. Uploads your code to your own remote only,
+                        never your sessions. Opt-in; needs a project and a remote
   --output, -o <path>   export: bundle output path (default <project>.codexbundle)
   --dry-run             import: validate and report only, write nothing
   --map-cwd OLD=NEW     import: rewrite a session's recorded cwd from OLD to NEW

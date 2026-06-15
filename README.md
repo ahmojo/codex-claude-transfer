@@ -5,7 +5,7 @@
 ![CI](https://github.com/ahmojo/Codex_Sync/actions/workflows/ci.yml/badge.svg)
 ![Go](https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go)
 ![License](https://img.shields.io/badge/license-MIT-blue)
-![Status](https://img.shields.io/badge/status-v0.1.11-orange)
+![Status](https://img.shields.io/badge/status-v0.1.12-orange)
 
 > ⚠️ **Unofficial.** Not affiliated with or endorsed by OpenAI. Codex's internals
 > can change at any time and break this tool. Use at your own risk — see the
@@ -107,12 +107,14 @@ codex-sync import ./project.codexbundle \
 ready-to-paste mapping.
 
 **Bring the code too (git handoff).** `--with-git` records the project's
-remote/branch/commit; `--clone` checks it out on the other side. This is
-read-only — it fetches, never pushes or uploads. Without `--clone`, import just
-prints the `git clone … && git checkout <commit>` commands for you.
+remote/branch/commit; `--clone` checks it out on the other side. If your latest
+commit isn't pushed yet, add `--git-push` to push your branch to its own git
+remote first, so the recorded commit is actually fetchable — it uploads **your
+code to your own remote only, never your sessions**. Without `--clone`, import
+just prints the `git clone … && git checkout <commit>` commands for you.
 
 ```bash
-codex-sync export --project . --with-git
+codex-sync export --project . --with-git --git-push
 codex-sync import ./project.codexbundle --clone ~/dev/project
 ```
 
@@ -158,6 +160,7 @@ as a brand-new session, leaving yours untouched).
 | `--session <id>` | export, import | Export: exactly one session by thread id (unique prefix); excludes `--all`/`--project`. Import: only the matching session(s); repeatable. |
 | `--since <when>` | export | Only sessions updated at/after a date (`YYYY-MM-DD`) or duration (`7d`, `48h`, `90m`). |
 | `--with-git` | export | Also record the project's git remote/branch/commit (and dirty/unpushed status). |
+| `--git-push` | export | Opt-in. Push the project's current branch to its own git remote first, so the recorded commit is fetchable on the other machine. Uploads your code only, never sessions; never force-pushes. Needs a project and a remote. |
 | `--output, -o <path>` | export | Bundle output path (defaults derived from `--project`/`--all`/`--session`). |
 | `--include-archived` | list, export | Also consider archived sessions. |
 | `--json` | doctor, list, inspect, export, import | Print a machine-readable JSON summary on stdout instead of text. |
@@ -227,12 +230,13 @@ read (decompressed) on export when `zstd` is installed.
 Shipped since v0.1.0: `--map-cwd`, `export --all`/`--since`/`--session`/`--with-git`,
 `import --clone`, `age` encryption, cwd discovery, `--replace-with-backup`, an
 interactive `ui`, `--import-as-copy`, `zstd`-based compressed-session support,
-`doctor` tool checks, `--json` output, and selective `import --session`.
+`doctor` tool checks, `--json` output, selective `import --session`,
+`version`/`completion` commands, and opt-in `export --git-push`.
 
-Planned, explicitly **not** in v0.1.x: opt-in `git push` on export (the upload
-half of handoff), a desktop app wrapper over the same Go core, and optional Claude
-support. **Never** planned: cloud sync, accounts, hosting, background sync, direct
-SQLite writes, global path rewriting, or automatic merge.
+Planned, explicitly **not** in v0.1.x: a desktop app wrapper over the same Go
+core, and optional Claude support. **Never** planned: cloud sync, accounts,
+hosting, background sync, direct SQLite writes, global path rewriting, automatic
+merge, or uploading your sessions anywhere.
 
 ## Built with AI assistance
 

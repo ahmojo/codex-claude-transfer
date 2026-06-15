@@ -2,6 +2,20 @@
 
 All notable changes to codex-sync are documented here.
 
+## [0.1.12] - 2026-06-15
+
+### Added
+- `export --git-push`: opt-in completion of the git handoff. Before exporting, it
+  pushes the project's current branch to its own git remote (`git push <remote>
+  <branch>`) so the commit recorded in the bundle is actually fetchable on the
+  other machine. It uploads **your code to your own remote only — never your
+  sessions, and never to any codex-sync service**, and is deliberately
+  conservative: it never force-pushes, never pushes tags, and never creates a
+  remote (a diverged remote is rejected as a non-fast-forward). Scoped to a single
+  project (not `--all`/`--session`); if the push fails, the export stops rather
+  than write a bundle that falsely claims the commit is fetchable. The only two
+  outbound git actions remain opt-in: `--git-push` and `import --clone`.
+
 ## [0.1.11] - 2026-06-15
 
 ### Added

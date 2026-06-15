@@ -269,27 +269,39 @@ by decompressing, rewriting, and recompressing it (round-trip verified); see §8
 
 ---
 
-## 10. Git-assisted handoff is read-only and opt-in
+## 10. Git-assisted handoff is opt-in and only touches your own remote
 
-`--with-git` (export) and `--clone` (import) help move the **project code** that
-a session refers to, without weakening the safety model.
+`--with-git`/`--git-push` (export) and `--clone` (import) help move the **project
+code** that a session refers to, without weakening the safety model. They act on
+**git** — your code and your own git remote — and **never** on your sessions:
+codex-sync still never uploads a session or `.codexbundle` anywhere.
 
 - **On export**, `--with-git` only **reads** git. It records the project's
   remote URL, branch, commit SHA, and whether the tree was dirty/unpushed into
   `manifest.json`. It never commits, pushes, or creates anything. The recorded
   remote URL and branch names become part of the bundle, so treat them as you
   would the rest of its contents (see §1).
+- **On export, `--git-push`** is opt-in and the only thing that pushes. It runs a
+  plain `git push <remote> <branch>` of your project's current branch to its
+  **own** git remote, so the commit recorded in the bundle is actually fetchable
+  on the other machine. It is deliberately conservative: it **never force-pushes**,
+  never pushes tags, and never creates a remote (a diverged remote is rejected as
+  a non-fast-forward, not overwritten). It uploads **your code to your remote**,
+  never your sessions, and never to any codex-sync service. If it fails, the
+  export stops rather than produce a bundle that falsely claims the commit is
+  fetchable.
 - **On import**, with no `--clone` flag, codex-sync only **prints** the
   `git clone … && git checkout <commit>` commands. Nothing runs.
-- **`import --clone <dir>`** is the single feature that makes an outbound network
-  call: it runs `git clone <recorded-remote> <dir>` and then
-  `git checkout <recorded-commit>`. It is explicit, it only fetches (never
+- **`import --clone <dir>`** runs `git clone <recorded-remote> <dir>` and then
+  `git checkout <recorded-commit>`. It is explicit, it only **fetches** (never
   pushes), it is skipped under `--dry-run`, and it writes only inside the `<dir>`
   you name — never into your Codex home.
 
-If a bundle came from an untrusted source, review the recorded remote URL with
-`codex-sync inspect` before using `--clone`, since cloning executes git against
-whatever URL the manifest contains.
+So the only two outbound git actions are both opt-in: `--git-push` (push your code
+to your remote) and `--clone` (fetch your code from your remote). If a bundle came
+from an untrusted source, review the recorded remote URL with `codex-sync inspect`
+before using `--clone`, since cloning executes git against whatever URL the
+manifest contains.
 
 ---
 
@@ -351,11 +363,13 @@ These are intentional non-goals. They keep the tool small, predictable, and safe
   read-only to recover metadata when `zstd` is available (see §9). The single
   exception is `--map-cwd`, which (with `zstd`) decompresses, rewrites only the
   `cwd` field, and recompresses — verifying the round-trip first.
-- **Does not upload anything.** It never sends your sessions, code, or any other
-  data off your machine — no cloud, no telemetry, no `git push`, no repo
-  creation. The one outbound network action is `import --clone`, which you opt
-  into explicitly and which only *fetches* the project code you asked for via
-  `git clone` (see §10).
+- **Does not upload your sessions anywhere.** It never sends a session or
+  `.codexbundle` off your machine — no cloud, no telemetry, no codex-sync server,
+  no account. The only outbound actions are the two opt-in **git** features, which
+  act on your code and your own git remote, never your sessions: `export
+  --git-push` (a plain `git push` of your branch to your remote, never a
+  force-push, never repo creation) and `import --clone` (a `git clone`/`fetch` of
+  the recorded remote). See §10.
 - **Does not require accounts, servers, or a background daemon.**
 - **Does not scrub secrets from bundles.** It cannot tell what is sensitive — that
   responsibility stays with you (see §1). Optional `age` encryption (§11)

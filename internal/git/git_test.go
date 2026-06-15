@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -117,4 +118,73 @@ func TestCloneNoRemoteErrors(t *testing.T) {
 	if err := Clone("", t.TempDir(), ""); err == nil {
 		t.Errorf("expected error cloning empty remote")
 	}
+}
+
+func TestPushRoundTrip(t *testing.T) {
+	skipNoGit(t)
+	gitEnv(t)
+	// A source repo with a remote whose HEAD has NOT been pushed yet.
+	src := t.TempDir()
+	mustGit(t, src, "init")
+	mustGit(t, src, "checkout", "-b", "work")
+	if err := os.WriteFile(filepath.Join(src, "file.txt"), []byte("payload"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	mustGit(t, src, "add", ".")
+	mustGit(t, src, "commit", "-m", "first")
+
+	bare := filepath.Join(t.TempDir(), "remote.git")
+	mustGit(t, ".", "init", "--bare", bare)
+	mustGit(t, src, "remote", "add", "origin", bare)
+
+	// Before push, Discover reports the commit as unpushed.
+	if !Discover(src).Unpushed {
+		t.Fatalf("precondition: commit should be unpushed before Push")
+	}
+
+	remote, branch, err := Push(src)
+	if err != nil {
+		t.Fatalf("push: %v", err)
+	}
+	if remote != "origin" || branch != "work" {
+		t.Errorf("push reported remote=%q branch=%q, want origin/work", remote, branch)
+	}
+	// The bare remote must now contain the branch at the same commit.
+	want := Discover(src).CommitSHA
+	got := strings.TrimSpace(runOut(t, ".", "ls-remote", bare, "refs/heads/work"))
+	if got == "" || !strings.HasPrefix(got, want) {
+		t.Errorf("remote ref = %q, want commit %q present", got, want)
+	}
+	// And Discover should now consider HEAD pushed.
+	if Discover(src).Unpushed {
+		t.Errorf("after Push, HEAD should no longer be unpushed")
+	}
+}
+
+func TestPushNoRemoteErrors(t *testing.T) {
+	skipNoGit(t)
+	gitEnv(t)
+	dir := t.TempDir()
+	mustGit(t, dir, "init")
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("hi"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	mustGit(t, dir, "add", ".")
+	mustGit(t, dir, "commit", "-m", "first")
+
+	if _, _, err := Push(dir); err == nil {
+		t.Errorf("expected an error pushing with no remote configured")
+	}
+}
+
+// runOut runs a git command and returns stdout, failing the test on error.
+func runOut(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git %v: %v", args, err)
+	}
+	return string(out)
 }
