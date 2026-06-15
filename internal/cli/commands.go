@@ -44,6 +44,11 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runImport(rest, stdout, stderr)
 	case "ui":
 		return runUI(rest, stdout, stderr)
+	case "version", "--version", "-V":
+		printVersion(stdout)
+		return 0
+	case "completion":
+		return runCompletion(rest, stdout, stderr)
 	case "help", "-h", "--help":
 		printUsage(stdout)
 		return 0
@@ -218,7 +223,11 @@ func runDoctor(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	report := doctor.Run(home)
-	printReport(stdout, report)
+	if f.jsonOut {
+		printDoctorJSON(stdout, report)
+	} else {
+		printReport(stdout, report)
+	}
 	return 0
 }
 
@@ -619,14 +628,16 @@ Commands:
   import    Import a .codexbundle into your Codex home (never overwrites)
   ui        Interactive mode: a guided menu that builds and runs the commands
             below for you (shows the equivalent command each time)
+  version   Print the codex-sync version (also --version)
+  completion Print a shell completion script (bash, zsh, or fish)
   help      Show this help
 
 Flags:
   --codex-home <path>   Use a specific Codex home instead of ~/.codex
                         (also honors $CODEX_HOME)
   --include-archived    list, export: also consider archived sessions
-  --json                list/inspect/export/import: print a machine-readable
-                        JSON summary on stdout instead of human text
+  --json                doctor/list/inspect/export/import: print a machine-
+                        readable JSON summary on stdout instead of human text
   --project <path>      export: filter sessions by recorded cwd
                         import: warn on cwd mismatch (never rewrites paths)
   --all                 export: include every session (no cwd filter);

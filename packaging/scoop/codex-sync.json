@@ -1,0 +1,23 @@
+{
+    "version": "0.1.10",
+    "description": "Local Codex session portability across machines (unofficial)",
+    "homepage": "https://github.com/ahmojo/Codex_Sync",
+    "license": "MIT",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/ahmojo/Codex_Sync/releases/download/v0.1.10/codex-sync_v0.1.10_windows_amd64.tar.gz",
+            "hash": "9045d87c25836b154f2b490a83c8cbe4267610df0b1220640a39ad0f7986ab57",
+            "extract_dir": "codex-sync_v0.1.10_windows_amd64"
+        }
+    },
+    "bin": "codex-sync.exe",
+    "checkver": "github",
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/ahmojo/Codex_Sync/releases/download/v$version/codex-sync_v$version_windows_amd64.tar.gz",
+                "extract_dir": "codex-sync_v$version_windows_amd64"
+            }
+        }
+    }
+}

@@ -2,6 +2,19 @@
 
 All notable changes to codex-sync are documented here.
 
+## [0.1.11] - 2026-06-15
+
+### Added
+- `codex-sync version` (and `--version`) prints the build version plus OS/arch
+  and Go version. Release binaries embed the tag via the linker; `go install`
+  builds report the module version.
+- `codex-sync completion <bash|zsh|fish>` prints a shell completion script for
+  the commands and flags.
+- `doctor --json` now has machine-readable output too (joining list/inspect/
+  export/import).
+- Packaging manifests under `packaging/`: a Homebrew formula and a Scoop manifest
+  that install the prebuilt release binary.
+
 ## [0.1.10] - 2026-06-15
 
 ### Added

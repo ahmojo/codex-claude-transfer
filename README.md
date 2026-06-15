@@ -5,7 +5,7 @@
 ![CI](https://github.com/ahmojo/Codex_Sync/actions/workflows/ci.yml/badge.svg)
 ![Go](https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go)
 ![License](https://img.shields.io/badge/license-MIT-blue)
-![Status](https://img.shields.io/badge/status-v0.1.10-orange)
+![Status](https://img.shields.io/badge/status-v0.1.11-orange)
 
 > ⚠️ **Unofficial.** Not affiliated with or endorsed by OpenAI. Codex's internals
 > can change at any time and break this tool. Use at your own risk — see the
@@ -48,6 +48,9 @@ or build from a clone:
 git clone https://github.com/ahmojo/Codex_Sync.git
 cd Codex_Sync && go build -o codex-sync ./cmd/codex-sync
 ```
+
+Package manifests for **Homebrew** and **Scoop** live in
+[`packaging/`](packaging/) (they install the prebuilt release binary).
 
 The binary is self-contained. Only the interactive `ui` command uses a
 third-party library ([`charmbracelet/huh`](https://github.com/charmbracelet/huh));
@@ -141,6 +144,8 @@ as a brand-new session, leaving yours untouched).
 | `codex-sync export [--project <path> \| --all \| --session <id>]` | Package matching sessions into a `.codexbundle`. |
 | `codex-sync inspect <bundle>` | Show a bundle's manifest and contents, read-only, and flag any recorded project folder that's missing locally. |
 | `codex-sync import <bundle>` | Import rollout files into your Codex home. Verifies checksums; never overwrites by default. |
+| `codex-sync version` | Print the version (also `--version`). |
+| `codex-sync completion <bash\|zsh\|fish>` | Print a shell completion script. |
 | `codex-sync help` | Show help. |
 
 ### Flags
@@ -155,7 +160,7 @@ as a brand-new session, leaving yours untouched).
 | `--with-git` | export | Also record the project's git remote/branch/commit (and dirty/unpushed status). |
 | `--output, -o <path>` | export | Bundle output path (defaults derived from `--project`/`--all`/`--session`). |
 | `--include-archived` | list, export | Also consider archived sessions. |
-| `--json` | list, inspect, export, import | Print a machine-readable JSON summary on stdout instead of text. |
+| `--json` | doctor, list, inspect, export, import | Print a machine-readable JSON summary on stdout instead of text. |
 | `--dry-run` | import | Validate and report only; write nothing. |
 | `--map-cwd OLD=NEW` | import | Rewrite matching sessions' recorded cwd. Plain `.jsonl` always; `.jsonl.zst` when `zstd` is installed. Repeatable. |
 | `--replace-with-backup` | import | On a conflict, back up the local file and overwrite it with the bundle's version. |

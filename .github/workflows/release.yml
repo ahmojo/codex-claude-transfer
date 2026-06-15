@@ -48,7 +48,7 @@ jobs:
           if [ "$GOOS" = "windows" ]; then ext=".exe"; fi
           outdir="dist/${name}_${version}_${GOOS}_${GOARCH}"
           mkdir -p "$outdir"
-          go build -trimpath -ldflags "-s -w" -o "$outdir/${name}${ext}" ./cmd/codex-sync
+          go build -trimpath -ldflags "-s -w -X github.com/ahmojo/Codex_Sync/internal/cli.Version=${version}" -o "$outdir/${name}${ext}" ./cmd/codex-sync
           cp README.md docs/safety.md "$outdir/" 2>/dev/null || true
           ( cd dist && tar -czf "${name}_${version}_${GOOS}_${GOARCH}.tar.gz" "$(basename "$outdir")" )
 

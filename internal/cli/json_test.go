@@ -7,6 +7,32 @@ import (
 	"testing"
 )
 
+func TestDoctorJSONOutput(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	writeSessionCWD(t, home, "abcd1111-2222-3333-4444-555566667777", "/proj/a")
+
+	var out, errOut bytes.Buffer
+	if code := Run([]string{"doctor", "--json", "--codex-home", home}, &out, &errOut); code != 0 {
+		t.Fatalf("doctor --json exit = %d, stderr=%s", code, errOut.String())
+	}
+	var got doctorJSON
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("doctor output is not valid JSON: %v\n%s", err, out.String())
+	}
+	if got.CodexHome == "" || len(got.Checks) == 0 {
+		t.Fatalf("unexpected doctor json: %+v", got)
+	}
+	// Every check must carry a recognized status string.
+	for _, c := range got.Checks {
+		switch c.Status {
+		case "ok", "warn", "info":
+		default:
+			t.Errorf("unexpected status %q", c.Status)
+		}
+	}
+}
+
 func TestListJSONOutput(t *testing.T) {
 	tmp := t.TempDir()
 	home := filepath.Join(tmp, "home")

@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/ahmojo/Codex_Sync/internal/bundle"
+	"github.com/ahmojo/Codex_Sync/internal/doctor"
 	"github.com/ahmojo/Codex_Sync/internal/sessions"
 )
 
@@ -23,6 +24,40 @@ func writeJSON(w io.Writer, v any) {
 	}
 	w.Write(data)
 	fmt.Fprintln(w)
+}
+
+type checkJSON struct {
+	Status  string `json:"status"` // "ok" | "warn" | "info"
+	Message string `json:"message"`
+}
+
+type doctorJSON struct {
+	CodexHome   string      `json:"codex_home"`
+	SessionsDir string      `json:"sessions_dir"`
+	Checks      []checkJSON `json:"checks"`
+}
+
+func printDoctorJSON(w io.Writer, report doctor.Report) {
+	out := doctorJSON{
+		CodexHome:   report.Home.Root,
+		SessionsDir: report.Home.SessionsDir,
+		Checks:      make([]checkJSON, 0, len(report.Checks)),
+	}
+	for _, c := range report.Checks {
+		out.Checks = append(out.Checks, checkJSON{Status: doctorStatusString(c.Status), Message: c.Message})
+	}
+	writeJSON(w, out)
+}
+
+func doctorStatusString(s doctor.Status) string {
+	switch s {
+	case doctor.StatusOK:
+		return "ok"
+	case doctor.StatusWarn:
+		return "warn"
+	default:
+		return "info"
+	}
 }
 
 type sessionJSON struct {
