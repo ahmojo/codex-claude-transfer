@@ -11,28 +11,28 @@
 class CodexSync < Formula
   desc "Local Codex session portability across machines (unofficial)"
   homepage "https://github.com/ahmojo/Codex_Sync"
-  version "0.1.10"
+  version "0.1.11"
   license "MIT"
 
   on_macos do
     on_arm do
-      url "https://github.com/ahmojo/Codex_Sync/releases/download/v0.1.10/codex-sync_v0.1.10_darwin_arm64.tar.gz"
-      sha256 "aa388a9ce102f60058d6f51a66f869657b3b7abefb47a105b694dd00bf99dbee"
+      url "https://github.com/ahmojo/Codex_Sync/releases/download/v0.1.11/codex-sync_v0.1.11_darwin_arm64.tar.gz"
+      sha256 "a3b4dff358aa6b9f9a8e56ff9b0e4c563e5a5f3fd9443f4a7a71b8e3929d7bf6"
     end
     on_intel do
-      url "https://github.com/ahmojo/Codex_Sync/releases/download/v0.1.10/codex-sync_v0.1.10_darwin_amd64.tar.gz"
-      sha256 "930de9fdfa9035e2e41a57604c17346f8148d1602e2563bc6e32e3c0a91dd028"
+      url "https://github.com/ahmojo/Codex_Sync/releases/download/v0.1.11/codex-sync_v0.1.11_darwin_amd64.tar.gz"
+      sha256 "ff28f0e6d354f28c087ecddc3bc5ee179c992277de28450e233486b38dc9d667"
     end
   end
 
   on_linux do
     on_arm do
-      url "https://github.com/ahmojo/Codex_Sync/releases/download/v0.1.10/codex-sync_v0.1.10_linux_arm64.tar.gz"
-      sha256 "56891830ceaaee2c3d60f8d2fe87e85d49a2e91e87fccc0fced83bec63ad6d31"
+      url "https://github.com/ahmojo/Codex_Sync/releases/download/v0.1.11/codex-sync_v0.1.11_linux_arm64.tar.gz"
+      sha256 "1ee436d0fdbb8a1fdd0b80beb1c571fa0cce6ad620c3c2a39441164c15e0debf"
     end
     on_intel do
-      url "https://github.com/ahmojo/Codex_Sync/releases/download/v0.1.10/codex-sync_v0.1.10_linux_amd64.tar.gz"
-      sha256 "6f18c21a57f2d0b800b45f9f2552325f2c347dc44bd29d6b350af6f32f13b68f"
+      url "https://github.com/ahmojo/Codex_Sync/releases/download/v0.1.11/codex-sync_v0.1.11_linux_amd64.tar.gz"
+      sha256 "d3198e6742cedf9741bd90259f94e8f36f1d06f22475988e41c96236496a534c"
     end
   end
 
