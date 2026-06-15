@@ -5,7 +5,7 @@
 ![CI](https://github.com/ahmojo/Codex_Sync/actions/workflows/ci.yml/badge.svg)
 ![Go](https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go)
 ![License](https://img.shields.io/badge/license-MIT-blue)
-![Status](https://img.shields.io/badge/status-v0.1.9-orange)
+![Status](https://img.shields.io/badge/status-v0.1.10-orange)
 
 > ⚠️ **Unofficial tool.** Not affiliated with or endorsed by OpenAI. Codex's
 > internals can change at any time and break this tool. Use at your own risk.
@@ -290,7 +290,7 @@ affected. codex-sync still never uploads anything.
 | Command | Description |
 | ------- | ----------- |
 | `codex-sync ui` | Interactive mode: a guided menu that asks only the relevant questions, prints the equivalent command, and runs it. Imports are previewed with `--dry-run` first. Requires an interactive terminal. |
-| `codex-sync doctor` | Read-only health check: finds your Codex home, counts sessions, warns about cwd/compressed files, and confirms SQLite will not be modified. |
+| `codex-sync doctor` | Read-only health check: finds your Codex home, counts sessions, warns about cwd/compressed files, reports which optional tools (`git`/`age`/`zstd`) are installed, and confirms SQLite will not be modified. |
 | `codex-sync list` | Lists discovered Codex sessions (preview, thread id, cwd, source, updated time). |
 | `codex-sync export --project <path>` | Exports sessions whose recorded cwd matches `<path>` into a `.codexbundle`. |
 | `codex-sync export --all` | Exports every session regardless of recorded cwd (includes compressed `.jsonl.zst`) into `codex-sessions.codexbundle`. |
@@ -301,7 +301,8 @@ affected. codex-sync still never uploads anything.
 | `codex-sync inspect <file.codexbundle>` | Shows a bundle's manifest and contents without extracting anything, and lists the recorded project folders (cwds), flagging any that don't exist on this machine. |
 | `codex-sync import <file.codexbundle>` | Imports rollout files into your Codex home. Never overwrites; verifies checksums first. |
 | `codex-sync import <file.codexbundle> --dry-run` | Validates and reports what *would* happen, writing nothing. |
-| `codex-sync import <file.codexbundle> --map-cwd OLD=NEW` | Imports while rewriting matching plain `.jsonl` sessions' recorded cwd from `OLD` to `NEW`. Repeatable. |
+| `codex-sync import <file.codexbundle> --map-cwd OLD=NEW` | Imports while rewriting matching sessions' recorded cwd from `OLD` to `NEW` (plain `.jsonl`, and `.jsonl.zst` when `zstd` is installed). Repeatable. |
+| `codex-sync import <file.codexbundle> --session <id>` | Imports only the session(s) in the bundle matching `<id>` (a unique prefix is enough; repeatable), skipping the rest. |
 | `codex-sync import <file.codexbundle> --replace-with-backup` | On a conflict (a local session that diverged from the bundle), overwrites the local file with the bundle's version after saving a backup next to it. |
 | `codex-sync import <file.codexbundle> --import-as-copy` | On a conflict, imports the bundle's version as a brand-new session (fresh id + filename), leaving the local one untouched. Mutually exclusive with `--replace-with-backup`. |
 | `codex-sync help` | Show help. |
@@ -313,13 +314,14 @@ affected. codex-sync still never uploads anything.
 | `--codex-home <path>` | all | Use a specific Codex home instead of the default (also honors `$CODEX_HOME`). |
 | `--project <path>` | export, import | Export: filter sessions by recorded cwd. Import: check for cwd mismatch. |
 | `--all` | export | Export every session regardless of cwd (includes compressed sessions). Mutually exclusive with `--project`. |
-| `--session <thread-id>` | export | Export exactly one session by thread id (a unique prefix is enough). Mutually exclusive with `--all` and `--project`. |
+| `--session <thread-id>` | export, import | Export: export exactly one session by thread id (a unique prefix is enough); mutually exclusive with `--all` and `--project`. Import: import only the session(s) with this thread id; repeatable to pick several. |
 | `--since <when>` | export | Only export sessions updated at/after `<when>`. Accepts a date (`YYYY-MM-DD`) or a duration (`7d`, `48h`, `90m`). Combines with `--project` or `--all`. |
 | `--with-git` | export | Also record the project's git remote/branch/commit (and dirty/unpushed status) in the bundle, even with `--all` or `--session`. |
 | `--output, -o <path>` | export | Bundle output path (default `<project>.codexbundle`, or `codex-sessions.codexbundle` with `--all`, or `session-<id>.codexbundle` with `--session`). |
 | `--include-archived` | list, export | Also consider archived sessions. |
+| `--json` | list, inspect, export, import | Print a machine-readable JSON summary on stdout instead of human-readable text (for scripting). |
 | `--dry-run` | import | Write nothing; just report. |
-| `--map-cwd OLD=NEW` | import | Opt-in cwd rewrite for matching plain `.jsonl` sessions. Does not rewrite `.jsonl.zst`. |
+| `--map-cwd OLD=NEW` | import | Opt-in cwd rewrite for matching sessions. Plain `.jsonl` always; `.jsonl.zst` too when the `zstd` tool is installed (otherwise copied byte-for-byte). |
 | `--replace-with-backup` | import | Opt-in. On a conflict, back up the local file (to a sibling `…jsonl.codexsync-bak-*` that Codex ignores) and overwrite it with the bundle's version. Default is to skip conflicts and never overwrite. |
 | `--import-as-copy` | import | Opt-in. On a conflict, import the bundle's version as a brand-new session (fresh id + filename) instead of skipping it, leaving the local session untouched. Plain `.jsonl` only; mutually exclusive with `--replace-with-backup`. |
 | `--clone <dir>` | import | After importing, clone the bundle's recorded git remote into `<dir>` and check out the recorded commit. Opt-in; needs a git remote recorded in the bundle (by `--project` or `--with-git` on export). |
@@ -350,9 +352,10 @@ affected. codex-sync still never uploads anything.
 - **Default import is byte-for-byte.** Session content is only changed if you
   explicitly pass `--map-cwd`.
 - **`--map-cwd` is intentionally narrow.** It rewrites only the `cwd` field in
-  the `session_meta` line of matching plain `.jsonl` files. All non-`session_meta`
-  lines are preserved byte-for-byte. `.jsonl.zst` files are never decompressed or
-  rewritten.
+  the `session_meta` line; all non-`session_meta` lines are preserved
+  byte-for-byte. For `.jsonl.zst` files it does nothing unless the `zstd` tool is
+  installed, in which case it decompresses, rewrites only that field, and
+  recompresses after verifying the round-trip.
 
 See [`docs/safety.md`](docs/safety.md) for the full safety and privacy details,
 including the important note that **`.codexbundle` files may contain sensitive
@@ -392,10 +395,11 @@ project.codexbundle
   sessions are included by `--project` and shown with their details. Without
   `zstd` installed, their cwd is unknown, so they are skipped by the `--project`
   filter (use `--all` to include them) and shown without metadata.
-- **`.jsonl.zst` cwd mapping is not implemented.** `--map-cwd` only rewrites
-  plain `.jsonl` files; rewriting a compressed session would require recompressing
-  it. Compressed sessions that match a mapping are copied byte-for-byte and
-  reported as not remapped.
+- **`.jsonl.zst` cwd mapping needs the external `zstd` tool.** When `zstd` is
+  installed, `--map-cwd` rewrites a matching compressed session by decompressing,
+  rewriting only its `cwd`, and recompressing (verifying the round-trip first).
+  Without `zstd`, a compressed session that matches a mapping is copied
+  byte-for-byte and reported as not remapped.
 - **Project-specific visibility depends on matching cwd paths.** Codex's
   per-project sidebar filters by the session's recorded working directory. If
   your project lives at a different path on the two machines, an imported session
@@ -418,14 +422,14 @@ Already shipped since v0.1.0: `--map-cwd` (v0.1.1), `export --all` and
 `import --clone` (v0.1.3), optional `age` bundle encryption (v0.1.4),
 cwd discovery in `inspect`/`import` and `import --replace-with-backup` (v0.1.5),
 an interactive `ui` mode (v0.1.6), `import --import-as-copy` and read-only
-`.jsonl.zst` metadata recovery via the external `zstd` tool (v0.1.9).
+`.jsonl.zst` metadata recovery via the external `zstd` tool (v0.1.9),
+`doctor` optional-tool checks, `--json` output, selective `import --session`,
+and compressed-session `--map-cwd` via `zstd` (v0.1.10).
 
 Planned, explicitly **not** in v0.1.x:
 
 - Optional `git push`/repo-creation on export (the upload half of handoff),
   clearly separated and opt-in — codex-sync does not upload anything today
-- Safe cwd mapping for compressed sessions, once the decompression/recompression
-  round-trip is researched (reading compressed metadata already ships)
 - A desktop app wrapper later, reusing the same Go core
 - Optional Claude support later (not in v0.1.x)
 

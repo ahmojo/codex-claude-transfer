@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/ahmojo/Codex_Sync/internal/sessions"
+	"github.com/ahmojo/Codex_Sync/internal/zstdcli"
 )
 
 // Fixed non-session_meta lines used to prove they are preserved byte-for-byte.
@@ -146,7 +147,13 @@ func TestMapCWDResultStillParses(t *testing.T) {
 	}
 }
 
-func TestMapCWDCompressedSkipped(t *testing.T) {
+// TestMapCWDCompressedSkippedWithoutZstd covers the fallback when the zstd tool
+// is not installed: a compressed session matching a mapping cannot be rewritten,
+// so it is copied byte-for-byte and reported as not remapped.
+func TestMapCWDCompressedSkippedWithoutZstd(t *testing.T) {
+	if zstdcli.Available() {
+		t.Skip("zstd is installed; compressed sessions are remapped (see TestMapCWDCompressedRemapped)")
+	}
 	dir := t.TempDir()
 	zstRel := "sessions/2026/06/13/rollout-2026-06-13T18-22-01-bbbb1111-2222-3333-4444-555566667777.jsonl.zst"
 	data := []byte{0x28, 0xb5, 0x2f, 0xfd, 0x00, 0x01, 0x02, 0x03}
@@ -168,6 +175,53 @@ func TestMapCWDCompressedSkipped(t *testing.T) {
 	got, _ := os.ReadFile(dest)
 	if !bytes.Equal(got, data) {
 		t.Errorf("compressed session was not copied byte-for-byte")
+	}
+}
+
+// TestMapCWDCompressedRemapped covers the zstd path: a compressed session whose
+// recorded cwd matches a mapping is decompressed, rewritten, and recompressed,
+// and the written file decompresses back to valid JSONL carrying the new cwd.
+func TestMapCWDCompressedRemapped(t *testing.T) {
+	if !zstdcli.Available() {
+		t.Skip("zstd not installed; compressed remapping unavailable")
+	}
+	dir := t.TempDir()
+	zstRel := "sessions/2026/06/13/rollout-2026-06-13T18-22-01-bbbb1111-2222-3333-4444-555566667777.jsonl.zst"
+	plain := metaSessionJSONL(t, "/source/proj")
+	comp, err := zstdcli.Compress(plain)
+	if err != nil {
+		t.Fatalf("compress: %v", err)
+	}
+	bundlePath := buildBundle(t, dir, zstRel, comp, "/source/proj", nil)
+
+	target := fakeHome(t)
+	res, err := Import(target, ImportOptions{
+		BundlePath: bundlePath,
+		MapCWD:     []CWDMapping{{Old: "/source/proj", New: "/new/proj"}},
+	})
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	if res.Imported != 1 || res.Mapped != 1 || res.MappedCompressedSkipped != 0 {
+		t.Fatalf("counts: imported=%d mapped=%d compressedSkipped=%d",
+			res.Imported, res.Mapped, res.MappedCompressedSkipped)
+	}
+	dest := filepath.Join(target.Root, filepath.FromSlash(zstRel))
+	got, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("read dest: %v", err)
+	}
+	// The written file must still be a valid zstd frame that decompresses to JSONL
+	// carrying the new cwd (and not the old one).
+	back, err := zstdcli.Decompress(got)
+	if err != nil {
+		t.Fatalf("written compressed session is not valid zstd: %v", err)
+	}
+	if !bytes.Contains(back, []byte(`"cwd":"/new/proj"`)) {
+		t.Errorf("remapped compressed session does not carry the new cwd:\n%s", back)
+	}
+	if bytes.Contains(back, []byte(`"cwd":"/source/proj"`)) {
+		t.Errorf("remapped compressed session still carries the old cwd")
 	}
 }
 

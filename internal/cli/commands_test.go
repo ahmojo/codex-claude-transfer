@@ -417,6 +417,78 @@ func TestRunImportReplaceAndCopyMutuallyExclusive(t *testing.T) {
 	}
 }
 
+func TestRunImportSelectSession(t *testing.T) {
+	tmp := t.TempDir()
+	srcHome := filepath.Join(tmp, "home")
+	id1 := "aaaa1111-2222-3333-4444-555566667777"
+	id2 := "bbbb1111-2222-3333-4444-555566667777"
+	writeSessionCWD(t, srcHome, id1, "/proj/a")
+	writeSessionCWD(t, srcHome, id2, "/proj/b")
+	bundle := filepath.Join(tmp, "p.codexbundle")
+	var out, errOut bytes.Buffer
+	if code := Run([]string{"export", "--all", "--codex-home", srcHome, "-o", bundle}, &out, &errOut); code != 0 {
+		t.Fatalf("export exit = %d, stderr=%s", code, errOut.String())
+	}
+
+	// Import only the first session (by a unique prefix).
+	dstHome := filepath.Join(tmp, "home2")
+	out.Reset()
+	errOut.Reset()
+	if code := Run([]string{"import", bundle, "--session", "aaaa1111", "--codex-home", dstHome}, &out, &errOut); code != 0 {
+		t.Fatalf("import exit = %d, stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "New sessions: 1") {
+		t.Errorf("expected 1 new session, output:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "Skipped (not selected by --session): 1") {
+		t.Errorf("expected 1 deselected, output:\n%s", out.String())
+	}
+	// Only id1's file should exist in the destination.
+	gotID1 := filepath.Join(dstHome, "sessions", "2026", "06", "13", "rollout-2026-06-13T18-22-01-"+id1+".jsonl")
+	gotID2 := filepath.Join(dstHome, "sessions", "2026", "06", "13", "rollout-2026-06-13T18-22-01-"+id2+".jsonl")
+	if _, err := os.Stat(gotID1); err != nil {
+		t.Errorf("selected session was not imported: %v", err)
+	}
+	if _, err := os.Stat(gotID2); !os.IsNotExist(err) {
+		t.Errorf("deselected session should not have been imported")
+	}
+}
+
+func TestRunImportSelectSessionNoMatchErrors(t *testing.T) {
+	tmp := t.TempDir()
+	srcHome := filepath.Join(tmp, "home")
+	writeSessionCWD(t, srcHome, "aaaa1111-2222-3333-4444-555566667777", "/proj/a")
+	bundle := filepath.Join(tmp, "p.codexbundle")
+	var out, errOut bytes.Buffer
+	if code := Run([]string{"export", "--all", "--codex-home", srcHome, "-o", bundle}, &out, &errOut); code != 0 {
+		t.Fatalf("export exit = %d, stderr=%s", code, errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	code := Run([]string{"import", bundle, "--session", "nope", "--codex-home", filepath.Join(tmp, "home2")}, &out, &errOut)
+	if code != 1 {
+		t.Fatalf("expected exit 1 for unmatched --session, got %d", code)
+	}
+	if !strings.Contains(errOut.String(), "no session in the bundle matches") {
+		t.Errorf("missing no-match error: %s", errOut.String())
+	}
+}
+
+func TestRunExportRejectsMultipleSessions(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	writeSessionCWD(t, home, "aaaa1111-2222-3333-4444-555566667777", "/proj/a")
+	var out, errOut bytes.Buffer
+	code := Run([]string{"export", "--session", "a", "--session", "b", "--codex-home", home,
+		"-o", filepath.Join(tmp, "b.codexbundle")}, &out, &errOut)
+	if code != 2 {
+		t.Fatalf("expected exit 2, got %d; stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "only one --session") {
+		t.Errorf("missing multi-session error: %s", errOut.String())
+	}
+}
+
 func TestRunInspectShowsMissingCWD(t *testing.T) {
 	tmp := t.TempDir()
 	srcHome := filepath.Join(tmp, "home")

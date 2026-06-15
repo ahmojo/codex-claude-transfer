@@ -8,7 +8,10 @@ import (
 	"os"
 
 	"github.com/ahmojo/Codex_Sync/internal/codexhome"
+	"github.com/ahmojo/Codex_Sync/internal/crypt"
+	"github.com/ahmojo/Codex_Sync/internal/git"
 	"github.com/ahmojo/Codex_Sync/internal/sessions"
+	"github.com/ahmojo/Codex_Sync/internal/zstdcli"
 )
 
 // Status is the result level of a single check.
@@ -70,8 +73,33 @@ func Run(home codexhome.Home) Report {
 		r.warn(fmt.Sprintf("%d session(s) have cwd paths that do not exist on this device", missing))
 	}
 
+	r.checkOptionalTools()
+
 	r.ok("SQLite will not be modified")
 	return r
+}
+
+// checkOptionalTools reports which optional external tools are installed. None of
+// them is required for the core commands; each only enables a specific opt-in
+// feature, so a missing tool is reported as info (not a warning).
+func (r *Report) checkOptionalTools() {
+	type tool struct {
+		name      string
+		available bool
+		enables   string
+	}
+	tools := []tool{
+		{"git", git.Available(), "export --with-git, import --clone"},
+		{"age", crypt.Available(), "bundle encryption (--encrypt-to/--passphrase) and decrypting .age bundles"},
+		{"zstd", zstdcli.Available(), "reading metadata of compressed .jsonl.zst sessions"},
+	}
+	for _, t := range tools {
+		if t.available {
+			r.ok(fmt.Sprintf("Optional tool '%s' found (enables %s)", t.name, t.enables))
+		} else {
+			r.info(fmt.Sprintf("Optional tool '%s' not found — %s unavailable until installed", t.name, t.enables))
+		}
+	}
 }
 
 func countMissingCwd(list []sessions.Session) int {

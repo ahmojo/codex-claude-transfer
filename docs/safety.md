@@ -231,12 +231,14 @@ When a mapping matches a plain `.jsonl` session:
 - tool output
 - terminal output
 - file paths mentioned in normal chat content
-- compressed `.jsonl.zst` sessions
 
-If a `.jsonl.zst` session matches a mapping, it is copied byte-for-byte and
-reported as not remapped. `codex-sync` may **read** (decompress) a compressed
-session to recover its metadata (see §9), but it never **recompresses or
-rewrites** one, so `--map-cwd` cannot apply to compressed sessions.
+When a mapping matches a compressed `.jsonl.zst` session and the external `zstd`
+tool is installed, codex-sync decompresses it, rewrites the `cwd` exactly as
+above (only the `session_meta` line, validated), and recompresses it —
+additionally verifying that the recompressed frame decompresses back to the
+rewritten content before anything is written. Without `zstd`, a compressed
+session that matches a mapping is copied byte-for-byte and reported as not
+remapped.
 
 ---
 
@@ -261,9 +263,9 @@ dependency-free spirit as the git and `age` integrations. It is:
 
 With recovered metadata, a compressed session whose cwd matches `--project` is
 now included in the export (previously it was always skipped because its cwd was
-unknown), and `list`/`inspect` show its details and project folder. Rewriting a
-compressed session's cwd with `--map-cwd` is still **not** supported, because
-that would require recompressing it (see §8).
+unknown), and `list`/`inspect` show its details and project folder. When `zstd`
+is available, `--map-cwd` can also rewrite a compressed session's cwd on import
+by decompressing, rewriting, and recompressing it (round-trip verified); see §8.
 
 ---
 
@@ -344,10 +346,11 @@ These are intentional non-goals. They keep the tool small, predictable, and safe
   `--replace-with-backup` (overwrite, keeping a recoverable backup of the local
   file first) and `--import-as-copy` (import the bundle's version as a brand-new
   session, leaving the local file untouched); see §2. Even then nothing is merged.
-- **Does not recompress or rewrite `.jsonl.zst` files.** They are copied
-  byte-for-byte; their contents may be decompressed read-only to recover metadata
-  when the external `zstd` tool is available (see §9), but the files are never
-  modified.
+- **Does not rewrite `.jsonl.zst` files except under opt-in `--map-cwd`.** They
+  are copied byte-for-byte by default; their contents may be decompressed
+  read-only to recover metadata when `zstd` is available (see §9). The single
+  exception is `--map-cwd`, which (with `zstd`) decompresses, rewrites only the
+  `cwd` field, and recompresses — verifying the round-trip first.
 - **Does not upload anything.** It never sends your sessions, code, or any other
   data off your machine — no cloud, no telemetry, no `git push`, no repo
   creation. The one outbound network action is `import --clone`, which you opt

@@ -51,6 +51,37 @@ func TestDecompressHeadRoundTrip(t *testing.T) {
 	}
 }
 
+func TestCompressDecompressRoundTrip(t *testing.T) {
+	if !Available() {
+		t.Skip("zstd not installed; skipping compress round-trip")
+	}
+	orig := []byte(`{"type":"session_meta","payload":{"id":"x","cwd":"/a/b"}}` + "\n" +
+		`{"type":"event_msg","payload":{"type":"user_message","message":"hello"}}` + "\n")
+	comp, err := Compress(orig)
+	if err != nil {
+		t.Fatalf("compress: %v", err)
+	}
+	if len(comp) == 0 {
+		t.Fatalf("compressed output is empty")
+	}
+	back, err := Decompress(comp)
+	if err != nil {
+		t.Fatalf("decompress: %v", err)
+	}
+	if string(back) != string(orig) {
+		t.Fatalf("round-trip mismatch:\n got %q\nwant %q", back, orig)
+	}
+}
+
+func TestDecompressRejectsGarbage(t *testing.T) {
+	if !Available() {
+		t.Skip("zstd not installed")
+	}
+	if _, err := Decompress([]byte("not a zstd frame at all")); err == nil {
+		t.Fatalf("expected error decompressing non-zstd bytes")
+	}
+}
+
 func TestDecompressHeadRejectsGarbage(t *testing.T) {
 	if !Available() {
 		t.Skip("zstd not installed; skipping garbage check")

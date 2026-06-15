@@ -66,3 +66,32 @@ func DecompressHead(path string, maxBytes int64) ([]byte, error) {
 	}
 	return data, nil
 }
+
+// Decompress fully decompresses zstd-compressed bytes (read from stdin) and
+// returns the complete plaintext. Unlike DecompressHead it does not truncate, so
+// it is suitable for rewriting a whole compressed session. A truncated or
+// corrupt frame is surfaced as an error.
+func Decompress(compressed []byte) ([]byte, error) {
+	return runPipe([]string{"-dc"}, compressed)
+}
+
+// Compress compresses plaintext bytes (read from stdin) into a standard zstd
+// frame and returns the compressed bytes. Used to re-pack a compressed session
+// after its metadata was rewritten on import.
+func Compress(plain []byte) ([]byte, error) {
+	return runPipe([]string{"-q", "-c"}, plain)
+}
+
+// runPipe runs `zstd <args>` with input on stdin and returns its stdout. Both
+// input and output are held in memory, which is fine for session-sized files.
+func runPipe(args []string, input []byte) ([]byte, error) {
+	cmd := exec.Command(binary, args...)
+	cmd.Stdin = bytes.NewReader(input)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("zstd %v: %v: %s", args, err, strings.TrimSpace(stderr.String()))
+	}
+	return stdout.Bytes(), nil
+}

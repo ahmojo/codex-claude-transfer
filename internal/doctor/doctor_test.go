@@ -93,6 +93,25 @@ func TestDoctorWarnsOnMissingHome(t *testing.T) {
 	}
 }
 
+func TestDoctorReportsOptionalTools(t *testing.T) {
+	home := fakeHome(t)
+	report := Run(home)
+	// Each optional tool must be reported exactly once, as either "found" (ok) or
+	// "not found" (info) depending on the environment — never silently omitted.
+	for _, name := range []string{"git", "age", "zstd"} {
+		want := "Optional tool '" + name + "'"
+		var seen int
+		for _, c := range report.Checks {
+			if strings.Contains(c.Message, want) {
+				seen++
+			}
+		}
+		if seen != 1 {
+			t.Errorf("expected exactly one report line for %q, got %d", name, seen)
+		}
+	}
+}
+
 func TestDoctorCompressedDetected(t *testing.T) {
 	home := fakeHome(t)
 	day := filepath.Join(home.SessionsDir, "2026", "06", "13")

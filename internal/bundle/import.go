@@ -14,6 +14,7 @@ import (
 
 	"github.com/ahmojo/Codex_Sync/internal/codexhome"
 	"github.com/ahmojo/Codex_Sync/internal/safety"
+	"github.com/ahmojo/Codex_Sync/internal/zstdcli"
 )
 
 // Action describes what import decided to do with one bundle entry.
@@ -27,6 +28,7 @@ const (
 	ActionImportCopy     Action = "import-copy"      // conflict, imported as a brand-new session (fresh id + filename)
 	ActionSkipArchived   Action = "skip-archived"    // archived_sessions entry; not imported in v0.1
 	ActionSkipNonSession Action = "skip-non-session" // unexpected non-session file
+	ActionSkipDeselected Action = "skip-deselected"  // not among the --session ids requested for import
 )
 
 // ImportItem is the plan/outcome for a single bundle entry.
@@ -67,6 +69,11 @@ type ImportOptions struct {
 	// to itself and then overwritten with the bundle's version. Without it,
 	// conflicts are reported and skipped (the default, never-overwrite behavior).
 	ReplaceWithBackup bool
+	// SessionIDs, when non-empty, restricts the import to the bundle sessions
+	// whose thread id equals (or uniquely begins with) one of these values; every
+	// other session in the bundle is skipped (ActionSkipDeselected). An id that
+	// matches no session in the bundle is an error (nothing is written).
+	SessionIDs []string
 	// ImportAsCopy turns conflicts into a brand-new session: the bundle's
 	// version is assigned a fresh session id and written under a new rollout
 	// filename, so it coexists with the diverged local session rather than being
@@ -84,7 +91,9 @@ type ImportResult struct {
 	SkippedIdentical int
 	Conflicts        int
 	SkippedOther     int
-	CWDMismatchCount int
+	// SkippedDeselected counts bundle sessions excluded by a --session filter.
+	SkippedDeselected int
+	CWDMismatchCount  int
 	// Replaced counts conflicting sessions that were overwritten after the local
 	// file was backed up (--replace-with-backup).
 	Replaced int
@@ -141,6 +150,13 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 		cwdByBundlePath[ms.BundlePath] = ms.OriginalCWD
 	}
 
+	// Resolve a --session filter (if any) to the exact set of bundle paths it
+	// selects, erroring before any write if a requested id matches nothing.
+	selectedPaths, err := resolveSelectedPaths(manifest, opts.SessionIDs)
+	if err != nil {
+		return result, err
+	}
+
 	for _, f := range zr.File {
 		if f.Name == ManifestName || f.Name == ChecksumsName {
 			continue
@@ -157,6 +173,14 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 			}
 			result.Items = append(result.Items, ImportItem{BundlePath: rel, Action: action})
 			result.SkippedOther++
+			continue
+		}
+
+		// Apply the --session filter: a session not requested is skipped here,
+		// before any conflict/checksum/mapping work.
+		if selectedPaths != nil && !selectedPaths[rel] {
+			result.Items = append(result.Items, ImportItem{BundlePath: rel, Action: ActionSkipDeselected})
+			result.SkippedDeselected++
 			continue
 		}
 
@@ -182,9 +206,23 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 		effectiveSum := checksums[rel]
 		if m := matchMapping(item.OriginalCWD, opts.MapCWD); m != nil {
 			if strings.HasSuffix(rel, compressedSessionSuffix) {
-				result.MappedCompressedSkipped++
-				result.Warnings = append(result.Warnings,
-					fmt.Sprintf("%s: compressed session cannot be cwd-mapped in v0.1; copied byte-for-byte", rel))
+				mapped, changed, available, err := remapCompressed(&zr.Reader, rel, m)
+				if err != nil {
+					return result, err
+				}
+				switch {
+				case mapped != nil:
+					item.Mapped = true
+					item.content = mapped
+					effectiveSum = sha256Hex(mapped)
+				case !available:
+					result.MappedCompressedSkipped++
+					result.Warnings = append(result.Warnings,
+						fmt.Sprintf("%s: compressed session cannot be cwd-mapped without the 'zstd' tool; copied byte-for-byte", rel))
+				case !changed:
+					result.Warnings = append(result.Warnings,
+						fmt.Sprintf("%s: recorded cwd did not match the mapping; not rewritten", rel))
+				}
 			} else {
 				orig, err := readEntryBytes(&zr.Reader, rel)
 				if err != nil {
@@ -382,8 +420,58 @@ func planImportCopy(zr *zip.Reader, item *ImportItem, rel, root string, result *
 	return "", fmt.Errorf("could not find a free destination to import a copy of %s", rel)
 }
 
-// compressedSessionSuffix is the extension of compressed rollout files, which
-// are copied byte-for-byte and never parsed or rewritten in v0.1.
+// remapCompressed applies a cwd mapping to a compressed (.jsonl.zst) bundle
+// entry by decompressing it, rewriting the session_meta cwd, and recompressing,
+// when the external `zstd` tool is available. It returns:
+//   - mapped != nil: the recompressed bytes to write (cwd was rewritten);
+//   - available=false: zstd is not installed, so nothing was done (caller copies
+//     the entry byte-for-byte and reports it as not remapped);
+//   - changed=false (available=true): the recorded cwd did not actually match.
+//
+// The rewrite uses the same narrow, validated path as plain .jsonl mapping, and
+// additionally verifies the recompressed frame round-trips back to the exact
+// rewritten plaintext before it is accepted. Any decompress/compress/validation
+// failure is returned as an error and aborts the import before any write.
+func remapCompressed(zr *zip.Reader, rel string, m *CWDMapping) (mapped []byte, changed bool, available bool, err error) {
+	if !zstdcli.Available() {
+		return nil, false, false, nil
+	}
+	raw, err := readEntryBytes(zr, rel)
+	if err != nil {
+		return nil, false, true, err
+	}
+	plain, err := zstdcli.Decompress(raw)
+	if err != nil {
+		return nil, false, true, fmt.Errorf("decompress %s: %w", rel, err)
+	}
+	rewritten, didChange, err := rewriteSessionMetaCWD(plain, m.Old, m.New)
+	if err != nil {
+		return nil, false, true, fmt.Errorf("map cwd for %s: %w", rel, err)
+	}
+	if !didChange {
+		return nil, false, true, nil
+	}
+	if err := validateMappedJSONL(plain, rewritten, m.New); err != nil {
+		return nil, false, true, fmt.Errorf("mapped %s failed validation: %w", rel, err)
+	}
+	recompressed, err := zstdcli.Compress(rewritten)
+	if err != nil {
+		return nil, false, true, fmt.Errorf("recompress %s: %w", rel, err)
+	}
+	// Round-trip integrity: the recompressed frame must decompress back to the
+	// exact rewritten plaintext, or we refuse to write it.
+	check, err := zstdcli.Decompress(recompressed)
+	if err != nil {
+		return nil, false, true, fmt.Errorf("verify recompressed %s: %w", rel, err)
+	}
+	if !bytes.Equal(check, rewritten) {
+		return nil, false, true, fmt.Errorf("recompressed %s does not round-trip to the rewritten content", rel)
+	}
+	return recompressed, true, true, nil
+}
+
+// compressedSessionSuffix is the extension of compressed rollout files. They are
+// copied byte-for-byte unless an opted-in --map-cwd rewrite recompresses one.
 const compressedSessionSuffix = ".jsonl.zst"
 
 func readEntryBytes(zr *zip.Reader, name string) ([]byte, error) {
@@ -480,6 +568,45 @@ func readMeta(zr *zip.Reader) (Manifest, Checksums, error) {
 		return manifest, checksums, fmt.Errorf("bundle is missing %s", ChecksumsName)
 	}
 	return manifest, checksums, nil
+}
+
+// resolveSelectedPaths maps a list of requested --session ids to the set of
+// bundle paths they select. For each id, an exact thread-id match wins; failing
+// that, any session whose thread id begins with the id is selected. An id that
+// matches no session in the bundle is an error so a typo never silently imports
+// nothing. It returns nil when no filter was requested (import everything).
+func resolveSelectedPaths(manifest Manifest, ids []string) (map[string]bool, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	selected := map[string]bool{}
+	for _, id := range ids {
+		if id == "" {
+			return nil, fmt.Errorf("empty --session id")
+		}
+		var exact, prefix []string
+		for _, ms := range manifest.Sessions {
+			if ms.ThreadID == "" {
+				continue
+			}
+			if ms.ThreadID == id {
+				exact = append(exact, ms.BundlePath)
+			} else if strings.HasPrefix(ms.ThreadID, id) {
+				prefix = append(prefix, ms.BundlePath)
+			}
+		}
+		matches := exact
+		if len(matches) == 0 {
+			matches = prefix
+		}
+		if len(matches) == 0 {
+			return nil, fmt.Errorf("no session in the bundle matches --session %q", id)
+		}
+		for _, p := range matches {
+			selected[p] = true
+		}
+	}
+	return selected, nil
 }
 
 func isArchivedEntry(rel string) bool {

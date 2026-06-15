@@ -63,7 +63,7 @@ type commonFlags struct {
 	dryRun          bool
 	all             bool
 	since           string
-	session         string
+	sessions        []string
 	withGit         bool
 	cloneDir        string
 	mapCWD          []string
@@ -73,6 +73,7 @@ type commonFlags struct {
 	identity        string
 	replaceBackup   bool
 	importAsCopy    bool
+	jsonOut         bool
 	positional      []string
 }
 
@@ -130,9 +131,9 @@ func parseFlags(args []string) (commonFlags, error) {
 			if err != nil {
 				return f, err
 			}
-			f.session = val
+			f.sessions = append(f.sessions, val)
 		case hasPrefix(arg, "--session="):
-			f.session = arg[len("--session="):]
+			f.sessions = append(f.sessions, arg[len("--session="):])
 		case arg == "--with-git":
 			f.withGit = true
 		case arg == "--clone":
@@ -175,6 +176,8 @@ func parseFlags(args []string) (commonFlags, error) {
 			f.importAsCopy = true
 		case arg == "--include-archived":
 			f.includeArchived = true
+		case arg == "--json":
+			f.jsonOut = true
 		case arg == "--dry-run":
 			f.dryRun = true
 		case hasPrefix(arg, "-"):
@@ -237,7 +240,11 @@ func runList(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "error: scan failed: %v\n", err)
 		return 1
 	}
-	printList(stdout, scan)
+	if f.jsonOut {
+		printListJSON(stdout, scan)
+	} else {
+		printList(stdout, scan)
+	}
 	return 0
 }
 
@@ -256,7 +263,17 @@ func runExport(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "error: --all and --project are mutually exclusive")
 		return 2
 	}
-	if f.session != "" && (f.all || f.project != "") {
+	// Export targets exactly one session; import can take several. Reject more
+	// than one --session here so the single-session output name stays meaningful.
+	if len(f.sessions) > 1 {
+		fmt.Fprintln(stderr, "error: export accepts only one --session (use --all to export several)")
+		return 2
+	}
+	session := ""
+	if len(f.sessions) == 1 {
+		session = f.sessions[0]
+	}
+	if session != "" && (f.all || f.project != "") {
 		fmt.Fprintln(stderr, "error: --session cannot be combined with --all or --project")
 		return 2
 	}
@@ -284,7 +301,7 @@ func runExport(args []string, stdout, stderr io.Writer) int {
 	// With --all the project path is empty so every session is considered;
 	// with --session the single matching session is selected regardless of cwd.
 	var absProject string
-	if !f.all && f.session == "" {
+	if !f.all && session == "" {
 		project := f.project
 		if project == "" {
 			project = "."
@@ -299,8 +316,8 @@ func runExport(args []string, stdout, stderr io.Writer) int {
 	output := f.output
 	if output == "" {
 		switch {
-		case f.session != "":
-			output = "session-" + sanitizeForFilename(f.session) + ".codexbundle"
+		case session != "":
+			output = "session-" + sanitizeForFilename(session) + ".codexbundle"
 		case f.all:
 			output = "codex-sessions.codexbundle"
 		default:
@@ -313,7 +330,7 @@ func runExport(args []string, stdout, stderr io.Writer) int {
 		OutputPath:      output,
 		IncludeArchived: f.includeArchived,
 		Since:           since,
-		SessionID:       f.session,
+		SessionID:       session,
 		WithGit:         f.withGit,
 	})
 	if err != nil {
@@ -342,7 +359,11 @@ func runExport(args []string, stdout, stderr io.Writer) int {
 		result.BundlePath = encPath
 	}
 
-	printExport(stdout, absProject, f.session, result)
+	if f.jsonOut {
+		printExportJSON(stdout, result)
+	} else {
+		printExport(stdout, absProject, session, result)
+	}
 	return 0
 }
 
@@ -430,7 +451,11 @@ func runInspect(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
 	}
-	printInspect(stdout, f.positional[0], res)
+	if f.jsonOut {
+		printInspectJSON(stdout, f.positional[0], res)
+	} else {
+		printInspect(stdout, f.positional[0], res)
+	}
 	return 0
 }
 
@@ -479,7 +504,7 @@ func runImport(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if len(f.positional) != 1 {
-		fmt.Fprintln(stderr, "usage: codex-sync import <file.codexbundle> [--dry-run] [--project <path>] [--map-cwd OLD=NEW] [--replace-with-backup] [--import-as-copy] [--clone <dir>]")
+		fmt.Fprintln(stderr, "usage: codex-sync import <file.codexbundle> [--dry-run] [--session <id>] [--project <path>] [--map-cwd OLD=NEW] [--replace-with-backup] [--import-as-copy] [--clone <dir>]")
 		return 2
 	}
 	if f.replaceBackup && f.importAsCopy {
@@ -519,15 +544,25 @@ func runImport(args []string, stdout, stderr io.Writer) int {
 		MapCWD:            mappings,
 		ReplaceWithBackup: f.replaceBackup,
 		ImportAsCopy:      f.importAsCopy,
+		SessionIDs:        f.sessions,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "error: import failed: %v\n", err)
 		return 1
 	}
-	printImport(stdout, f.positional[0], res)
+	if f.jsonOut {
+		printImportJSON(stdout, f.positional[0], res)
+	} else {
+		printImport(stdout, f.positional[0], res)
+	}
 
 	if f.cloneDir != "" {
-		if code := cloneProject(f, res, stdout, stderr); code != 0 {
+		// In --json mode keep stdout pure JSON: clone progress goes to stderr.
+		cloneOut := stdout
+		if f.jsonOut {
+			cloneOut = stderr
+		}
+		if code := cloneProject(f, res, cloneOut, stderr); code != 0 {
 			return code
 		}
 	}
@@ -590,12 +625,16 @@ Flags:
   --codex-home <path>   Use a specific Codex home instead of ~/.codex
                         (also honors $CODEX_HOME)
   --include-archived    list, export: also consider archived sessions
+  --json                list/inspect/export/import: print a machine-readable
+                        JSON summary on stdout instead of human text
   --project <path>      export: filter sessions by recorded cwd
                         import: warn on cwd mismatch (never rewrites paths)
   --all                 export: include every session (no cwd filter);
                         mutually exclusive with --project
   --session <id>        export: export only the session with this thread id
                         (a unique prefix is enough); ignores cwd filtering
+                        import: import only the session(s) with this thread id
+                        (a unique prefix is enough); repeatable to pick several
   --since <when>        export: only sessions updated at/after <when>, where
                         <when> is a date (YYYY-MM-DD) or a duration (7d, 48h, 90m)
   --with-git            export: also record the project's git remote/branch/

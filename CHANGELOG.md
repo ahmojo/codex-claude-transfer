@@ -2,6 +2,29 @@
 
 All notable changes to codex-sync are documented here.
 
+## [0.1.10] - 2026-06-15
+
+### Added
+- `doctor` now reports which optional external tools (`git`, `age`, `zstd`) are
+  installed and what each enables, so it is clear up front which opt-in features
+  are available on this machine. A missing tool is reported as info, not a
+  warning (the core commands need none).
+- `--json` output for `list`, `inspect`, `export`, and `import`: prints a single
+  stable JSON object on stdout instead of human-readable text, for scripting and
+  automation. Human status/warnings still go to stderr, so stdout stays pure JSON
+  (with `--clone`, clone progress also moves to stderr in `--json` mode).
+- Selective import: `import --session <id>` imports only the bundle session(s)
+  whose thread id matches `<id>` (a unique prefix is enough), skipping the rest.
+  Repeatable to pick several. An id that matches nothing in the bundle is an
+  error (nothing is written). Reported as "Skipped (not selected by --session)".
+- Compressed `--map-cwd`: when the external `zstd` tool is installed, `--map-cwd`
+  now also rewrites a matching compressed `.jsonl.zst` session by decompressing
+  it, rewriting only the `cwd` field (the same narrow, validated change as for
+  plain files), and recompressing — additionally verifying the recompressed frame
+  decompresses back to the rewritten content before writing. Without `zstd`, a
+  matching compressed session is still copied byte-for-byte and reported as not
+  remapped.
+
 ## [0.1.9] - 2026-06-14
 
 ### Added
