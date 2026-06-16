@@ -6,7 +6,7 @@ The command is **`cct`**.
 ![CI](https://github.com/ahmojo/codex-claude-transfer/actions/workflows/ci.yml/badge.svg)
 ![Go](https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go)
 ![License](https://img.shields.io/badge/license-MIT-blue)
-![Status](https://img.shields.io/badge/status-v0.1.13-orange)
+![Status](https://img.shields.io/badge/status-v0.2.0-orange)
 
 > ⚠️ **Unofficial.** Not affiliated with or endorsed by OpenAI or Anthropic.
 > These tools' internals can change at any time and break this tool. Use at your
@@ -241,7 +241,7 @@ project.codexbundle
 └── sessions/YYYY/MM/DD/rollout-…-<uuid>.jsonl[.zst]
 ```
 
-Format version `cct-bundle-v1`. Compressed `.jsonl.zst` rollouts are copied
+Format version `codex-sync-bundle-v1`. Compressed `.jsonl.zst` rollouts are copied
 in **byte-for-byte** and never recompressed or modified; their metadata may be
 read (decompressed) on export when `zstd` is installed.
 

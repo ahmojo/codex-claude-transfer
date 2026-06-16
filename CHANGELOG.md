@@ -2,7 +2,7 @@
 
 All notable changes to codex-claude-transfer are documented here.
 
-## [Unreleased]
+## [0.2.0] - 2026-06-16
 
 ### Changed
 - **Renamed the project from `codex-sync` to `codex-claude-transfer`**, with the
