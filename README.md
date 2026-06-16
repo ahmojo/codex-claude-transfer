@@ -73,16 +73,10 @@ encrypt/decrypt locally — they never change the "nothing is uploaded" guarante
 
 ## Quickstart
 
-Prefer a graphical app? **`codex-sync app`** opens a small desktop GUI in your
-browser (a loopback-only local server — nothing is uploaded) with Doctor,
-Sessions, Export, Inspect, and Import views.
-
-Prefer the terminal but not memorizing flags? **`codex-sync ui`** opens a guided
-menu that asks only the relevant questions, prints the exact command it builds,
-and runs it — you pick folders and sessions from a list instead of typing paths,
-and imports are always previewed first.
-
-Or drive the commands directly:
+codex-sync is a CLI first — the commands below are the whole tool. Two **optional**
+front-ends are included if you prefer not to type flags: `codex-sync app` (a
+graphical app in your browser) and `codex-sync ui` (a guided terminal menu).
+Neither is required; everything they do is just the flags.
 
 ```bash
 codex-sync doctor                           # check it can see your sessions
@@ -95,6 +89,34 @@ codex-sync import  ./project.codexbundle             # import for real
 ```
 
 After importing, **restart Codex (or run it again)** so it re-scans the files.
+
+## Desktop app (optional)
+
+If you'd rather click than type, `codex-sync app` gives you a small graphical
+interface with **Doctor, Sessions, Export, Inspect, and Import** views — the same
+operations as the CLI, with project folders and sessions shown in lists and every
+import previewed before anything is written.
+
+```bash
+codex-sync app                  # opens the app in your default browser
+codex-sync app --no-browser     # just print the URL (open it yourself)
+codex-sync app --port 8765      # pin a port (default: a free one is chosen)
+```
+
+**How it works.** It is *not* a separate program or an Electron-style native
+window — it is the same `codex-sync` binary serving a tiny web page to your own
+browser. On launch it starts a small web server bound to **`127.0.0.1` only**
+(your machine, not the network), prints a URL, and opens it. The page talks to the
+local server, which runs the exact same export/import code as the CLI. It is
+**optional and self-contained**: no extra install, no Node, no toolchain — just
+the one binary.
+
+**Why it's safe.** The server is reachable only from your own machine; every
+action requires a random token generated fresh each launch (handed to your browser
+through the launch URL, never embedded in the page), and requests with a foreign
+`Host` header are refused. It **never uploads anything** — the browser is just the
+UI over your local files. Stop it with Ctrl-C when you're done. See
+[`docs/safety.md`](docs/safety.md) for the details.
 
 ## Common workflows
 

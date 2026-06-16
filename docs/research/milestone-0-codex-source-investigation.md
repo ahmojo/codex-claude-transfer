@@ -161,6 +161,7 @@ Options A (raw JSONL copy) and C (copy + rely on scan-repair) **converge**: copy
   plain `.jsonl` files.
 - **No global path rewriting** — never replace path strings throughout prompts, messages, tool
   output, or other session content.
-- **No GUI yet** — CLI first; desktop app (e.g. Wails) reusing the same Go core comes later.
+- **CLI first** — the desktop GUI shipped later as `codex-sync app` (a loopback-only local web UI
+  over the same Go core), rather than a native Wails app, to keep the CGO-free single-binary model.
 - **Safe export/import only** — never overwrite existing session files silently; conflicts are
   reported and skipped by default.
