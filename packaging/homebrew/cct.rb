@@ -8,8 +8,8 @@
 #
 # Update `version` and the four sha256 values for each release (the sha256 of the
 # corresponding release tarball, e.g. `shasum -a 256 cct_vX_darwin_arm64.tar.gz`).
-class CodexSync < Formula
-  desc "Local Codex session portability across machines (unofficial)"
+class Cct < Formula
+  desc "Transfer local Codex & Claude Code sessions between machines (unofficial)"
   homepage "https://github.com/ahmojo/codex-claude-transfer"
   version "0.1.13"
   license "MIT"

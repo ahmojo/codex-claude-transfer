@@ -16,21 +16,23 @@ type completionCommand struct {
 // shell completion scripts are generated from, so they stay in sync with the CLI.
 var completionCommands = []completionCommand{
 	{"doctor", "Read-only health check"},
-	{"list", "List discovered Codex sessions"},
+	{"list", "List discovered sessions (Codex or Claude Code)"},
 	{"export", "Export sessions into a .codexbundle"},
 	{"inspect", "Show a bundle's contents (read-only)"},
-	{"import", "Import a bundle into your Codex home"},
+	{"import", "Import a bundle into the agent's home"},
 	{"ui", "Interactive guided menu"},
+	{"app", "Launch the local desktop GUI in your browser"},
 	{"version", "Print the cct version"},
 	{"completion", "Print a shell completion script"},
 	{"help", "Show help"},
 }
 
 var completionFlags = []string{
-	"--codex-home", "--project", "--all", "--session", "--since", "--with-git",
-	"--output", "-o", "--include-archived", "--json", "--dry-run", "--map-cwd",
-	"--replace-with-backup", "--import-as-copy", "--clone", "--encrypt-to",
-	"--recipients-file", "--passphrase", "--identity", "--version", "--help",
+	"--tool", "--codex-home", "--claude-home", "--project", "--all", "--session",
+	"--since", "--with-git", "--git-push", "--output", "-o", "--include-archived",
+	"--json", "--dry-run", "--to", "--map-cwd", "--replace-with-backup",
+	"--import-as-copy", "--clone", "--encrypt-to", "--recipients-file",
+	"--passphrase", "--identity", "--port", "--no-browser", "--version", "--help",
 }
 
 // runCompletion prints a completion script for the requested shell.
@@ -64,7 +66,7 @@ func commandNames() string {
 func bashCompletion() string {
 	return fmt.Sprintf(`# bash completion for cct
 # Enable with:  source <(cct completion bash)
-_codex_sync() {
+_cct() {
     local cur commands flags
     cur="${COMP_WORDS[COMP_CWORD]}"
     commands="%s"
@@ -80,7 +82,7 @@ _codex_sync() {
     COMPREPLY=( $(compgen -f -- "$cur") )
     return 0
 }
-complete -o default -F _codex_sync cct
+complete -o default -F _cct cct
 `, commandNames(), strings.Join(completionFlags, " "))
 }
 
@@ -96,7 +98,7 @@ func zshCompletion() string {
 	return fmt.Sprintf(`#compdef cct
 # zsh completion for cct
 # Enable with:  source <(cct completion zsh)
-_codex_sync() {
+_cct() {
   local -a cmds
   cmds=(
 %s  )
@@ -107,7 +109,7 @@ _codex_sync() {
   _arguments -s \
 %s    '*:file:_files'
 }
-compdef _codex_sync cct
+compdef _cct cct
 `, cmds.String(), flags.String())
 }
 

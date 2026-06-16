@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ahmojo/codex-claude-transfer/internal/agent"
 	"github.com/ahmojo/codex-claude-transfer/internal/codexhome"
 	"github.com/ahmojo/codex-claude-transfer/internal/safety"
 	"github.com/ahmojo/codex-claude-transfer/internal/zstdcli"
@@ -111,15 +112,19 @@ type ImportResult struct {
 }
 
 // Import validates a bundle end-to-end and, unless DryRun is set, copies its
-// rollout files into the Codex home, preserving the sessions/YYYY/MM/DD layout.
+// session files into the agent home (home.Root), preserving each agent's layout:
+// Codex rollouts under sessions/YYYY/MM/DD/ and Claude Code transcripts under
+// projects/<encoded-cwd>/. The bundle's recorded tool selects which.
 //
 // Safety guarantees:
 //   - The whole bundle's checksums are verified BEFORE anything is written.
 //   - Unsafe entry paths (absolute, drive-letter, zip-slip) abort the import.
-//   - Only sessions/YYYY/MM/DD rollout files are imported.
+//   - Only the agent's recognized session files are imported (anything else is
+//     skipped and reported).
 //   - Existing files are never overwritten: identical files are skipped,
 //     differing files are reported as conflicts and skipped.
-//   - Writes are atomic (temp file + rename). SQLite is never touched.
+//   - Writes are atomic (temp file + rename). The agent's index (Codex SQLite,
+//     Claude ~/.claude.json) is never touched.
 //   - .jsonl.zst files are copied byte-for-byte; never parsed or decompressed.
 func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 	result := ImportResult{DryRun: opts.DryRun, ProjectProvided: opts.ProjectPath != ""}
@@ -138,6 +143,7 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 		return result, err
 	}
 	result.Manifest = manifest
+	kind := agent.Normalize(agent.Kind(manifest.Tool))
 
 	// 1) Verify integrity of the entire bundle before writing anything.
 	if err := verifyBundle(&zr.Reader, checksums); err != nil {
@@ -163,9 +169,9 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 		}
 		// Paths were already validated as safe in verifyBundle.
 		rel := f.Name
-		if !safety.IsSessionEntry(rel) {
+		if !isImportableEntry(kind, rel) {
 			action := ActionSkipNonSession
-			if isArchivedEntry(rel) {
+			if kind != agent.Claude && isArchivedEntry(rel) {
 				action = ActionSkipArchived
 				result.Warnings = append(result.Warnings, fmt.Sprintf("%s: archived sessions are not imported in v0.1; skipped", rel))
 			} else {
@@ -184,14 +190,8 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 			continue
 		}
 
-		dest, err := safety.DestPath(home.Root, rel)
-		if err != nil {
-			return result, err
-		}
-
 		item := ImportItem{
 			BundlePath:  rel,
-			DestPath:    dest,
 			OriginalCWD: cwdByBundlePath[rel],
 		}
 		if opts.ProjectPath != "" && item.OriginalCWD != "" && !pathEqual(item.OriginalCWD, opts.ProjectPath) {
@@ -199,13 +199,37 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 			result.CWDMismatchCount++
 		}
 
-		// The effective checksum is the bundle's checksum unless --map-cwd
-		// rewrites this file, in which case it is the checksum of the rewritten
-		// bytes. Never use the bundle checksum as the target checksum after a
-		// mutation.
+		// destRel is where this entry will be written. It equals the bundle path
+		// unless a Claude cwd remap moves the transcript into a different encoded
+		// project folder. The effective checksum is the bundle's checksum unless
+		// --map-cwd rewrites this file, in which case it is the checksum of the
+		// rewritten bytes (never the stale bundle checksum after a mutation).
+		destRel := rel
 		effectiveSum := checksums[rel]
 		if m := matchMapping(item.OriginalCWD, opts.MapCWD); m != nil {
-			if strings.HasSuffix(rel, compressedSessionSuffix) {
+			switch {
+			case kind == agent.Claude:
+				orig, err := readEntryBytes(&zr.Reader, rel)
+				if err != nil {
+					return result, err
+				}
+				mapped, changed, err := rewriteClaudeCWD(orig, m.Old, m.New)
+				if err != nil {
+					return result, fmt.Errorf("map cwd for %s: %w", rel, err)
+				}
+				if changed {
+					if err := validateClaudeMappedCWD(orig, mapped, m.Old, m.New); err != nil {
+						return result, fmt.Errorf("mapped %s failed validation: %w", rel, err)
+					}
+					item.Mapped = true
+					item.content = mapped
+					effectiveSum = sha256Hex(mapped)
+					destRel = claudeDestRelForCWD(rel, m.New)
+				} else {
+					result.Warnings = append(result.Warnings,
+						fmt.Sprintf("%s: recorded cwd did not match the mapping; not rewritten", rel))
+				}
+			case strings.HasSuffix(rel, compressedSessionSuffix):
 				mapped, changed, available, err := remapCompressed(&zr.Reader, rel, m)
 				if err != nil {
 					return result, err
@@ -223,7 +247,7 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 					result.Warnings = append(result.Warnings,
 						fmt.Sprintf("%s: recorded cwd did not match the mapping; not rewritten", rel))
 				}
-			} else {
+			default:
 				orig, err := readEntryBytes(&zr.Reader, rel)
 				if err != nil {
 					return result, err
@@ -246,6 +270,12 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 			}
 		}
 
+		dest, err := safety.DestPath(home.Root, destRel)
+		if err != nil {
+			return result, err
+		}
+		item.DestPath = dest
+
 		action, err := decideAction(dest, effectiveSum)
 		if err != nil {
 			return result, err
@@ -258,7 +288,11 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 		if action == ActionConflict && opts.ReplaceWithBackup {
 			action = ActionReplace
 		} else if action == ActionConflict && opts.ImportAsCopy {
-			action, err = planImportCopy(&zr.Reader, &item, rel, home.Root, &result)
+			if kind == agent.Claude {
+				action, err = planImportCopyClaude(&zr.Reader, &item, rel, home.Root, &result)
+			} else {
+				action, err = planImportCopy(&zr.Reader, &item, rel, home.Root, &result)
+			}
 			if err != nil {
 				return result, err
 			}
@@ -292,7 +326,7 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 
 	if !result.ProjectProvided && (result.Imported > 0 || result.ImportedCopies > 0) {
 		result.Warnings = append(result.Warnings,
-			"no --project given: whether imported sessions show in a project's sidebar depends on Codex's cwd filtering; if the project path differs from the source device they may be hidden from that project view")
+			fmt.Sprintf("no --project given: whether imported sessions show in a project's view depends on %s's cwd filtering; if the project path differs from the source device they may be hidden from that project view", kind.Label()))
 	}
 
 	// 3) Perform copies (unless dry-run).
@@ -329,12 +363,12 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 }
 
 // backupFile copies an existing file to a sibling backup path before it is
-// overwritten. The backup name ends in ".codexsync-bak-<unix-nanos>", which does
+// overwritten. The backup name ends in ".cct-bak-<unix-nanos>", which does
 // not match Codex's rollout-*.jsonl pattern, so Codex will not treat the backup
 // as a session. A fresh, non-existing name is chosen to avoid clobbering a prior
 // backup.
 func backupFile(dest string) (string, error) {
-	base := fmt.Sprintf("%s.codexsync-bak-%d", dest, time.Now().UnixNano())
+	base := fmt.Sprintf("%s.cct-bak-%d", dest, time.Now().UnixNano())
 	backup := base
 	for n := 1; ; n++ {
 		if _, err := os.Stat(backup); os.IsNotExist(err) {
@@ -353,6 +387,69 @@ func backupFile(dest string) (string, error) {
 		return "", err
 	}
 	return backup, nil
+}
+
+// isImportableEntry reports whether a bundle entry path is an importable session
+// file for the given agent: a Codex rollout under sessions/YYYY/MM/DD/ or a Claude
+// Code transcript under projects/<encoded-cwd>/<uuid>.jsonl.
+func isImportableEntry(kind agent.Kind, rel string) bool {
+	if kind == agent.Claude {
+		return safety.IsClaudeSessionEntry(rel)
+	}
+	return safety.IsSessionEntry(rel)
+}
+
+// planImportCopyClaude is the Claude analog of planImportCopy: it turns a conflict
+// into an import-as-copy by assigning a fresh session uuid (rewritten on every
+// transcript line) and a new <uuid>.jsonl filename in the same project folder,
+// leaving the diverged local transcript untouched. A hard error aborts the whole
+// import before any write; otherwise it returns ActionImportCopy on success or a
+// skipped ActionConflict when the transcript has no sessionId to reassign.
+func planImportCopyClaude(zr *zip.Reader, item *ImportItem, rel, root string, result *ImportResult) (Action, error) {
+	base := item.content // may already be cwd-mapped bytes
+	if base == nil {
+		b, err := readEntryBytes(zr, rel)
+		if err != nil {
+			return "", err
+		}
+		base = b
+	}
+	for attempt := 0; attempt < 5; attempt++ {
+		newID, err := newClaudeSessionID()
+		if err != nil {
+			return "", err
+		}
+		copied, _, changed, err := rewriteClaudeSessionID(base, newID)
+		if err != nil {
+			return "", fmt.Errorf("assign new session id for %s: %w", rel, err)
+		}
+		if !changed {
+			result.Warnings = append(result.Warnings,
+				fmt.Sprintf("%s: no sessionId to reassign; cannot import as a copy; skipped (conflict)", rel))
+			return ActionConflict, nil
+		}
+		newRel := claudeCopyDestRel(rel, newID)
+		if !safety.IsClaudeSessionEntry(newRel) {
+			return "", fmt.Errorf("internal: copy destination %q is not a valid session path", newRel)
+		}
+		newDest, err := safety.DestPath(root, newRel)
+		if err != nil {
+			return "", err
+		}
+		if _, statErr := os.Stat(newDest); statErr == nil {
+			continue // destination taken; regenerate
+		} else if !os.IsNotExist(statErr) {
+			return "", statErr
+		}
+		item.content = copied
+		item.DestPath = newDest
+		item.Copied = true
+		item.NewThreadID = newID
+		result.Warnings = append(result.Warnings,
+			fmt.Sprintf("%s: target exists with different content; importing as a new session (id %s)", rel, newID))
+		return ActionImportCopy, nil
+	}
+	return "", fmt.Errorf("could not find a free destination to import a copy of %s", rel)
 }
 
 // planImportCopy turns a conflict into an import-as-copy when possible. It

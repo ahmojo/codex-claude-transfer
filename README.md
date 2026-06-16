@@ -6,41 +6,53 @@ The command is **`cct`**.
 ![CI](https://github.com/ahmojo/codex-claude-transfer/actions/workflows/ci.yml/badge.svg)
 ![Go](https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go)
 ![License](https://img.shields.io/badge/license-MIT-blue)
-![Status](https://img.shields.io/badge/status-v0.2.0-orange)
+![Status](https://img.shields.io/badge/status-v0.3.0-orange)
 
 > ⚠️ **Unofficial.** Not affiliated with or endorsed by OpenAI or Anthropic.
 > These tools' internals can change at any time and break this tool. Use at your
 > own risk — see the [Disclaimer](#disclaimer).
 
-> **Status:** **Codex** session portability works today. **Claude Code** support
-> is in progress — the storage format and the file-based resume contract have been
-> verified (see [`docs/research/claude-code-sessions-investigation.md`](docs/research/claude-code-sessions-investigation.md)),
-> and the shared export/import core is being extended to it. The name reflects
-> that direction.
+> **Status:** Works with both **Codex** and **Claude Code**. Pick the agent with
+> `--tool codex` / `--tool claude` (auto-detected when only one is installed), and
+> **move a session from one agent to the other** with `import --to codex|claude`.
+> The Claude Code storage format and its file-based resume contract were verified
+> empirically against a live install (see
+> [`docs/research/claude-code-sessions-investigation.md`](docs/research/claude-code-sessions-investigation.md)).
 
 `cct` is a small, local-only CLI that moves your
-[Codex](https://github.com/openai/codex) sessions between machines by hand (with
-[Claude Code](https://github.com/anthropics/claude-code) support coming). You
-export a project's sessions into one `.codexbundle` file, copy it across however
-you like (USB stick, `scp`, Syncthing, an encrypted drive), and import it on the
-other machine. **No cloud, no account, no server, no daemon** — and the agent's
-index/state is never touched.
+[Codex](https://github.com/openai/codex) and
+[Claude Code](https://github.com/anthropics/claude-code) sessions between machines
+by hand. You export a project's sessions into one `.codexbundle` file, copy it
+across however you like (USB stick, `scp`, Syncthing, an encrypted drive), and
+import it on the other machine. **No cloud, no account, no server, no daemon** —
+and the agent's index/state is never touched.
 
 ```text
 Machine A:  cct export --project .      →  project.codexbundle
                         ⇣  (copy the file across yourself)
 Machine B:  cct import ./project.codexbundle
+
+# Claude Code instead of Codex:
+Machine A:  cct export --tool claude --project .
+Machine B:  cct import ./project.codexbundle      # the bundle knows it's Claude
 ```
 
 ## How it works
 
-Codex stores each session as a durable JSONL **rollout file** under
-`~/.codex/sessions/YYYY/MM/DD/`; its SQLite database is just a rebuildable index.
-`cct` works only with those rollout files: **export** packages them (with a
-manifest and SHA-256 checksums) into a `.codexbundle` ZIP, and **import** copies
-them back into place after verifying every checksum. It never writes SQLite —
-Codex re-indexes the files itself on its next run, so imported sessions show up
-the next time you start it.
+Each agent stores a session as a durable JSONL file, with a rebuildable index
+alongside it that `cct` never writes:
+
+- **Codex** → `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` (its SQLite DB is the
+  index).
+- **Claude Code** → `~/.claude/projects/<encoded-cwd>/<uuid>.jsonl` (its
+  `~/.claude.json` holds only config, not a session index).
+
+`cct` works only with those JSONL files: **export** packages them (with a manifest
+and SHA-256 checksums) into a `.codexbundle` ZIP, and **import** copies them back
+into place after verifying every checksum. It never writes the index — each agent
+re-discovers the files itself on its next run, so imported sessions show up the
+next time you start it. The bundle records which agent it came from, so import
+always writes to the right home.
 
 ## Install
 
@@ -94,9 +106,15 @@ cct export --project .               # → project.codexbundle
 cct inspect ./project.codexbundle    # look inside (read-only)
 cct import  ./project.codexbundle --dry-run   # preview, write nothing
 cct import  ./project.codexbundle             # import for real
+
+# For Claude Code, add --tool claude to doctor/list/export
+# (import auto-detects the agent from the bundle):
+cct list --tool claude
+cct export --tool claude --project .
 ```
 
-After importing, **restart Codex (or run it again)** so it re-scans the files.
+After importing, **run the agent again** (restart Codex, or relaunch Claude Code)
+so it re-scans the files.
 
 ## Desktop app (optional)
 
@@ -170,17 +188,36 @@ bundle is reported as a conflict and skipped. Opt into `--replace-with-backup`
 (overwrite, keeping a backup) or `--import-as-copy` (import the bundle's version
 as a brand-new session, leaving yours untouched).
 
+**Move work between agents (cross-agent handoff).** `import --to <agent>` doesn't
+import the bundle natively — it **translates** each session into the *other*
+agent's format and writes a real, discoverable session into that agent's home:
+
+```bash
+cct export --project .                 # a Codex bundle
+cct import ./project.codexbundle --to claude   # continue it in Claude Code
+
+cct export --tool claude --project .   # a Claude Code bundle
+cct import ./project.codexbundle --to codex     # continue it in Codex
+```
+
+The translated session opens with a short handoff note (project dir, git, "continue
+from here") and replays the prior conversation as text. It's an **honest
+best-effort handoff, not a perfect clone**: the conversation and project context
+cross over, but tool calls and command output are summarized rather than replayed,
+and model/runtime state does not transfer. It's deterministic, so re-running is an
+idempotent skip rather than a duplicate.
+
 ## Command reference
 
 | Command | Description |
 | ------- | ----------- |
 | `cct app` | Launch the desktop GUI: a loopback-only local web app that opens in your browser. Nothing is uploaded. |
 | `cct ui` | Interactive guided menu; builds and runs the commands below (and prints each one). Requires a terminal. |
-| `cct doctor` | Read-only health check: Codex home, session counts, missing-cwd and optional-tool (`git`/`age`/`zstd`) status. |
+| `cct doctor` | Read-only health check: the agent's home, session counts, missing-cwd and optional-tool (`git`/`age`/`zstd`) status. Use `--tool` to pick Codex or Claude Code. |
 | `cct list` | List discovered sessions (preview, thread id, cwd, source, updated time). |
 | `cct export [--project <path> \| --all \| --session <id>]` | Package matching sessions into a `.codexbundle`. |
 | `cct inspect <bundle>` | Show a bundle's manifest and contents, read-only, and flag any recorded project folder that's missing locally. |
-| `cct import <bundle>` | Import rollout files into your Codex home. Verifies checksums; never overwrites by default. |
+| `cct import <bundle>` | Import session files into the matching agent's home (or translate across agents with `--to`). Verifies checksums; never overwrites by default. |
 | `cct version` | Print the version (also `--version`). |
 | `cct completion <bash\|zsh\|fish>` | Print a shell completion script. |
 | `cct help` | Show help. |
@@ -189,7 +226,9 @@ as a brand-new session, leaving yours untouched).
 
 | Flag | Applies to | Meaning |
 | ---- | ---------- | ------- |
+| `--tool <codex\|claude>` | all | Which agent to act on. Default: auto-detect (Claude Code if only it is installed, else Codex). On import the bundle's recorded tool always wins. |
 | `--codex-home <path>` | all | Use a specific Codex home instead of the default (also honors `$CODEX_HOME`). |
+| `--claude-home <path>` | all | Use a specific Claude Code home instead of `~/.claude` (also honors `$CLAUDE_HOME`). |
 | `--project <path>` | export, import | Export: filter sessions by recorded cwd. Import: warn on cwd mismatch. |
 | `--all` | export | Export every session regardless of cwd. Mutually exclusive with `--project`. |
 | `--session <id>` | export, import | Export: exactly one session by thread id (unique prefix); excludes `--all`/`--project`. Import: only the matching session(s); repeatable. |
@@ -200,6 +239,7 @@ as a brand-new session, leaving yours untouched).
 | `--include-archived` | list, export | Also consider archived sessions. |
 | `--json` | doctor, list, inspect, export, import | Print a machine-readable JSON summary on stdout instead of text. |
 | `--dry-run` | import | Validate and report only; write nothing. |
+| `--to <codex\|claude>` | import | Cross-agent handoff: translate the bundle's sessions into the *other* agent's format and write them into that agent's home (best-effort: conversation + context preamble, tool calls summarized). |
 | `--map-cwd OLD=NEW` | import | Rewrite matching sessions' recorded cwd. Plain `.jsonl` always; `.jsonl.zst` when `zstd` is installed. Repeatable. |
 | `--replace-with-backup` | import | On a conflict, back up the local file and overwrite it with the bundle's version. |
 | `--import-as-copy` | import | On a conflict, import the bundle's version as a new session, leaving yours untouched. Excludes `--replace-with-backup`. |
@@ -259,6 +299,17 @@ read (decompressed) on export when `zstd` is installed.
   the `cwd` field in `session_meta`; sessions are copied, not merged.
 - **The desktop GUI runs in your browser**, not a native window — `cct app`
   serves a local, loopback-only web app (no native packaging, no extra toolchain).
+- **Claude Code's format is closed-source and moves fast.** Support was verified
+  against a recent install and parses defensively, but re-check after Claude Code
+  updates. Sub-agent *sidechains* are carried inside the same transcript file (and
+  whole project folders travel together on export); a logical session that spans
+  *separate* sidechain files has not been observed and is not specially handled yet.
+- **Cross-agent handoff (`--to`) is a translation, not a clone.** It carries the
+  conversation and project context and writes a session the target agent can
+  discover, but tool calls/command output are summarized (not replayed), and
+  model/runtime state, exact tool-call history, and provider-specific ids do not
+  transfer. Treat a handed-off session as a primed "continue from here" context,
+  not a byte-for-byte continuation.
 
 ## Roadmap
 
@@ -266,12 +317,15 @@ Shipped since v0.1.0: `--map-cwd`, `export --all`/`--since`/`--session`/`--with-
 `import --clone`, `age` encryption, cwd discovery, `--replace-with-backup`, an
 interactive `ui`, `--import-as-copy`, `zstd`-based compressed-session support,
 `doctor` tool checks, `--json` output, selective `import --session`,
-`version`/`completion` commands, opt-in `export --git-push`, and a desktop GUI
-(`cct app`, a loopback-only local web app over the same Go core).
+`version`/`completion` commands, opt-in `export --git-push`, a desktop GUI
+(`cct app`, a loopback-only local web app over the same Go core),
+**Claude Code support** (`--tool claude`) across every command and both
+front-ends, and **cross-agent handoff** (`import --to codex|claude`) that
+translates a session from one agent into the other.
 
-Planned, explicitly **not** in v0.1.x: optional Claude support. **Never** planned:
-cloud sync, accounts, hosting, background sync, direct SQLite writes, global path
-rewriting, automatic merge, or uploading your sessions anywhere.
+**Never** planned: cloud sync, accounts, hosting, background sync, direct
+index/SQLite writes, global path rewriting, automatic merge, or uploading your
+sessions anywhere.
 
 ## Built with AI assistance
 
@@ -290,8 +344,9 @@ under [MIT](LICENSE).
 
 ## Disclaimer
 
-Unofficial and **not affiliated with or endorsed by OpenAI**. It works against
-Codex's local files based on the open-source code at a point in time, which may
-change and break it. `.codexbundle` files can contain sensitive data (see
+Unofficial and **not affiliated with or endorsed by OpenAI or Anthropic**. It
+works against Codex's and Claude Code's local files based on their behavior at a
+point in time, which may change and break it (Claude Code is closed-source and
+changes often). `.codexbundle` files can contain sensitive data (see
 [`docs/safety.md`](docs/safety.md)). Provided "as is", without warranty.
 **Use at your own risk.**

@@ -51,7 +51,7 @@ func do(t *testing.T, ts *httptest.Server, method, path, token, body string) (*h
 		t.Fatal(err)
 	}
 	if token != "" {
-		req.Header.Set("X-Codex-Sync-Token", token)
+		req.Header.Set("X-Cct-Token", token)
 	}
 	if body != "" {
 		req.Header.Set("Content-Type", "application/json")
@@ -85,7 +85,7 @@ func TestTokenGating(t *testing.T) {
 func TestRejectsNonLoopbackHost(t *testing.T) {
 	_, ts := testServer(t)
 	req, _ := http.NewRequest("GET", ts.URL+"/api/doctor", nil)
-	req.Header.Set("X-Codex-Sync-Token", testToken)
+	req.Header.Set("X-Cct-Token", testToken)
 	req.Host = "evil.example.com"
 	res, err := ts.Client().Do(req)
 	if err != nil {

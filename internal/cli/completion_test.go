@@ -8,8 +8,8 @@ import (
 
 func TestCompletionScripts(t *testing.T) {
 	cases := map[string]string{
-		"bash": "complete -o default -F _codex_sync cct",
-		"zsh":  "compdef _codex_sync cct",
+		"bash": "complete -o default -F _cct cct",
+		"zsh":  "compdef _cct cct",
 		"fish": "complete -c cct",
 	}
 	for shell, marker := range cases {

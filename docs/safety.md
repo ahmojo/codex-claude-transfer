@@ -1,8 +1,15 @@
 # Safety & Privacy
 
 `cct` is designed to be **safe by default** and to never silently destroy
-your local Codex sessions. This document explains the safety model in detail and,
-just as importantly, the **privacy risks of `.codexbundle` files**.
+your local **Codex** or **Claude Code** sessions. This document explains the
+safety model in detail and, just as importantly, the **privacy risks of
+`.codexbundle` files**.
+
+> Both agents are covered. cct reads/writes Codex rollout files
+> (`~/.codex/sessions/…`) and Claude Code transcripts (`~/.claude/projects/…`) and
+> applies the same guarantees to each. Where a section says "Codex", the same
+> applies to Claude Code unless noted. (`.codexbundle` is the historical bundle
+> extension, kept for compatibility; a bundle records which agent it came from.)
 
 Read the privacy section before you share a bundle with anyone.
 
@@ -10,18 +17,19 @@ Read the privacy section before you share a bundle with anyone.
 
 ## 1. `.codexbundle` files may contain sensitive data
 
-A `.codexbundle` is a packaged copy of your real Codex **rollout files**. Those
-files are a full transcript of a session, so a bundle can contain:
+A `.codexbundle` is a packaged copy of your real session files — Codex **rollout
+files** or Claude Code **transcripts**. Those files are a full transcript of a
+session, so a bundle can contain:
 
-- **Your prompts** — everything you typed to Codex.
+- **Your prompts** — everything you typed to the agent.
 - **Model output** — including code, explanations, and suggested commands.
 - **Source code** — snippets and files that were read into or written during the session.
-- **Terminal output** — command results that Codex captured.
+- **Terminal output** — command results the agent captured.
 - **Absolute filesystem paths** — revealing your username, directory layout, and project names.
 - **Git metadata** — branch names, commit SHAs, and remote URLs.
 - **Secrets that were accidentally printed** — API keys, tokens, passwords, or
   `.env` contents that happened to appear in a prompt, a file, or command output
-  during the session. Codex records what it sees; it does not scrub secrets.
+  during the session. The agent records what it sees; it does not scrub secrets.
 - **Uploaded images and attachments** — anything you dropped into a session.
 
 > **Treat a `.codexbundle` like you would treat your shell history plus your
@@ -86,7 +94,7 @@ bundle's version to win, pass `--replace-with-backup`. For each conflicting file
 `cct` then:
 
 1. copies the existing local file to a sibling backup named
-   `…jsonl.codexsync-bak-<timestamp>`. That suffix does **not** match Codex's
+   `…jsonl.cct-bak-<timestamp>`. That suffix does **not** match Codex's
    `rollout-*.jsonl` pattern, so Codex ignores the backup on its next scan;
 2. overwrites the local file with the bundle's version using the same atomic
    write (temp file + rename) as a normal import.
@@ -162,6 +170,27 @@ index from the JSONL files on its next normal scan.
 
 This is why the recommended step after import is simply: **restart the Codex App
 (or run Codex again)** so it scans and reconciles the new files itself.
+
+### Claude Code: the same guarantee, a different index
+
+When you use `--tool claude`, the durable record is Claude Code's per-project
+transcript (`~/.claude/projects/<encoded-cwd>/<uuid>.jsonl`) and the
+rebuildable-index file is `~/.claude.json`. `cct` works **only** with the
+transcripts and **never** opens, writes, or migrates `~/.claude.json`, and it
+never touches the Claude cloud or your account. Claude Code rediscovers a
+dropped-in transcript on its next run (verified empirically — no registry entry
+is needed). The two agent-specific differences in how content can be rewritten:
+
+- **`--map-cwd`** must also move the transcript into the folder for the new path
+  (the project is addressed by the encoded folder name) **and** rewrite the
+  recorded `cwd` on every line, since Claude repeats it per line. The rewrite is
+  validated: the line count is unchanged, every line stays valid JSON, and nothing
+  but `cwd` changes.
+- **`--import-as-copy`** assigns a fresh `sessionId` (rewritten on every line) and
+  a new `<uuid>.jsonl` filename, leaving your diverged local transcript untouched.
+
+Everything else — checksums-before-write, no silent overwrites, path-traversal
+rejection, atomic writes — is identical to the Codex path.
 
 ---
 
@@ -239,6 +268,28 @@ additionally verifying that the recompressed frame decompresses back to the
 rewritten content before anything is written. Without `zstd`, a compressed
 session that matches a mapping is copied byte-for-byte and reported as not
 remapped.
+
+### Cross-agent handoff (`--to`) is a translation, and only writes to the target
+
+`import --to codex|claude` is a different operation from a normal import: it reads
+the bundle (in whatever agent's format it was exported) and **translates** each
+session into the *other* agent's format, writing the result into that agent's
+home. Its safety properties:
+
+- **Honest by construction.** The translated session carries the user/assistant
+  conversation plus project context (cwd, git), with tool calls and command output
+  **summarized to short text** — never replayed as real tool calls (the agents'
+  tools and ids differ). It opens with a plain-language preamble that says it was
+  handed off and is best-effort. No model/runtime state, permissions, or tokens
+  cross over.
+- **Source is read-only; only the target home is written.** The bundle's checksums
+  are verified before anything is read, exactly like a native import. Nothing in
+  the source agent's home is touched.
+- **Deterministic and non-overwriting.** The synthesized session's id and
+  timestamps are derived from the source, so re-running produces byte-identical
+  output and an existing translated session is skipped, never overwritten or
+  duplicated. Writes are atomic.
+- **No cloud, as always.** Translation is entirely local; nothing is uploaded.
 
 ---
 

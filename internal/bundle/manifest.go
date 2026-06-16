@@ -19,7 +19,11 @@ const (
 // Manifest describes a bundle and everything inside it. It is written as
 // manifest.json at the root of the ZIP.
 type Manifest struct {
-	FormatVersion     string            `json:"format_version"`
+	FormatVersion string `json:"format_version"`
+	// Tool records which coding agent the sessions came from ("codex" or
+	// "claude"). It is omitted for legacy Codex bundles, which are treated as
+	// "codex" on read, so older bundles remain importable unchanged.
+	Tool              string            `json:"tool,omitempty"`
 	CreatedAt         string            `json:"created_at"`
 	CreatedByDevice   string            `json:"created_by_device,omitempty"`
 	SourceOS          string            `json:"source_os"`

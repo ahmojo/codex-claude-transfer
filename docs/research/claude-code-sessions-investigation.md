@@ -1,8 +1,12 @@
 # Claude Code — Session-Storage Investigation
 
-> Status: **Initial findings complete; build not started.** This document records what was
-> learned about how **Claude Code** stores its sessions locally, and whether `cct`'s
-> file-based export → move → import model can be applied to it (a "cct for Claude Code").
+> Status: **Findings complete; Claude Code support implemented in cct.** The export → move →
+> import model, the safety guarantees, and all the conflict/map/session/encryption/git features now
+> work for Claude Code via `--tool claude` (and the `ui`/`app` front-ends). This document records
+> what was learned about how **Claude Code** stores its sessions locally, and how `cct`'s file-based
+> model maps onto it. Implementation notes: the per-line `cwd` remap re-encodes the destination
+> folder *and* rewrites the `cwd` on every line; import-as-copy reassigns the `sessionId` on every
+> line under a fresh `<uuid>.jsonl`; `~/.claude.json` and the cloud are never touched.
 >
 > Claude Code is **closed-source**, so — unlike the Codex investigation, which read the
 > open-source `openai/codex` repository — these findings come from **inspecting a live install**
@@ -48,10 +52,13 @@ so portability is moot.
 
 - One **JSONL transcript per session**, named by the session UUID.
 - Grouped into a directory whose name is the project's **working directory, encoded**.
-  **Encoding rule (verified by probing tricky paths):** every character that is **not**
-  `[A-Za-z0-9_-]` is replaced with `-`, per character. So `:`, `\`, `/`, space, `.`, `(`, `)`,
-  `@`, … each become `-`; `_`, `-`, digits, and **case** are preserved. Examples:
+  **Encoding rule (verified empirically, incl. against this repo's own folder):** every
+  character that is **not** a letter, digit, or `-` is replaced with `-`, per character. So
+  `:`, `\`, `/`, space, `.`, `(`, `)`, `@`, **and `_`** each become `-`; only letters
+  (case preserved), digits, and `-` pass through. (An earlier draft wrongly listed `_` as
+  preserved — it is not; the example outputs below were always correct.) Examples:
   - `C:\Users\faruk\Documents\Codex_sync` → `C--Users-faruk-Documents-Codex-sync`
+    (note `Codex_sync` → `Codex-sync`: the `_` becomes `-`)
   - `C:\Users\faruk\Desktop\Java documentation` → `C--Users-faruk-Desktop-Java-documentation`
   - `C:\Users\faruk\AppData\Local\Temp\cs.Enc Test (v2)@home_x-y`
     → `C--Users-faruk-AppData-Local-Temp-cs-Enc-Test--v2--home-x-y`
@@ -143,7 +150,8 @@ defensive JSONL parsing.
 
 **Resolved since first draft:**
 
-- ~~Folder-name encoding rule~~ — **resolved** (§1): `[^A-Za-z0-9_-] → -` per character; lossy.
+- ~~Folder-name encoding rule~~ — **resolved** (§1): `[^A-Za-z0-9-] → -` per character (note: `_`
+  is replaced too); lossy.
 - ~~Trust / project entry~~ — **resolved** (§1): discovery needs **no** `~/.claude.json` entry.
 
 **Still open (verify before shipping):**

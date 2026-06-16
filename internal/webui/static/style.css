@@ -46,6 +46,9 @@ body {
   border: 1px solid var(--accent); border-radius: 6px; padding: 1px 6px; margin-left: 4px;
 }
 .muted { color: var(--muted); }
+.toolpick { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+.toolpick select { width: auto; padding: 4px 8px; font-size: 13px; }
+.topbar .muted { margin-left: auto; }
 
 .layout { display: flex; min-height: calc(100vh - 49px); }
 .sidebar {

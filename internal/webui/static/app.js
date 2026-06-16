@@ -7,7 +7,7 @@ const TOKEN = new URLSearchParams(location.search).get("token") || "";
 async function api(path, body) {
   const opts = {
     method: body ? "POST" : "GET",
-    headers: { "X-Codex-Sync-Token": TOKEN },
+    headers: { "X-Cct-Token": TOKEN },
   };
   if (body) {
     opts.headers["Content-Type"] = "application/json";
@@ -21,6 +21,11 @@ async function api(path, body) {
 }
 
 function el(id) { return document.getElementById(id); }
+// The selected agent (Codex or Claude Code). Sent to read endpoints via ?tool=
+// and to export via the body; import always follows the bundle's own tool.
+function currentTool() { return el("tool-select").value; }
+function toolLabel() { return currentTool() === "claude" ? "Claude Code" : "Codex"; }
+function withTool(path) { return path + (path.includes("?") ? "&" : "?") + "tool=" + encodeURIComponent(currentTool()); }
 function esc(s) {
   return String(s == null ? "" : s).replace(/[&<>"]/g, c =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -43,14 +48,14 @@ async function runDoctor() {
   const out = el("doctor-out");
   setBusy(out, "Checking…");
   try {
-    const d = await api("/api/doctor");
+    const d = await api(withTool("/api/doctor"));
     let h = '<div class="card">';
     d.checks.forEach(c => {
       h += '<div class="row"><span class="pill ' + esc(c.status) + '">' + esc(c.status.toUpperCase()) +
         '</span><span class="grow">' + esc(c.message) + "</span></div>";
     });
     h += "</div>";
-    h += '<div class="card"><div class="row"><strong>Codex home</strong><span class="grow mono">' +
+    h += '<div class="card"><div class="row"><strong>' + esc(toolLabel()) + ' home</strong><span class="grow mono">' +
       esc(d.codex_home) + "</span></div></div>";
     out.innerHTML = h;
   } catch (e) { setError(out, e); }
@@ -63,9 +68,9 @@ async function runSessions() {
   const out = el("sessions-out");
   setBusy(out, "Scanning…");
   try {
-    const d = await api("/api/sessions");
+    const d = await api(withTool("/api/sessions"));
     cachedProjects = d.projects || [];
-    if (!d.count) { out.innerHTML = '<div class="card muted">No Codex sessions found.</div>'; return; }
+    if (!d.count) { out.innerHTML = '<div class="card muted">No ' + esc(toolLabel()) + ' sessions found.</div>'; return; }
     let h = '<p class="muted">' + d.count + " session(s)</p>";
     d.sessions.forEach(s => {
       h += '<div class="card"><div class="row"><span class="grow"><strong>' +
@@ -106,6 +111,7 @@ el("export-run").addEventListener("click", async () => {
   try {
     const d = await api("/api/export", {
       mode: el("export-mode").value,
+      tool: currentTool(),
       project: el("export-project").value,
       output: el("export-output").value.trim(),
       include_archived: el("export-archived").checked,
@@ -203,8 +209,16 @@ el("import-run").addEventListener("click", async () => {
     if (d.replaced) summary += ", " + d.replaced + " replaced";
     if (d.imported_copies) summary += ", " + d.imported_copies + " as copies";
     out.innerHTML = '<div class="card"><div class="success">' + esc(summary) + ".</div>" +
-      '<div class="preview-tip">Restart Codex (or run it again) so it picks up the imported sessions.</div></div>";
+      '<div class="preview-tip">Run your agent again (restart Codex, or relaunch Claude Code) so it picks up the imported sessions.</div></div>";
   } catch (e) { setError(out, e); }
+});
+
+// Switching the tool re-checks health and clears any stale session/project list.
+el("tool-select").addEventListener("change", () => {
+  cachedProjects = [];
+  el("sessions-out").innerHTML = "";
+  refreshExportProjects();
+  runDoctor();
 });
 
 // initial load

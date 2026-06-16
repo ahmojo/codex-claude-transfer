@@ -12,7 +12,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ahmojo/codex-claude-transfer/internal/agent"
 	"github.com/ahmojo/codex-claude-transfer/internal/bundle"
+	"github.com/ahmojo/codex-claude-transfer/internal/claudehome"
+	"github.com/ahmojo/codex-claude-transfer/internal/claudesessions"
 	"github.com/ahmojo/codex-claude-transfer/internal/codexhome"
 	"github.com/ahmojo/codex-claude-transfer/internal/crypt"
 	"github.com/ahmojo/codex-claude-transfer/internal/doctor"
@@ -65,6 +68,9 @@ func Run(args []string, stdout, stderr io.Writer) int {
 // commonFlags holds flags shared by commands.
 type commonFlags struct {
 	codexHome       string
+	claudeHome      string
+	tool            string
+	to              string
 	includeArchived bool
 	project         string
 	output          string
@@ -103,6 +109,30 @@ func parseFlags(args []string) (commonFlags, error) {
 			f.codexHome = val
 		case hasPrefix(arg, "--codex-home="):
 			f.codexHome = arg[len("--codex-home="):]
+		case arg == "--claude-home":
+			val, err := takeValue(args, &i, "--claude-home")
+			if err != nil {
+				return f, err
+			}
+			f.claudeHome = val
+		case hasPrefix(arg, "--claude-home="):
+			f.claudeHome = arg[len("--claude-home="):]
+		case arg == "--tool":
+			val, err := takeValue(args, &i, "--tool")
+			if err != nil {
+				return f, err
+			}
+			f.tool = val
+		case hasPrefix(arg, "--tool="):
+			f.tool = arg[len("--tool="):]
+		case arg == "--to":
+			val, err := takeValue(args, &i, "--to")
+			if err != nil {
+				return f, err
+			}
+			f.to = val
+		case hasPrefix(arg, "--to="):
+			f.to = arg[len("--to="):]
 		case arg == "--project":
 			val, err := takeValue(args, &i, "--project")
 			if err != nil {
@@ -239,6 +269,66 @@ func resolveHome(f commonFlags, stderr io.Writer) (codexhome.Home, bool) {
 	return home, true
 }
 
+func resolveClaudeHome(f commonFlags, stderr io.Writer) (claudehome.Home, bool) {
+	home, err := claudehome.Detect(f.claudeHome)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: cannot determine Claude Code home: %v\n", err)
+		return claudehome.Home{}, false
+	}
+	return home, true
+}
+
+// resolveTool decides which agent a command targets. An explicit --tool wins;
+// otherwise it auto-detects: if a Claude Code home exists and a Codex home does
+// not, it picks Claude, else it defaults to Codex (the original, backward-
+// compatible behavior). The returned bool is false when --tool is invalid.
+func resolveTool(f commonFlags, stderr io.Writer) (agent.Kind, bool) {
+	if f.tool != "" {
+		kind, err := agent.Parse(f.tool)
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return "", false
+		}
+		return kind, true
+	}
+	ch, _ := codexhome.Detect(f.codexHome)
+	clh, _ := claudehome.Detect(f.claudeHome)
+	if clh.RootExists() && !ch.RootExists() {
+		return agent.Claude, true
+	}
+	return agent.Codex, true
+}
+
+// resolveImportTarget reads the bundle's recorded tool and returns the matching
+// destination home (as a codexhome.Home carrier whose Root is the agent's home).
+// The bundle, not --tool, is authoritative; a disagreeing --tool is reported and
+// ignored so a bundle is always written to the right place.
+func resolveImportTarget(f commonFlags, bundlePath string, stderr io.Writer) (agent.Kind, codexhome.Home, bool) {
+	insp, err := bundle.Inspect(bundlePath)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return "", codexhome.Home{}, false
+	}
+	kind := agent.Normalize(agent.Kind(insp.Manifest.Tool))
+	if f.tool != "" {
+		if want, perr := agent.Parse(f.tool); perr == nil && want != kind {
+			fmt.Fprintf(stderr, "note: --tool %s ignored; this bundle contains %s sessions\n", want, kind.Label())
+		}
+	}
+	if kind == agent.Claude {
+		clh, ok := resolveClaudeHome(f, stderr)
+		if !ok {
+			return "", codexhome.Home{}, false
+		}
+		return kind, codexhome.Home{Root: clh.Root, SessionsDir: clh.ProjectsDir, Source: clh.Source}, true
+	}
+	home, ok := resolveHome(f, stderr)
+	if !ok {
+		return "", codexhome.Home{}, false
+	}
+	return kind, home, true
+}
+
 // runApp launches the local desktop GUI: a loopback-only web server the user
 // drives from their browser. It blocks until interrupted.
 func runApp(args []string, stdout, stderr io.Writer) int {
@@ -248,9 +338,10 @@ func runApp(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	return webui.Run(webui.Options{
-		CodexHome: f.codexHome,
-		Port:      f.port,
-		NoBrowser: f.noBrowser,
+		CodexHome:  f.codexHome,
+		ClaudeHome: f.claudeHome,
+		Port:       f.port,
+		NoBrowser:  f.noBrowser,
 	}, stdout, stderr)
 }
 
@@ -260,11 +351,24 @@ func runDoctor(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 2
 	}
-	home, ok := resolveHome(f, stderr)
+	kind, ok := resolveTool(f, stderr)
 	if !ok {
-		return 1
+		return 2
 	}
-	report := doctor.Run(home)
+	var report doctor.Report
+	if kind == agent.Claude {
+		home, ok := resolveClaudeHome(f, stderr)
+		if !ok {
+			return 1
+		}
+		report = doctor.RunClaude(home)
+	} else {
+		home, ok := resolveHome(f, stderr)
+		if !ok {
+			return 1
+		}
+		report = doctor.Run(home)
+	}
 	if f.jsonOut {
 		printDoctorJSON(stdout, report)
 	} else {
@@ -279,14 +383,27 @@ func runList(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 2
 	}
-	home, ok := resolveHome(f, stderr)
+	kind, ok := resolveTool(f, stderr)
 	if !ok {
-		return 1
+		return 2
 	}
-	scan, err := sessions.Scan(home, sessions.ScanOptions{
-		IncludeArchived:      f.includeArchived,
-		DecompressCompressed: true,
-	})
+	var scan sessions.ScanResult
+	if kind == agent.Claude {
+		home, ok := resolveClaudeHome(f, stderr)
+		if !ok {
+			return 1
+		}
+		scan, err = claudesessions.Scan(home, claudesessions.ScanOptions{IncludeArchived: f.includeArchived})
+	} else {
+		home, ok := resolveHome(f, stderr)
+		if !ok {
+			return 1
+		}
+		scan, err = sessions.Scan(home, sessions.ScanOptions{
+			IncludeArchived:      f.includeArchived,
+			DecompressCompressed: true,
+		})
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "error: scan failed: %v\n", err)
 		return 1
@@ -294,7 +411,7 @@ func runList(args []string, stdout, stderr io.Writer) int {
 	if f.jsonOut {
 		printListJSON(stdout, scan)
 	} else {
-		printList(stdout, scan)
+		printList(stdout, kind, scan)
 	}
 	return 0
 }
@@ -305,9 +422,20 @@ func runExport(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 2
 	}
+	kind, ok := resolveTool(f, stderr)
+	if !ok {
+		return 2
+	}
 	home, ok := resolveHome(f, stderr)
 	if !ok {
 		return 1
+	}
+	var claudeHome claudehome.Home
+	if kind == agent.Claude {
+		claudeHome, ok = resolveClaudeHome(f, stderr)
+		if !ok {
+			return 1
+		}
 	}
 
 	if f.all && f.project != "" {
@@ -381,13 +509,19 @@ func runExport(args []string, stdout, stderr io.Writer) int {
 		case session != "":
 			output = "session-" + sanitizeForFilename(session) + ".codexbundle"
 		case f.all:
-			output = "codex-sessions.codexbundle"
+			if kind == agent.Claude {
+				output = "claude-sessions.codexbundle"
+			} else {
+				output = "codex-sessions.codexbundle"
+			}
 		default:
 			output = defaultBundleName(absProject)
 		}
 	}
 
 	result, err := bundle.Export(home, bundle.ExportOptions{
+		Tool:            kind,
+		ClaudeHome:      claudeHome,
 		ProjectPath:     absProject,
 		OutputPath:      output,
 		IncludeArchived: f.includeArchived,
@@ -424,7 +558,7 @@ func runExport(args []string, stdout, stderr io.Writer) int {
 	if f.jsonOut {
 		printExportJSON(stdout, result)
 	} else {
-		printExport(stdout, absProject, session, result)
+		printExport(stdout, kind, absProject, session, result)
 	}
 	return 0
 }
@@ -573,10 +707,6 @@ func runImport(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "error: --replace-with-backup and --import-as-copy are mutually exclusive (they resolve conflicts in opposite ways)")
 		return 2
 	}
-	home, ok := resolveHome(f, stderr)
-	if !ok {
-		return 1
-	}
 
 	var absProject string
 	if f.project != "" {
@@ -599,6 +729,20 @@ func runImport(args []string, stdout, stderr io.Writer) int {
 	}
 	defer cleanup()
 
+	// --to turns import into a cross-agent handoff: translate the bundle's sessions
+	// into the other agent's format and write them into that agent's home.
+	if f.to != "" {
+		return runTranslateImport(f, bundlePath, stdout, stderr)
+	}
+
+	// The bundle records which agent it came from; that, not --tool, decides where
+	// the sessions are written. Resolve the matching home, and if --tool was given
+	// and disagrees with the bundle, follow the bundle (and say so).
+	kind, home, ok := resolveImportTarget(f, bundlePath, stderr)
+	if !ok {
+		return 1
+	}
+
 	res, err := bundle.Import(home, bundle.ImportOptions{
 		BundlePath:        bundlePath,
 		DryRun:            f.dryRun,
@@ -615,7 +759,7 @@ func runImport(args []string, stdout, stderr io.Writer) int {
 	if f.jsonOut {
 		printImportJSON(stdout, f.positional[0], res)
 	} else {
-		printImport(stdout, f.positional[0], res)
+		printImport(stdout, kind, f.positional[0], res)
 	}
 
 	if f.cloneDir != "" {
@@ -628,6 +772,44 @@ func runImport(args []string, stdout, stderr io.Writer) int {
 			return code
 		}
 	}
+	return 0
+}
+
+// runTranslateImport performs a cross-agent handoff: it reads the bundle (in
+// whatever agent's format it was exported), translates each session into the
+// --to agent's format, and writes the results into that agent's home. The
+// destination home is the --to agent's; the bundle's own tool is the source.
+func runTranslateImport(f commonFlags, bundlePath string, stdout, stderr io.Writer) int {
+	target, err := agent.Parse(f.to)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: --to %v\n", err)
+		return 2
+	}
+	var home codexhome.Home
+	if target == agent.Claude {
+		clh, ok := resolveClaudeHome(f, stderr)
+		if !ok {
+			return 1
+		}
+		home = codexhome.Home{Root: clh.Root, SessionsDir: clh.ProjectsDir, Source: clh.Source}
+	} else {
+		h, ok := resolveHome(f, stderr)
+		if !ok {
+			return 1
+		}
+		home = h
+	}
+
+	res, err := bundle.TranslateImport(home, bundle.TranslateOptions{
+		BundlePath: bundlePath,
+		TargetTool: target,
+		DryRun:     f.dryRun,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "error: handoff failed: %v\n", err)
+		return 1
+	}
+	printTranslate(stdout, f.positional[0], res)
 	return 0
 }
 
@@ -699,7 +881,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprint(w, `cct — Codex & Claude Code session transfer (unofficial)
 
   Export. Move. Import. Continue your local coding-agent sessions on another machine.
-  (Codex works today; Claude Code support is in progress.)
+  Works with both Codex (~/.codex) and Claude Code (~/.claude); pick one with --tool.
 
 Usage:
   cct <command> [flags]
@@ -720,8 +902,13 @@ Commands:
   help      Show this help
 
 Flags:
+  --tool <codex|claude> Which agent's sessions to act on. Default: auto-detect
+                        (Claude Code if only its home exists, otherwise Codex).
+                        On import the bundle's recorded tool always wins.
   --codex-home <path>   Use a specific Codex home instead of ~/.codex
                         (also honors $CODEX_HOME)
+  --claude-home <path>  Use a specific Claude Code home instead of ~/.claude
+                        (also honors $CLAUDE_HOME)
   --include-archived    list, export: also consider archived sessions
   --json                doctor/list/inspect/export/import: print a machine-
                         readable JSON summary on stdout instead of human text
@@ -747,6 +934,11 @@ Flags:
                         never your sessions. Opt-in; needs a project and a remote
   --output, -o <path>   export: bundle output path (default <project>.codexbundle)
   --dry-run             import: validate and report only, write nothing
+  --to <codex|claude>   import: cross-agent handoff. Instead of importing the
+                        bundle's sessions natively, translate them into the OTHER
+                        agent's format and write them into that agent's home. A
+                        best-effort text handoff (conversation + a context
+                        preamble; tool calls summarized), not a perfect clone
   --map-cwd OLD=NEW     import: rewrite a session's recorded cwd from OLD to NEW
                         so it lands in the right local project (repeatable;
                         plain .jsonl only — .zst sessions are not rewritten)
@@ -782,8 +974,11 @@ nothing else is affected. .age bundles are auto-detected on import/inspect.
 Examples:
   cct ui                            # interactive, guided menu
   cct doctor
+  cct doctor --tool claude          # check Claude Code instead of Codex
   cct list
+  cct list --tool claude            # list Claude Code sessions
   cct export --project .            # -> <project>.codexbundle
+  cct export --tool claude --project .   # export this project's Claude sessions
   cct export --project . --with-git # also record git remote/commit
   cct export --all                  # -> codex-sessions.codexbundle
   cct export --all --since 7d       # everything updated in the last 7 days
@@ -795,18 +990,20 @@ Examples:
   cct import ./my-project.codexbundle --map-cwd "/old/path=/new/path"
   cct import ./my-project.codexbundle --replace-with-backup
   cct import ./my-project.codexbundle --import-as-copy
+  cct import ./my-project.codexbundle --to claude   # Codex bundle -> Claude Code
+  cct import ./claude.codexbundle      --to codex    # Claude bundle -> Codex
   cct import ./my-project.codexbundle --clone ~/dev/project
   cct export --project . --encrypt-to age1qz...   # -> <project>.codexbundle.age
   cct export --all --passphrase                   # passphrase-encrypted
   cct import ./my-project.codexbundle.age --identity ~/.age/key.txt
   cct inspect ./my-project.codexbundle.age --passphrase
 
-After importing, restart the Codex App (or run Codex again) so it scans and
-reconciles the imported rollout files.
+After importing, run the agent again (restart the Codex App, or relaunch Claude
+Code) so it discovers the imported session files.
 
 Notes:
-  cct never modifies Codex's SQLite state DB; Codex rebuilds its own
-  index from the JSONL files on its next scan.
+  cct never modifies Codex's SQLite state DB or Claude Code's ~/.claude.json;
+  each agent rebuilds its own index from the JSONL files on its next scan.
   .codexbundle files may contain prompts, code, terminal output, paths, and
   secrets — do not share them publicly. See docs/safety.md.
 `)

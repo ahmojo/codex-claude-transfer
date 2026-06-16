@@ -5,13 +5,36 @@ import (
 	"net/http"
 	"path/filepath"
 
+	"github.com/ahmojo/codex-claude-transfer/internal/agent"
 	"github.com/ahmojo/codex-claude-transfer/internal/bundle"
+	"github.com/ahmojo/codex-claude-transfer/internal/claudesessions"
+	"github.com/ahmojo/codex-claude-transfer/internal/codexhome"
 	"github.com/ahmojo/codex-claude-transfer/internal/crypt"
 	"github.com/ahmojo/codex-claude-transfer/internal/doctor"
 	"github.com/ahmojo/codex-claude-transfer/internal/git"
 	"github.com/ahmojo/codex-claude-transfer/internal/sessions"
 	"github.com/ahmojo/codex-claude-transfer/internal/zstdcli"
 )
+
+// kindFromRequest reads the selected agent from a ?tool= query parameter (or a
+// "tool" form value), defaulting to Codex. An unrecognized value falls back to
+// Codex rather than erroring, so the UI can never wedge the server.
+func (s *Server) kindFromRequest(r *http.Request) agent.Kind {
+	if k, err := agent.Parse(r.URL.Query().Get("tool")); err == nil {
+		return k
+	}
+	return agent.Codex
+}
+
+// importHomeFor returns the destination home (as a codexhome.Home carrier) for
+// the given agent: the Codex home, or the Claude home rooted at ~/.claude with
+// sessions under projects/.
+func (s *Server) importHomeFor(kind agent.Kind) codexhome.Home {
+	if kind == agent.Claude {
+		return codexhome.Home{Root: s.claudeHome.Root, SessionsDir: s.claudeHome.ProjectsDir, Source: s.claudeHome.Source}
+	}
+	return s.home
+}
 
 // writeJSON encodes v as the response body.
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -35,7 +58,13 @@ func decodeBody(r *http.Request, v any) error {
 // ---- doctor ----
 
 func (s *Server) handleDoctor(w http.ResponseWriter, r *http.Request) {
-	report := doctor.Run(s.home)
+	kind := s.kindFromRequest(r)
+	var report doctor.Report
+	if kind == agent.Claude {
+		report = doctor.RunClaude(s.claudeHome)
+	} else {
+		report = doctor.Run(s.home)
+	}
 	type check struct {
 		Status  string `json:"status"`
 		Message string `json:"message"`
@@ -49,7 +78,7 @@ func (s *Server) handleDoctor(w http.ResponseWriter, r *http.Request) {
 			Age  bool `json:"age"`
 			Zstd bool `json:"zstd"`
 		} `json:"tools"`
-	}{CodexHome: s.home.Root, SessionsDir: s.home.SessionsDir}
+	}{CodexHome: report.Home.Root, SessionsDir: report.Home.SessionsDir}
 	for _, c := range report.Checks {
 		out.Checks = append(out.Checks, check{Status: statusString(c.Status), Message: c.Message})
 	}
@@ -83,7 +112,14 @@ type sessionDTO struct {
 }
 
 func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
-	scan, err := sessions.Scan(s.home, sessions.ScanOptions{DecompressCompressed: true})
+	kind := s.kindFromRequest(r)
+	var scan sessions.ScanResult
+	var err error
+	if kind == agent.Claude {
+		scan, err = claudesessions.Scan(s.claudeHome, claudesessions.ScanOptions{})
+	} else {
+		scan, err = sessions.Scan(s.home, sessions.ScanOptions{DecompressCompressed: true})
+	}
 	if err != nil {
 		apiError(w, http.StatusInternalServerError, "scan failed: "+err.Error())
 		return
@@ -123,6 +159,7 @@ type projectDTO struct {
 
 type exportReq struct {
 	Mode            string `json:"mode"` // "project" | "all"
+	Tool            string `json:"tool"` // "codex" | "claude"
 	Project         string `json:"project"`
 	Output          string `json:"output"`
 	IncludeArchived bool   `json:"include_archived"`
@@ -135,6 +172,10 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	if err := decodeBody(r, &req); err != nil {
 		apiError(w, http.StatusBadRequest, "bad request: "+err.Error())
 		return
+	}
+	kind := agent.Codex
+	if k, err := agent.Parse(req.Tool); err == nil {
+		kind = k
 	}
 
 	var absProject string
@@ -174,7 +215,11 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	output := req.Output
 	if output == "" {
 		if req.Mode == "all" {
-			output = "codex-sessions.codexbundle"
+			if kind == agent.Claude {
+				output = "claude-sessions.codexbundle"
+			} else {
+				output = "codex-sessions.codexbundle"
+			}
 		} else {
 			output = filepath.Base(absProject) + ".codexbundle"
 		}
@@ -182,6 +227,8 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	res, err := bundle.Export(s.home, bundle.ExportOptions{
+		Tool:            kind,
+		ClaudeHome:      s.claudeHome,
 		ProjectPath:     absProject,
 		OutputPath:      output,
 		IncludeArchived: req.IncludeArchived,
@@ -275,7 +322,15 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := bundle.Import(s.home, bundle.ImportOptions{
+	// The bundle records its own tool; that decides the destination home.
+	insp, err := bundle.Inspect(req.Path)
+	if err != nil {
+		apiError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	home := s.importHomeFor(agent.Normalize(agent.Kind(insp.Manifest.Tool)))
+
+	res, err := bundle.Import(home, bundle.ImportOptions{
 		BundlePath:        req.Path,
 		DryRun:            req.DryRun,
 		MapCWD:            mappings,

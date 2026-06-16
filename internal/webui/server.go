@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ahmojo/codex-claude-transfer/internal/claudehome"
 	"github.com/ahmojo/codex-claude-transfer/internal/codexhome"
 )
 
@@ -32,16 +33,20 @@ var staticFiles embed.FS
 
 // Options configures the desktop server.
 type Options struct {
-	CodexHome string // optional --codex-home override
-	Port      int    // 0 = pick a free port
-	NoBrowser bool   // do not auto-open the browser
+	CodexHome  string // optional --codex-home override
+	ClaudeHome string // optional --claude-home override
+	Port       int    // 0 = pick a free port
+	NoBrowser  bool   // do not auto-open the browser
 }
 
-// Server holds the running desktop UI state.
+// Server holds the running desktop UI state. It serves both agents (Codex and
+// Claude Code); each request selects one via a ?tool= parameter, and import
+// follows the bundle's recorded tool.
 type Server struct {
-	home  codexhome.Home
-	token string
-	out   io.Writer
+	home       codexhome.Home
+	claudeHome claudehome.Home
+	token      string
+	out        io.Writer
 }
 
 // Run starts the desktop UI: it binds a loopback listener, prints (and opens) the
@@ -52,6 +57,11 @@ func Run(opts Options, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "error: cannot determine Codex home: %v\n", err)
 		return 1
 	}
+	clHome, err := claudehome.Detect(opts.ClaudeHome)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: cannot determine Claude Code home: %v\n", err)
+		return 1
+	}
 
 	token, err := randomToken()
 	if err != nil {
@@ -59,7 +69,7 @@ func Run(opts Options, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	s := &Server{home: home, token: token, out: stdout}
+	s := &Server{home: home, claudeHome: clHome, token: token, out: stdout}
 
 	addr := fmt.Sprintf("127.0.0.1:%d", opts.Port)
 	ln, err := net.Listen("tcp", addr)
@@ -130,7 +140,7 @@ func (s *Server) guard(h http.HandlerFunc) http.HandlerFunc {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
-		if subtleCompare(r.Header.Get("X-Codex-Sync-Token"), s.token) {
+		if subtleCompare(r.Header.Get("X-Cct-Token"), s.token) {
 			h(w, r)
 			return
 		}

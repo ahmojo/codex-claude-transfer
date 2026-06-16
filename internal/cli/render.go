@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/ahmojo/codex-claude-transfer/internal/agent"
 	"github.com/ahmojo/codex-claude-transfer/internal/bundle"
 	"github.com/ahmojo/codex-claude-transfer/internal/doctor"
 	"github.com/ahmojo/codex-claude-transfer/internal/sessions"
@@ -26,13 +27,14 @@ func symbol(s doctor.Status) string {
 	}
 }
 
-func printList(w io.Writer, scan sessions.ScanResult) {
+func printList(w io.Writer, kind agent.Kind, scan sessions.ScanResult) {
+	label := kind.Label()
 	if len(scan.Sessions) == 0 {
-		fmt.Fprintln(w, "No Codex sessions found.")
+		fmt.Fprintf(w, "No %s sessions found.\n", label)
 		return
 	}
 
-	fmt.Fprintf(w, "Found %d Codex session(s)\n\n", len(scan.Sessions))
+	fmt.Fprintf(w, "Found %d %s session(s)\n\n", len(scan.Sessions), label)
 	for i, s := range scan.Sessions {
 		fmt.Fprintf(w, "%d. %s\n", i+1, title(s))
 		if s.ThreadID != "" {
@@ -65,14 +67,15 @@ func printList(w io.Writer, scan sessions.ScanResult) {
 		scan.Files, scan.Valid, scan.Compressed, unparsed)
 }
 
-func printExport(w io.Writer, project, session string, result bundle.ExportResult) {
+func printExport(w io.Writer, kind agent.Kind, project, session string, result bundle.ExportResult) {
+	label := kind.Label()
 	switch {
 	case session != "":
-		fmt.Fprintf(w, "Exporting one Codex session (thread id %s)\n\n", session)
+		fmt.Fprintf(w, "Exporting one %s session (thread id %s)\n\n", label, session)
 	case project == "":
-		fmt.Fprintf(w, "Exporting all Codex sessions\n\n")
+		fmt.Fprintf(w, "Exporting all %s sessions\n\n", label)
 	default:
-		fmt.Fprintf(w, "Exporting Codex sessions for project:\n%s\n\n", project)
+		fmt.Fprintf(w, "Exporting %s sessions for project:\n%s\n\n", label, project)
 	}
 	for _, warn := range result.Warnings {
 		fmt.Fprintf(w, "warning: %s\n", warn)
@@ -86,7 +89,9 @@ func printExport(w io.Writer, project, session string, result bundle.ExportResul
 
 func printInspect(w io.Writer, path string, res bundle.InspectResult) {
 	m := res.Manifest
+	kind := agent.Normalize(agent.Kind(m.Tool))
 	fmt.Fprintf(w, "Bundle: %s\n", path)
+	fmt.Fprintf(w, "Tool: %s\n", kind.Label())
 	fmt.Fprintf(w, "Format: %s\n", m.FormatVersion)
 	if m.CreatedAt != "" {
 		fmt.Fprintf(w, "Created: %s", m.CreatedAt)
@@ -120,7 +125,7 @@ func printInspect(w io.Writer, path string, res bundle.InspectResult) {
 		}
 		fmt.Fprintln(w)
 	}
-	printCWDSummary(w, bundle.SummarizeCWDs(m.Sessions, bundle.DirExists), path, false)
+	printCWDSummary(w, kind, bundle.SummarizeCWDs(m.Sessions, bundle.DirExists), path, false)
 }
 
 // printCWDSummary renders the distinct recorded working directories in a bundle
@@ -129,7 +134,7 @@ func printInspect(w io.Writer, path string, res bundle.InspectResult) {
 // unless a folder at that exact cwd exists). When onlyIfMissing is true the
 // whole block is suppressed unless at least one folder is missing, so it does
 // not add noise to a clean import.
-func printCWDSummary(w io.Writer, summary bundle.CWDSummary, bundlePath string, onlyIfMissing bool) {
+func printCWDSummary(w io.Writer, kind agent.Kind, summary bundle.CWDSummary, bundlePath string, onlyIfMissing bool) {
 	if onlyIfMissing && summary.MissingCount == 0 {
 		return
 	}
@@ -149,9 +154,9 @@ func printCWDSummary(w io.Writer, summary bundle.CWDSummary, bundlePath string, 
 	}
 	if summary.MissingCount > 0 {
 		fmt.Fprintln(w)
-		fmt.Fprintln(w, "Some of these folders do not exist on this machine, so those sessions")
-		fmt.Fprintln(w, "will be hidden in Codex's sidebar until you create the folder (then")
-		fmt.Fprintln(w, "restart Codex) or remap the cwd on import, e.g.:")
+		fmt.Fprintf(w, "Some of these folders do not exist on this machine, so those sessions\n")
+		fmt.Fprintf(w, "will be hidden in %s's project view until you create the folder (then\n", kind.Label())
+		fmt.Fprintf(w, "restart %s) or remap the cwd on import, e.g.:\n", kind.Label())
 		fmt.Fprintf(w, "  cct import %s --map-cwd \"<old-cwd>=<new-local-path>\"\n", bundlePath)
 	}
 }
@@ -163,7 +168,7 @@ func plural(n int, noun string) string {
 	return fmt.Sprintf("%d %ss", n, noun)
 }
 
-func printImport(w io.Writer, path string, res bundle.ImportResult) {
+func printImport(w io.Writer, kind agent.Kind, path string, res bundle.ImportResult) {
 	fmt.Fprintf(w, "Bundle: %s\n", path)
 	fmt.Fprintf(w, "Sessions in bundle: %d\n", len(res.Manifest.Sessions))
 	fmt.Fprintf(w, "New sessions: %d\n", res.Imported)
@@ -229,7 +234,7 @@ func printImport(w io.Writer, path string, res bundle.ImportResult) {
 
 	if summary := bundle.SummarizeCWDs(res.Manifest.Sessions, bundle.DirExists); summary.MissingCount > 0 {
 		fmt.Fprintln(w)
-		printCWDSummary(w, summary, path, true)
+		printCWDSummary(w, kind, summary, path, true)
 	}
 
 	fmt.Fprintln(w)
@@ -239,10 +244,51 @@ func printImport(w io.Writer, path string, res bundle.ImportResult) {
 	}
 	if res.Imported > 0 || res.Replaced > 0 || res.ImportedCopies > 0 {
 		fmt.Fprintln(w, "Import complete.")
-		fmt.Fprintln(w, "Next: restart the Codex App (or run Codex again) so it scans and")
-		fmt.Fprintln(w, "reconciles the imported rollout files. cct does not modify Codex's SQLite.")
+		if kind == agent.Claude {
+			fmt.Fprintln(w, "Next: run Claude Code again so it discovers the imported transcripts.")
+			fmt.Fprintln(w, "cct does not modify ~/.claude.json or the Claude cloud.")
+		} else {
+			fmt.Fprintln(w, "Next: restart the Codex App (or run Codex again) so it scans and")
+			fmt.Fprintln(w, "reconciles the imported rollout files. cct does not modify Codex's SQLite.")
+		}
 	} else {
 		fmt.Fprintln(w, "Nothing to import (all sessions already present or skipped).")
+	}
+}
+
+func printTranslate(w io.Writer, path string, res bundle.TranslateResult) {
+	fmt.Fprintf(w, "Cross-agent handoff: %s → %s\n", res.SourceTool.Label(), res.TargetTool.Label())
+	fmt.Fprintf(w, "Bundle: %s\n\n", path)
+	fmt.Fprintf(w, "Translated sessions: %d\n", res.Translated)
+	if res.SkippedExisting > 0 {
+		fmt.Fprintf(w, "Already translated (skipped): %d\n", res.SkippedExisting)
+	}
+	if res.Skipped > 0 {
+		fmt.Fprintf(w, "Could not translate (skipped): %d\n", res.Skipped)
+	}
+	for _, it := range res.Items {
+		if it.Action == "translate" {
+			fmt.Fprintf(w, "  + %s  (%s)\n", it.SessionID, plural(it.Turns, "turn"))
+		}
+	}
+	if len(res.Warnings) > 0 {
+		fmt.Fprintln(w)
+		for _, wn := range res.Warnings {
+			fmt.Fprintf(w, "warning: %s\n", wn)
+		}
+	}
+
+	fmt.Fprintln(w)
+	if res.DryRun {
+		fmt.Fprintln(w, "No files were written because --dry-run was used.")
+		return
+	}
+	if res.Translated > 0 {
+		fmt.Fprintln(w, "Handoff complete. These are best-effort translated sessions: each opens")
+		fmt.Fprintf(w, "with a handoff note and the prior conversation as text. Run %s again to\n", res.TargetTool.Label())
+		fmt.Fprintln(w, "see them, then continue from there.")
+	} else {
+		fmt.Fprintln(w, "Nothing was translated (all sessions already present or unconvertible).")
 	}
 }
 

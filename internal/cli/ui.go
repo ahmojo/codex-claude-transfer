@@ -8,7 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/ahmojo/codex-claude-transfer/internal/agent"
 	"github.com/ahmojo/codex-claude-transfer/internal/bundle"
+	"github.com/ahmojo/codex-claude-transfer/internal/claudehome"
+	"github.com/ahmojo/codex-claude-transfer/internal/claudesessions"
 	"github.com/ahmojo/codex-claude-transfer/internal/codexhome"
 	"github.com/ahmojo/codex-claude-transfer/internal/git"
 	"github.com/ahmojo/codex-claude-transfer/internal/sessions"
@@ -20,6 +23,7 @@ import (
 // It is converted to a flag argv by buildExportArgs, which is pure and tested.
 type exportChoices struct {
 	mode        string // "current" | "all" | "session" | "project"
+	tool        agent.Kind
 	projectPath string
 	sessionID   string
 	withGit     bool
@@ -28,6 +32,7 @@ type exportChoices struct {
 	recipient   string
 	output      string
 	codexHome   string
+	claudeHome  string
 }
 
 // importChoices holds the answers gathered by the interactive import wizard.
@@ -41,6 +46,7 @@ type importChoices struct {
 	decryptMode   string // "" | "passphrase" | "identity"
 	identity      string
 	codexHome     string
+	claudeHome    string
 }
 
 // buildExportArgs turns export wizard answers into the equivalent CLI argv. It
@@ -48,6 +54,9 @@ type importChoices struct {
 // the real command.
 func buildExportArgs(c exportChoices) []string {
 	args := []string{"export"}
+	if c.tool == agent.Claude {
+		args = append(args, "--tool", "claude")
+	}
 	switch c.mode {
 	case "all":
 		args = append(args, "--all")
@@ -77,6 +86,9 @@ func buildExportArgs(c exportChoices) []string {
 	}
 	if c.codexHome != "" {
 		args = append(args, "--codex-home", c.codexHome)
+	}
+	if c.claudeHome != "" {
+		args = append(args, "--claude-home", c.claudeHome)
 	}
 	return args
 }
@@ -116,6 +128,9 @@ func buildImportArgs(c importChoices, dryRun bool) []string {
 	}
 	if c.codexHome != "" {
 		args = append(args, "--codex-home", c.codexHome)
+	}
+	if c.claudeHome != "" {
+		args = append(args, "--claude-home", c.claudeHome)
 	}
 	return args
 }
@@ -184,6 +199,31 @@ func runUI(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
+	// Decide which agent this session targets. An explicit --tool wins; otherwise
+	// auto-detect, and if both Codex and Claude Code are installed, let the user
+	// choose. Import always follows the bundle's own tool regardless of this.
+	kind, ok := resolveTool(f, stderr)
+	if !ok {
+		return 2
+	}
+	if f.tool == "" {
+		ch, _ := codexhome.Detect(f.codexHome)
+		clh, _ := claudehome.Detect(f.claudeHome)
+		if ch.RootExists() && clh.RootExists() {
+			var t string
+			if !runField(huh.NewSelect[string]().
+				Title("Which tool's sessions?").
+				Options(
+					huh.NewOption("Codex (~/.codex)", "codex"),
+					huh.NewOption("Claude Code (~/.claude)", "claude"),
+				).
+				Value(&t), stderr) {
+				return 0
+			}
+			kind, _ = agent.Parse(t)
+		}
+	}
+
 	for {
 		var action string
 		err := huh.NewSelect[string]().
@@ -211,21 +251,29 @@ func runUI(args []string, stdout, stderr io.Writer) int {
 		case "quit":
 			return 0
 		case "export":
-			uiExport(f, stdout, stderr)
+			uiExport(f, kind, stdout, stderr)
 		case "import":
 			uiImport(f, stdout, stderr)
 		case "inspect":
 			uiInspect(f, stdout, stderr)
 		case "list":
-			runBuilt(withHome([]string{"list"}, f), stdout, stderr)
+			runBuilt(withToolHome([]string{"list"}, kind, f), stdout, stderr)
 		case "doctor":
-			runBuilt(withHome([]string{"doctor"}, f), stdout, stderr)
+			runBuilt(withToolHome([]string{"doctor"}, kind, f), stdout, stderr)
 		}
 	}
 }
 
-// withHome appends --codex-home to argv when the user passed one to `ui`.
-func withHome(argv []string, f commonFlags) []string {
+// withToolHome appends the agent selector and the matching home override (when
+// the user passed one to `ui`) so the echoed command targets the chosen tool.
+func withToolHome(argv []string, kind agent.Kind, f commonFlags) []string {
+	if kind == agent.Claude {
+		argv = append(argv, "--tool", "claude")
+		if f.claudeHome != "" {
+			argv = append(argv, "--claude-home", f.claudeHome)
+		}
+		return argv
+	}
 	if f.codexHome != "" {
 		argv = append(argv, "--codex-home", f.codexHome)
 	}
@@ -239,8 +287,8 @@ func runBuilt(argv []string, stdout, stderr io.Writer) {
 	fmt.Fprintln(stdout)
 }
 
-func uiExport(f commonFlags, stdout, stderr io.Writer) {
-	c := exportChoices{codexHome: f.codexHome}
+func uiExport(f commonFlags, kind agent.Kind, stdout, stderr io.Writer) {
+	c := exportChoices{tool: kind, codexHome: f.codexHome, claudeHome: f.claudeHome}
 	if !runField(huh.NewSelect[string]().
 		Title("What do you want to export?").
 		Options(
@@ -255,13 +303,13 @@ func uiExport(f commonFlags, stdout, stderr io.Writer) {
 
 	switch c.mode {
 	case "project":
-		path, ok := pickProjectFolder(f, stdout, stderr)
+		path, ok := pickProjectFolder(f, kind, stdout, stderr)
 		if !ok {
 			return
 		}
 		c.projectPath = path
 	case "session":
-		id, ok := pickSession(f, stdout, stderr)
+		id, ok := pickSession(f, kind, stdout, stderr)
 		if !ok {
 			return
 		}
@@ -313,7 +361,7 @@ func uiExport(f commonFlags, stdout, stderr io.Writer) {
 }
 
 func uiImport(f commonFlags, stdout, stderr io.Writer) {
-	c := importChoices{codexHome: f.codexHome}
+	c := importChoices{codexHome: f.codexHome, claudeHome: f.claudeHome}
 
 	// 1) Which bundle? (Tolerate a path pasted with surrounding quotes.)
 	if !runField(huh.NewInput().
@@ -360,6 +408,9 @@ func uiImport(f commonFlags, stdout, stderr io.Writer) {
 		fmt.Fprintf(stderr, "error: cannot read bundle: %v\n", err)
 		return
 	}
+	// The bundle records which agent it came from; that determines the
+	// destination home and the wording below (Codex vs Claude Code).
+	bkind := agent.Normalize(agent.Kind(res.Manifest.Tool))
 	summary := bundle.SummarizeCWDs(res.Manifest.Sessions, bundle.DirExists)
 
 	fmt.Fprintf(stdout, "\nThis bundle contains %s from %s:\n",
@@ -379,8 +430,7 @@ func uiImport(f commonFlags, stdout, stderr io.Writer) {
 	// 4) For every missing folder, offer a clear fix in plain language. The user
 	//    never types the OLD path — it comes straight from the bundle.
 	if summary.MissingCount == 0 && len(summary.Dirs) > 0 {
-		fmt.Fprintln(stdout, "All project folders already exist here — your sessions will")
-		fmt.Fprintln(stdout, "show up in Codex automatically after import.")
+		fmt.Fprintf(stdout, "All project folders already exist here — your sessions will\nshow up in %s automatically after import.\n", bkind.Label())
 	}
 	for _, d := range summary.Dirs {
 		if d.ExistsLocal {
@@ -388,8 +438,8 @@ func uiImport(f commonFlags, stdout, stderr io.Writer) {
 		}
 		var choice string
 		if !runField(huh.NewSelect[string]().
-			Title(fmt.Sprintf("%s recorded in this folder, which is NOT on this computer:\n  %s\nWhat should I do so these sessions appear in Codex?",
-				plural(d.Count, "session"), d.Path)).
+			Title(fmt.Sprintf("%s recorded in this folder, which is NOT on this computer:\n  %s\nWhat should I do so these sessions appear in %s?",
+				plural(d.Count, "session"), d.Path, bkind.Label())).
 			Options(
 				huh.NewOption("Create that exact folder here (keep the original path)", "create"),
 				huh.NewOption("Point these sessions to a different folder on this computer", "remap"),
@@ -434,10 +484,10 @@ func uiImport(f commonFlags, stdout, stderr io.Writer) {
 	}
 
 	// 5) Quietly dry-run the import so we can show a clean, accurate preview and
-	//    only ask about conflicts if there really are any.
-	home, err := codexhome.Detect(c.codexHome)
-	if err != nil {
-		fmt.Fprintf(stderr, "error: cannot determine Codex home: %v\n", err)
+	//    only ask about conflicts if there really are any. The destination home
+	//    follows the bundle's tool.
+	home, ok := uiImportHome(bkind, c, stderr)
+	if !ok {
 		return
 	}
 	mappings, err := bundle.ParseCWDMappings(c.mapCWD)
@@ -518,6 +568,25 @@ func uiImport(f commonFlags, stdout, stderr io.Writer) {
 	runBuilt(buildImportArgs(c, false), stdout, stderr)
 }
 
+// uiImportHome resolves the destination home for the import wizard's dry-run,
+// matching the bundle's recorded tool (the same rule the real import uses).
+func uiImportHome(bkind agent.Kind, c importChoices, stderr io.Writer) (codexhome.Home, bool) {
+	if bkind == agent.Claude {
+		clh, err := claudehome.Detect(c.claudeHome)
+		if err != nil {
+			fmt.Fprintf(stderr, "error: cannot determine Claude Code home: %v\n", err)
+			return codexhome.Home{}, false
+		}
+		return codexhome.Home{Root: clh.Root, SessionsDir: clh.ProjectsDir, Source: clh.Source}, true
+	}
+	home, err := codexhome.Detect(c.codexHome)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: cannot determine Codex home: %v\n", err)
+		return codexhome.Home{}, false
+	}
+	return home, true
+}
+
 // resolveBundleForRead returns a plaintext bundle path the wizard can read
 // (Inspect / dry-run Import) without writing anything, decrypting a .age bundle
 // to a temp file when needed. The returned cleanup removes any temp file.
@@ -550,18 +619,41 @@ func exportGitDir(c exportChoices) string {
 	return ""
 }
 
-// pickProjectFolder scans local sessions, groups them by recorded project folder,
-// and lets the user pick one to export — so they choose from a list instead of
-// typing a path. ok is false if the user aborted or there is nothing to pick.
-func pickProjectFolder(f commonFlags, stdout, stderr io.Writer) (string, bool) {
+// uiScan scans the local sessions for the chosen agent (Codex or Claude Code),
+// so the export pickers list the right tool's projects and sessions.
+func uiScan(f commonFlags, kind agent.Kind, stderr io.Writer) (sessions.ScanResult, bool) {
+	if kind == agent.Claude {
+		home, err := claudehome.Detect(f.claudeHome)
+		if err != nil {
+			fmt.Fprintf(stderr, "error: cannot determine Claude Code home: %v\n", err)
+			return sessions.ScanResult{}, false
+		}
+		scan, err := claudesessions.Scan(home, claudesessions.ScanOptions{})
+		if err != nil {
+			fmt.Fprintf(stderr, "error: scan failed: %v\n", err)
+			return sessions.ScanResult{}, false
+		}
+		return scan, true
+	}
 	home, err := codexhome.Detect(f.codexHome)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: cannot determine Codex home: %v\n", err)
-		return "", false
+		return sessions.ScanResult{}, false
 	}
 	scan, err := sessions.Scan(home, sessions.ScanOptions{})
 	if err != nil {
 		fmt.Fprintf(stderr, "error: scan failed: %v\n", err)
+		return sessions.ScanResult{}, false
+	}
+	return scan, true
+}
+
+// pickProjectFolder scans local sessions, groups them by recorded project folder,
+// and lets the user pick one to export — so they choose from a list instead of
+// typing a path. ok is false if the user aborted or there is nothing to pick.
+func pickProjectFolder(f commonFlags, kind agent.Kind, stdout, stderr io.Writer) (string, bool) {
+	scan, ok := uiScan(f, kind, stderr)
+	if !ok {
 		return "", false
 	}
 	ms := make([]bundle.ManifestSession, 0, len(scan.Sessions))
@@ -635,15 +727,9 @@ func uiInspect(f commonFlags, stdout, stderr io.Writer) {
 // pickSession scans the local Codex home and lets the user choose one session,
 // returning its thread id. ok is false if the user aborted or there is nothing
 // to pick.
-func pickSession(f commonFlags, stdout, stderr io.Writer) (string, bool) {
-	home, err := codexhome.Detect(f.codexHome)
-	if err != nil {
-		fmt.Fprintf(stderr, "error: cannot determine Codex home: %v\n", err)
-		return "", false
-	}
-	scan, err := sessions.Scan(home, sessions.ScanOptions{})
-	if err != nil {
-		fmt.Fprintf(stderr, "error: scan failed: %v\n", err)
+func pickSession(f commonFlags, kind agent.Kind, stdout, stderr io.Writer) (string, bool) {
+	scan, ok := uiScan(f, kind, stderr)
+	if !ok {
 		return "", false
 	}
 	var opts []huh.Option[string]

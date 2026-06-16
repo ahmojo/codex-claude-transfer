@@ -1,6 +1,6 @@
 {
     "version": "0.1.13",
-    "description": "Local Codex session portability across machines (unofficial)",
+    "description": "Transfer local Codex & Claude Code sessions between machines (unofficial)",
     "homepage": "https://github.com/ahmojo/codex-claude-transfer",
     "license": "MIT",
     "architecture": {

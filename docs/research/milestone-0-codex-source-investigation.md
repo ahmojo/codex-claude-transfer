@@ -152,8 +152,13 @@ Options A (raw JSONL copy) and C (copy + rely on scan-repair) **converge**: copy
 
 ## 6. v0.1.x decisions
 
+> Historical note: this document captures the **Codex-only** v0.1.x design. Claude
+> Code support and cross-agent handoff shipped later (v0.2.0 rename → v0.3.0); see
+> [`claude-code-sessions-investigation.md`](claude-code-sessions-investigation.md)
+> and the top-level `CHANGELOG.md`.
+
 - **Go CLI** — single binary, fast, GitHub-release friendly; reusable core library + thin CLI.
-- **Codex only** — no Claude support yet.
+- **Codex only at the time** — Claude Code support was added later (see note above).
 - **No hosting** — no accounts, no cloud, no server, no subscriptions, no background sync.
 - **No SQLite writes** — never modify Codex's `state_db`.
 - **No default JSONL rewriting** — normal import is byte-for-byte. The only mutation path is the

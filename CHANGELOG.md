@@ -2,6 +2,57 @@
 
 All notable changes to codex-claude-transfer are documented here.
 
+## [0.3.0] - 2026-06-16
+
+### Added
+- **Cross-agent handoff: translate a session from one agent into the other**
+  (`import <bundle> --to codex|claude`). Instead of importing a bundle natively,
+  cct converts each session into the *other* agent's format and writes a real,
+  discoverable session into that agent's home. It goes through a neutral
+  intermediate representation (`agent-session-v1`): the user/assistant
+  conversation is preserved, tool calls and command output are summarized to short
+  text, and the translated session opens with a plain-language handoff preamble
+  (project dir, git, "continue from here"). This is an **honest best-effort
+  translation, not a perfect clone** — model/runtime state, exact tool-call replay,
+  and provider-specific ids do not cross over. Output is deterministic (stable id
+  and timestamps derived from the source), so re-running is an idempotent skip, and
+  the source bundle's checksums are verified before anything is read. Works both
+  directions (Codex→Claude and Claude→Codex); honored under `--dry-run`.
+
+- **Claude Code session support.** Every existing command now works for Claude
+  Code as well as Codex, selected with `--tool claude` (auto-detected when only
+  Claude Code is installed). On import, the bundle's recorded tool always decides
+  where the sessions go, so a Claude bundle is never written into the Codex home
+  or vice versa.
+  - `doctor`/`list`/`export`/`inspect`/`import` read and write Claude Code's
+    `~/.claude/projects/<encoded-cwd>/<uuid>.jsonl` transcripts (override the home
+    with `--claude-home`/`$CLAUDE_HOME`). The encoded project-folder name is
+    reproduced exactly (every character outside `[A-Za-z0-9-]`, including `_`,
+    becomes `-`).
+  - `--map-cwd` for Claude re-encodes the destination project folder **and**
+    rewrites the recorded `cwd` on every transcript line (validated: same line
+    count, only `cwd` changed). `--import-as-copy` assigns a fresh session id
+    (rewritten on every line) under a new `<uuid>.jsonl`. `--replace-with-backup`,
+    `--session`, `--since`, `--all`, `--json`, `age` encryption, and the git
+    handoff (`--with-git`/`--git-push`/`--clone`) all work unchanged.
+  - The interactive `ui` asks which tool to use (when both are installed), and the
+    desktop `app` has a Codex/Claude Code toggle in its top bar.
+  - cct never touches `~/.claude.json` or the Claude cloud — Claude Code
+    rediscovers a dropped-in transcript on its next run, the same scan-and-reconcile
+    contract that makes the Codex path safe.
+- The bundle manifest now records a `tool` field (`codex`/`claude`). Older bundles
+  with no `tool` field are treated as Codex, so they import unchanged.
+
+### Changed
+- Branding cleanup: removed remaining traces of the old `codex-sync` name from
+  internal artifacts and the desktop UI. The `--replace-with-backup` backup suffix
+  is now `.cct-bak-<nanos>` (was `.codexsync-bak-<nanos>`) and the desktop app's
+  loopback request header is `X-Cct-Token` (was `X-Codex-Sync-Token`). These are
+  internal — no bundle, flag, or on-disk session format changed. **Unchanged for
+  compatibility:** the `.codexbundle` extension, the `codex-sync-bundle-v1` bundle
+  format version, and the `--codex-home`/`$CODEX_HOME` flags (these name the Codex
+  tool, not this project), so existing bundles still import.
+
 ## [0.2.0] - 2026-06-16
 
 ### Changed

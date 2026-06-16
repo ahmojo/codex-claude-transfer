@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ahmojo/codex-claude-transfer/internal/claudehome"
+	"github.com/ahmojo/codex-claude-transfer/internal/claudesessions"
 	"github.com/ahmojo/codex-claude-transfer/internal/codexhome"
 	"github.com/ahmojo/codex-claude-transfer/internal/crypt"
 	"github.com/ahmojo/codex-claude-transfer/internal/git"
@@ -76,6 +78,63 @@ func Run(home codexhome.Home) Report {
 	r.checkOptionalTools()
 
 	r.ok("SQLite will not be modified")
+	return r
+}
+
+// RunClaude gathers diagnostics for a Claude Code home. It mirrors Run but for
+// the ~/.claude/projects transcript store. The returned Report reuses the shared
+// shape (its Home.Root/SessionsDir carry the Claude root and projects dir) so the
+// same renderers apply. It never writes anything and never touches the cloud, the
+// account, or ~/.claude.json.
+func RunClaude(home claudehome.Home) Report {
+	r := Report{Home: codexhome.Home{
+		Root:        home.Root,
+		SessionsDir: home.ProjectsDir,
+		Source:      home.Source,
+	}}
+
+	if home.RootExists() {
+		r.ok(fmt.Sprintf("Claude Code home found: %s", home.Root))
+	} else {
+		r.warn(fmt.Sprintf("Claude Code home not found: %s", home.Root))
+	}
+
+	if home.ProjectsDirExists() {
+		r.ok(fmt.Sprintf("Projects folder found: %s", home.ProjectsDir))
+	} else {
+		r.warn(fmt.Sprintf("Projects folder not found: %s", home.ProjectsDir))
+	}
+
+	scan, _ := claudesessions.Scan(home, claudesessions.ScanOptions{})
+	r.ok(fmt.Sprintf("%d transcript files detected", scan.Files))
+	r.ok(fmt.Sprintf("%d valid sessions", scan.Valid))
+	invalid := scan.Invalid
+	if invalid > 0 {
+		r.warn(fmt.Sprintf("%d transcript file(s) could not be parsed", invalid))
+	}
+
+	if missing := countMissingCwd(scan.Sessions); missing > 0 {
+		r.warn(fmt.Sprintf("%d session(s) have cwd paths that do not exist on this device", missing))
+	}
+
+	// Claude-relevant optional tools (git for handoff, age for encryption; zstd
+	// is Codex-only — Claude Code does not compress transcripts).
+	for _, t := range []struct {
+		name      string
+		available bool
+		enables   string
+	}{
+		{"git", git.Available(), "export --with-git, import --clone"},
+		{"age", crypt.Available(), "bundle encryption (--encrypt-to/--passphrase) and decrypting .age bundles"},
+	} {
+		if t.available {
+			r.ok(fmt.Sprintf("Optional tool '%s' found (enables %s)", t.name, t.enables))
+		} else {
+			r.info(fmt.Sprintf("Optional tool '%s' not found — %s unavailable until installed", t.name, t.enables))
+		}
+	}
+
+	r.ok("~/.claude.json and the Claude cloud are never modified")
 	return r
 }
 

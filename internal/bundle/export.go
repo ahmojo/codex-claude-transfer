@@ -14,6 +14,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ahmojo/codex-claude-transfer/internal/agent"
+	"github.com/ahmojo/codex-claude-transfer/internal/claudehome"
+	"github.com/ahmojo/codex-claude-transfer/internal/claudesessions"
 	"github.com/ahmojo/codex-claude-transfer/internal/codexhome"
 	"github.com/ahmojo/codex-claude-transfer/internal/git"
 	"github.com/ahmojo/codex-claude-transfer/internal/sessions"
@@ -21,6 +24,13 @@ import (
 
 // ExportOptions configures an export.
 type ExportOptions struct {
+	// Tool selects which agent's sessions to export ("" / agent.Codex scans the
+	// Codex home; agent.Claude scans ClaudeHome). The chosen tool is recorded in
+	// the manifest so import knows how to place the files back.
+	Tool agent.Kind
+	// ClaudeHome is the resolved Claude Code home, used only when Tool is
+	// agent.Claude. (The Codex home is passed to Export directly.)
+	ClaudeHome claudehome.Home
 	// ProjectPath, when non-empty, restricts the export to sessions whose
 	// SessionMeta cwd matches this (already absolute) path. Leave empty to
 	// export every session regardless of cwd (the `--all` behavior).
@@ -58,11 +68,20 @@ type ExportResult struct {
 // a manifest, and a checksum map. It never reads or writes Codex's SQLite.
 func Export(home codexhome.Home, opts ExportOptions) (ExportResult, error) {
 	var result ExportResult
+	kind := agent.Normalize(opts.Tool)
 
-	scan, err := sessions.Scan(home, sessions.ScanOptions{
-		IncludeArchived:      opts.IncludeArchived,
-		DecompressCompressed: true,
-	})
+	var scan sessions.ScanResult
+	var err error
+	if kind == agent.Claude {
+		scan, err = claudesessions.Scan(opts.ClaudeHome, claudesessions.ScanOptions{
+			IncludeArchived: opts.IncludeArchived,
+		})
+	} else {
+		scan, err = sessions.Scan(home, sessions.ScanOptions{
+			IncludeArchived:      opts.IncludeArchived,
+			DecompressCompressed: true,
+		})
+	}
 	if err != nil {
 		return result, fmt.Errorf("scan sessions: %w", err)
 	}
@@ -92,6 +111,10 @@ func Export(home codexhome.Home, opts ExportOptions) (ExportResult, error) {
 	}
 
 	manifest := newManifest(home, opts)
+	if kind == agent.Claude {
+		manifest.Tool = string(agent.Claude)
+		manifest.SourceCodexHome = opts.ClaudeHome.Root
+	}
 	gi, gitWarns := captureGit(opts, selected)
 	if gi != nil {
 		manifest.Git = gi
@@ -100,7 +123,7 @@ func Export(home codexhome.Home, opts ExportOptions) (ExportResult, error) {
 	// found" notice is itself returned with a nil Info, and must not be dropped.
 	result.Warnings = append(result.Warnings, gitWarns...)
 
-	if err := writeBundle(opts.OutputPath, selected, &manifest); err != nil {
+	if err := writeBundle(opts.OutputPath, selected, &manifest, kind); err != nil {
 		return result, err
 	}
 
@@ -249,7 +272,7 @@ func newManifest(home codexhome.Home, opts ExportOptions) Manifest {
 
 // writeBundle creates the ZIP atomically: it writes to a temp file in the
 // destination directory and renames it into place on success.
-func writeBundle(outputPath string, selected []sessions.Session, manifest *Manifest) error {
+func writeBundle(outputPath string, selected []sessions.Session, manifest *Manifest, kind agent.Kind) error {
 	dir := filepath.Dir(outputPath)
 	tmp, err := os.CreateTemp(dir, ".codexbundle-*.tmp")
 	if err != nil {
@@ -268,7 +291,7 @@ func writeBundle(outputPath string, selected []sessions.Session, manifest *Manif
 	checksums := Checksums{}
 
 	for _, s := range selected {
-		bundlePath := bundlePathFor(s)
+		bundlePath := bundlePathFor(s, kind)
 		sum, err := addFileToZip(zw, bundlePath, s.Path)
 		if err != nil {
 			return fmt.Errorf("add %s: %w", s.Path, err)
@@ -334,9 +357,13 @@ func manifestSession(s sessions.Session, bundlePath, sum string) ManifestSession
 	}
 }
 
-// bundlePathFor returns the forward-slash path inside the ZIP for a session,
-// preserving the YYYY/MM/DD layout under sessions/ (or archived_sessions/).
-func bundlePathFor(s sessions.Session) string {
+// bundlePathFor returns the forward-slash path inside the ZIP for a session. For
+// Codex it preserves the YYYY/MM/DD layout under sessions/ (or archived_sessions/);
+// for Claude Code it preserves the projects/<encoded-cwd>/<uuid>.jsonl layout.
+func bundlePathFor(s sessions.Session, kind agent.Kind) string {
+	if agent.Normalize(kind) == agent.Claude {
+		return path.Join(claudehome.ProjectsSubdir, s.RelPath)
+	}
 	root := codexhome.SessionsSubdir
 	if s.Archived {
 		root = codexhome.ArchivedSessionsSubdir

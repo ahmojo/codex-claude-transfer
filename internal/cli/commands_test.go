@@ -405,7 +405,7 @@ func TestRunImportReplaceWithBackup(t *testing.T) {
 		if err != nil || d.IsDir() {
 			return nil
 		}
-		if strings.Contains(p, ".codexsync-bak-") {
+		if strings.Contains(p, ".cct-bak-") {
 			if b, _ := os.ReadFile(p); string(b) == "locally diverged content\n" {
 				foundBackup = true
 			}

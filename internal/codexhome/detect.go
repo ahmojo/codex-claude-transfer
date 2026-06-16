@@ -6,8 +6,10 @@
 package codexhome
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 const (
@@ -96,4 +98,12 @@ func (h Home) ArchivedSessionsDirExists() bool { return dirExists(h.ArchivedSess
 func dirExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
+}
+
+// RolloutName builds a Codex rollout filename of the form
+// rollout-<YYYY-MM-DDThh-mm-ss>-<id>.jsonl for a given timestamp and session id.
+// It matches the on-disk naming the scanner recognizes, so a synthesized session
+// is discovered like any other.
+func RolloutName(t time.Time, id string) string {
+	return fmt.Sprintf("rollout-%s-%s.jsonl", t.UTC().Format("2006-01-02T15-04-05"), id)
 }

@@ -4,11 +4,17 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>cct</title>
-  <link rel="stylesheet" href="/style.css" />
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <header class="topbar">
     <div class="brand">cct <span class="tag">desktop</span></div>
+    <label class="toolpick">Tool:
+      <select id="tool-select">
+        <option value="codex">Codex</option>
+        <option value="claude">Claude Code</option>
+      </select>
+    </label>
     <div class="muted">Local only &mdash; nothing is uploaded.</div>
   </header>
 
@@ -25,7 +31,7 @@
       <!-- Doctor -->
       <section id="view-doctor" class="view">
         <h1>Health check</h1>
-        <p class="muted">Confirms codex-sync can see your local Codex sessions, and which optional tools are installed.</p>
+        <p class="muted">Confirms cct can see your local sessions for the selected tool, and which optional tools are installed.</p>
         <button class="primary" id="doctor-refresh">Run check</button>
         <div id="doctor-out" class="out"></div>
       </section>
@@ -33,7 +39,7 @@
       <!-- Sessions -->
       <section id="view-sessions" class="view hidden">
         <h1>Your sessions</h1>
-        <p class="muted">Codex sessions discovered on this machine.</p>
+        <p class="muted">Sessions discovered on this machine for the selected tool.</p>
         <button class="primary" id="sessions-refresh">Refresh</button>
         <div id="sessions-out" class="out"></div>
       </section>
@@ -79,7 +85,7 @@
       <!-- Import -->
       <section id="view-import" class="view hidden">
         <h1>Import a bundle</h1>
-        <p class="muted">Bring sessions from a bundle into this machine's Codex home. Always previewed first.</p>
+        <p class="muted">Bring sessions from a bundle into the matching agent's home on this machine. Always previewed first.</p>
         <label class="field">
           <span>Bundle file</span>
           <input id="import-path" type="text" placeholder="path to .codexbundle" />
@@ -101,6 +107,6 @@
     </main>
   </div>
 
-  <script src="/app.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>

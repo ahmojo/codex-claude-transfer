@@ -12,9 +12,14 @@ import (
 	"strings"
 )
 
-// sessionEntryRe matches the only bundle paths we will import: rollout files
-// under sessions/YYYY/MM/DD/. Compressed (.jsonl.zst) variants are allowed.
+// sessionEntryRe matches the only Codex bundle paths we will import: rollout
+// files under sessions/YYYY/MM/DD/. Compressed (.jsonl.zst) variants are allowed.
 var sessionEntryRe = regexp.MustCompile(`^sessions/\d{4}/\d{2}/\d{2}/rollout-[^/]+\.jsonl(\.zst)?$`)
+
+// claudeEntryRe matches the only Claude Code bundle paths we will import:
+// transcripts under projects/<encoded-cwd>/<uuid>.jsonl. The encoded folder and
+// the uuid are single path segments (no nested directories, no traversal).
+var claudeEntryRe = regexp.MustCompile(`^projects/[^/]+/[^/]+\.jsonl$`)
 
 // CleanRelPath validates a ZIP entry name and returns it as a safe, canonical,
 // forward-slash relative path. It rejects anything that could escape the
@@ -44,10 +49,16 @@ func CleanRelPath(name string) (string, error) {
 	return name, nil
 }
 
-// IsSessionEntry reports whether a (already cleaned) relative path is a rollout
-// file under sessions/YYYY/MM/DD/.
+// IsSessionEntry reports whether a (already cleaned) relative path is a Codex
+// rollout file under sessions/YYYY/MM/DD/.
 func IsSessionEntry(rel string) bool {
 	return sessionEntryRe.MatchString(rel)
+}
+
+// IsClaudeSessionEntry reports whether a (already cleaned) relative path is a
+// Claude Code transcript under projects/<encoded-cwd>/<uuid>.jsonl.
+func IsClaudeSessionEntry(rel string) bool {
+	return claudeEntryRe.MatchString(rel)
 }
 
 // DestPath joins a cleaned relative bundle path onto the Codex home root and
