@@ -47,14 +47,19 @@ so portability is moot.
 ```
 
 - One **JSONL transcript per session**, named by the session UUID.
-- Grouped into a directory whose name is the project's **working directory, encoded**: the path's
-  `:`, `\`, `/`, and spaces are replaced with `-`. Examples observed:
+- Grouped into a directory whose name is the project's **working directory, encoded**.
+  **Encoding rule (verified by probing tricky paths):** every character that is **not**
+  `[A-Za-z0-9_-]` is replaced with `-`, per character. So `:`, `\`, `/`, space, `.`, `(`, `)`,
+  `@`, … each become `-`; `_`, `-`, digits, and **case** are preserved. Examples:
   - `C:\Users\faruk\Documents\Codex_sync` → `C--Users-faruk-Documents-Codex-sync`
   - `C:\Users\faruk\Desktop\Java documentation` → `C--Users-faruk-Desktop-Java-documentation`
-  - `C:\Users\faruk\AppData\Local\Temp\cstest1` → `C--Users-faruk-AppData-Local-Temp-cstest1`
-  - `_` is preserved (so it is **not** a blanket `[^A-Za-z0-9]→-`). Full character mapping
-    (dots, unicode, very long paths, POSIX `/` roots on macOS/Linux) is **not yet fully
-    characterized** — see open questions.
+  - `C:\Users\faruk\AppData\Local\Temp\cs.Enc Test (v2)@home_x-y`
+    → `C--Users-faruk-AppData-Local-Temp-cs-Enc-Test--v2--home-x-y`
+- **The encoding is lossy / not reversible** — a `-` in the folder name could have come from `\`,
+  `/`, `:`, space, `.`, etc. So the folder name alone cannot reconstruct the real path; the
+  per-line **`cwd` field is the source of truth** for the actual project path. (macOS/Linux POSIX
+  roots like `/home/user/proj` should follow the same rule → `-home-user-proj`, but that should be
+  confirmed on a real non-Windows install.)
 
 This is directly analogous to Codex's `~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<uuid>.jsonl`,
 except the **project association is the directory name** rather than a date layout.
@@ -100,6 +105,12 @@ the app reconciles" contract codex-sync depends on). It does. Verified on v2.1.1
   path's encoded folder and resume from that cwd → **found** (`Not logged in`). Negative control —
   resume the same id from a third cwd whose folder lacks the file → **not found**.
 
+- **No trust/registry entry needed (verified).** The throwaway project paths used in these tests
+  were **never** added to `~/.claude.json`'s `projects` map (0 entries), yet resume still *found*
+  the session. So session discovery is independent of the `~/.claude.json` registry — an import
+  need never touch it (the analog of Codex's "never touch SQLite"). The interactive trust dialog,
+  if any, is a separate permissions concern for *running tools*, not a gate on session visibility.
+
 **Conclusion:** session discovery is filesystem-based and scoped to the current cwd's encoded
 folder. Dropping a transcript into the destination's `projects/<encoded-cwd>/` makes it
 resumable, with no database/registry to update. This is the same scan-and-reconcile contract that
@@ -128,21 +139,29 @@ defensive JSONL parsing.
 
 ---
 
-## 3. Open questions (resolve before/while building)
+## 3. Open questions
 
-- **Full folder-name encoding rule.** Exact character mapping, including `.`, unicode, drive vs
-  POSIX roots (`/home/...` on macOS/Linux), and any length/case handling.
-- **Sub-agent sidechains.** Does a logical session span multiple files (a main transcript plus
-  sidechain transcripts), and must they travel together to resume cleanly? (`isSidechain` exists.)
-- **Trust / project entry.** Does a freshly imported project need a `~/.claude.json` `projects`
-  entry (trust dialog) to be usable normally, or does resume work without it? (Our test bypassed
-  permissions.)
-- **Attachments.** Are images/attachments inlined (base64) like Codex, or referenced as separate
-  files that must be bundled too? (`attachment` line type exists.)
+**Resolved since first draft:**
+
+- ~~Folder-name encoding rule~~ — **resolved** (§1): `[^A-Za-z0-9_-] → -` per character; lossy.
+- ~~Trust / project entry~~ — **resolved** (§1): discovery needs **no** `~/.claude.json` entry.
+
+**Still open (verify before shipping):**
+
+- **Sub-agent sidechains (the main one).** Does a logical session span multiple files (a main
+  transcript plus separate sidechain/sub-agent transcripts that must travel together to resume
+  cleanly), or are sidechains inlined in the one file with `isSidechain: true`? **Could not be
+  determined here** — all 5 sessions on this machine are single-file, single-`sessionId`,
+  `isSidechain: false`, and none used a `Task`/sub-agent tool. Needs a logged-in session that
+  spawns a sub-agent. Until then, treat a session as possibly-multi-file and design export to
+  detect/gather related transcripts defensively.
+- **Attachments.** Are images/attachments inlined (base64) or referenced as separate files that
+  must be bundled too? (`attachment` line type exists; one transcript had 79 of them.)
 - **Compression.** Does Claude Code ever compress old transcripts (Codex has `.jsonl.zst`)? None
   seen so far.
-- **macOS/Linux paths.** Confirm the same `~/.claude/projects/<encoded-cwd>/` layout and encoding
-  on non-Windows machines (the cross-machine case usually mixes OSes).
+- **macOS/Linux paths.** Confirm the same `~/.claude/projects/<encoded-cwd>/` layout and that the
+  `[^A-Za-z0-9_-]→-` rule yields `-home-user-proj` for `/home/user/proj` (the cross-machine case
+  usually mixes OSes).
 
 ---
 
