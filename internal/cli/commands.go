@@ -1,4 +1,4 @@
-// Package cli implements the codex-sync command-line interface. The CLI is a
+// Package cli implements the cct command-line interface. The CLI is a
 // thin layer over the reusable core packages (codexhome, sessions, doctor) so
 // the same core can later back a desktop app.
 package cli
@@ -12,13 +12,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ahmojo/Codex_Sync/internal/bundle"
-	"github.com/ahmojo/Codex_Sync/internal/codexhome"
-	"github.com/ahmojo/Codex_Sync/internal/crypt"
-	"github.com/ahmojo/Codex_Sync/internal/doctor"
-	"github.com/ahmojo/Codex_Sync/internal/git"
-	"github.com/ahmojo/Codex_Sync/internal/sessions"
-	"github.com/ahmojo/Codex_Sync/internal/webui"
+	"github.com/ahmojo/codex-claude-transfer/internal/bundle"
+	"github.com/ahmojo/codex-claude-transfer/internal/codexhome"
+	"github.com/ahmojo/codex-claude-transfer/internal/crypt"
+	"github.com/ahmojo/codex-claude-transfer/internal/doctor"
+	"github.com/ahmojo/codex-claude-transfer/internal/git"
+	"github.com/ahmojo/codex-claude-transfer/internal/sessions"
+	"github.com/ahmojo/codex-claude-transfer/internal/webui"
 )
 
 // Run parses args (excluding the program name) and executes the requested
@@ -367,7 +367,7 @@ func runExport(args []string, stdout, stderr io.Writer) int {
 	// Opt-in --git-push completes the handoff: it pushes the project's code to its
 	// own git remote so the commit recorded in the bundle is actually fetchable on
 	// the other machine. It pushes CODE to YOUR remote only — never sessions, never
-	// to any codex-sync server — and runs before the export so the bundle records
+	// to any cct server — and runs before the export so the bundle records
 	// the now-pushed state. It is scoped to a single project (not --all/--session).
 	if f.gitPush {
 		if code := pushProject(absProject, session, f.all, stdout, stderr); code != 0 {
@@ -499,7 +499,7 @@ func runInspect(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if len(f.positional) != 1 {
-		fmt.Fprintln(stderr, "usage: codex-sync inspect <file.codexbundle>")
+		fmt.Fprintln(stderr, "usage: cct inspect <file.codexbundle>")
 		return 2
 	}
 	bundlePath, cleanup, code := resolveBundlePath(f, stderr)
@@ -540,7 +540,7 @@ func resolveBundlePath(f commonFlags, stderr io.Writer) (string, func(), int) {
 		fmt.Fprintln(stderr, "error: "+ageMissingMessage)
 		return "", noop, 1
 	}
-	tmpDir, err := os.MkdirTemp("", "codex-sync-dec-")
+	tmpDir, err := os.MkdirTemp("", "cct-dec-")
 	if err != nil {
 		fmt.Fprintf(stderr, "error: cannot create temp dir: %v\n", err)
 		return "", noop, 1
@@ -566,7 +566,7 @@ func runImport(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if len(f.positional) != 1 {
-		fmt.Fprintln(stderr, "usage: codex-sync import <file.codexbundle> [--dry-run] [--session <id>] [--project <path>] [--map-cwd OLD=NEW] [--replace-with-backup] [--import-as-copy] [--clone <dir>]")
+		fmt.Fprintln(stderr, "usage: cct import <file.codexbundle> [--dry-run] [--session <id>] [--project <path>] [--map-cwd OLD=NEW] [--replace-with-backup] [--import-as-copy] [--clone <dir>]")
 		return 2
 	}
 	if f.replaceBackup && f.importAsCopy {
@@ -634,7 +634,7 @@ func runImport(args []string, stdout, stderr io.Writer) int {
 // pushProject handles the opt-in --git-push step on export: it pushes the
 // project's current branch to its git remote. This is the only outbound action
 // on export, it is explicit, and it uploads your code to your own remote — never
-// your sessions, and never to any codex-sync service. It returns a non-zero exit
+// your sessions, and never to any cct service. It returns a non-zero exit
 // code on failure so the export aborts before writing a bundle that would
 // misleadingly claim a commit is fetchable.
 func pushProject(absProject, session string, all bool, stdout, stderr io.Writer) int {
@@ -657,7 +657,7 @@ func pushProject(absProject, session string, all bool, stdout, stderr io.Writer)
 		return 1
 	}
 	fmt.Fprintf(stdout, "Pushed branch %q to remote %q.\n", branch, remote)
-	fmt.Fprintln(stdout, "(This uploads your code to your own git remote only — codex-sync never uploads your sessions.)")
+	fmt.Fprintln(stdout, "(This uploads your code to your own git remote only — cct never uploads your sessions.)")
 	fmt.Fprintln(stdout)
 	return 0
 }
@@ -696,12 +696,13 @@ func hasPrefix(s, prefix string) bool {
 }
 
 func printUsage(w io.Writer) {
-	fmt.Fprint(w, `codex-sync — local Codex session portability (unofficial)
+	fmt.Fprint(w, `cct — Codex & Claude Code session transfer (unofficial)
 
-  Export. Move. Import. Continue your local Codex sessions anywhere.
+  Export. Move. Import. Continue your local coding-agent sessions on another machine.
+  (Codex works today; Claude Code support is in progress.)
 
 Usage:
-  codex-sync <command> [flags]
+  cct <command> [flags]
 
 Commands:
   doctor    Read-only health check: find your Codex home, count sessions,
@@ -714,7 +715,7 @@ Commands:
             below for you (shows the equivalent command each time)
   app       Launch the local desktop GUI in your browser (loopback-only,
             nothing is uploaded)
-  version   Print the codex-sync version (also --version)
+  version   Print the cct version (also --version)
   completion Print a shell completion script (bash, zsh, or fish)
   help      Show this help
 
@@ -779,32 +780,32 @@ If a tool is missing, the matching feature errors with guidance or is skipped;
 nothing else is affected. .age bundles are auto-detected on import/inspect.
 
 Examples:
-  codex-sync ui                            # interactive, guided menu
-  codex-sync doctor
-  codex-sync list
-  codex-sync export --project .            # -> <project>.codexbundle
-  codex-sync export --project . --with-git # also record git remote/commit
-  codex-sync export --all                  # -> codex-sessions.codexbundle
-  codex-sync export --all --since 7d       # everything updated in the last 7 days
-  codex-sync export --project . --since 2026-06-01
-  codex-sync export --session 9f3c1a2b     # one session by thread-id prefix
-  codex-sync inspect ./my-project.codexbundle
-  codex-sync import ./my-project.codexbundle --dry-run
-  codex-sync import ./my-project.codexbundle
-  codex-sync import ./my-project.codexbundle --map-cwd "/old/path=/new/path"
-  codex-sync import ./my-project.codexbundle --replace-with-backup
-  codex-sync import ./my-project.codexbundle --import-as-copy
-  codex-sync import ./my-project.codexbundle --clone ~/dev/project
-  codex-sync export --project . --encrypt-to age1qz...   # -> <project>.codexbundle.age
-  codex-sync export --all --passphrase                   # passphrase-encrypted
-  codex-sync import ./my-project.codexbundle.age --identity ~/.age/key.txt
-  codex-sync inspect ./my-project.codexbundle.age --passphrase
+  cct ui                            # interactive, guided menu
+  cct doctor
+  cct list
+  cct export --project .            # -> <project>.codexbundle
+  cct export --project . --with-git # also record git remote/commit
+  cct export --all                  # -> codex-sessions.codexbundle
+  cct export --all --since 7d       # everything updated in the last 7 days
+  cct export --project . --since 2026-06-01
+  cct export --session 9f3c1a2b     # one session by thread-id prefix
+  cct inspect ./my-project.codexbundle
+  cct import ./my-project.codexbundle --dry-run
+  cct import ./my-project.codexbundle
+  cct import ./my-project.codexbundle --map-cwd "/old/path=/new/path"
+  cct import ./my-project.codexbundle --replace-with-backup
+  cct import ./my-project.codexbundle --import-as-copy
+  cct import ./my-project.codexbundle --clone ~/dev/project
+  cct export --project . --encrypt-to age1qz...   # -> <project>.codexbundle.age
+  cct export --all --passphrase                   # passphrase-encrypted
+  cct import ./my-project.codexbundle.age --identity ~/.age/key.txt
+  cct inspect ./my-project.codexbundle.age --passphrase
 
 After importing, restart the Codex App (or run Codex again) so it scans and
 reconciles the imported rollout files.
 
 Notes:
-  codex-sync never modifies Codex's SQLite state DB; Codex rebuilds its own
+  cct never modifies Codex's SQLite state DB; Codex rebuilds its own
   index from the JSONL files on its next scan.
   .codexbundle files may contain prompts, code, terminal output, paths, and
   secrets — do not share them publicly. See docs/safety.md.

@@ -1,6 +1,6 @@
 // Package zstdcli recovers metadata from zstd-compressed Codex rollout files by
 // shelling out to the `zstd` CLI (https://github.com/facebook/zstd). Like the
-// git and age integrations, codex-sync stays a single, dependency-free binary
+// git and age integrations, cct stays a single, dependency-free binary
 // and reuses a well-known external tool when it is available. Codex writes
 // `.jsonl.zst` files as standard zstd frames, so the stock `zstd -d` reads them.
 //

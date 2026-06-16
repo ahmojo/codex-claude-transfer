@@ -1,7 +1,7 @@
 // Package codexhome resolves the location of the local Codex home directory
 // (~/.codex) and the session storage directories inside it.
 //
-// codex-sync never modifies Codex's SQLite state DB. This package only locates
+// cct never modifies Codex's SQLite state DB. This package only locates
 // directories; it does not create or write anything.
 package codexhome
 

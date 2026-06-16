@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ahmojo/Codex_Sync/internal/codexhome"
+	"github.com/ahmojo/codex-claude-transfer/internal/codexhome"
 )
 
 func fakeHome(t *testing.T) codexhome.Home {

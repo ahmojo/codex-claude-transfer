@@ -1,4 +1,4 @@
-// Package webui serves codex-sync's local desktop GUI: a small single-page app
+// Package webui serves cct's local desktop GUI: a small single-page app
 // served over a loopback-only HTTP server, backed by the same core packages as
 // the CLI. It is pure standard library (no third-party web framework, no build
 // step), so it cross-compiles to every target like the rest of the binary.
@@ -24,7 +24,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ahmojo/Codex_Sync/internal/codexhome"
+	"github.com/ahmojo/codex-claude-transfer/internal/codexhome"
 )
 
 //go:embed static/*
@@ -69,7 +69,7 @@ func Run(opts Options, stdout, stderr io.Writer) int {
 	}
 
 	url := fmt.Sprintf("http://%s/?token=%s", ln.Addr().String(), token)
-	fmt.Fprintln(stdout, "codex-sync desktop is running locally (nothing is uploaded).")
+	fmt.Fprintln(stdout, "cct desktop is running locally (nothing is uploaded).")
 	fmt.Fprintf(stdout, "Open this URL in your browser if it does not open automatically:\n  %s\n", url)
 	fmt.Fprintln(stdout, "Press Ctrl-C to stop.")
 

@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/ahmojo/Codex_Sync/internal/bundle"
-	"github.com/ahmojo/Codex_Sync/internal/doctor"
-	"github.com/ahmojo/Codex_Sync/internal/sessions"
+	"github.com/ahmojo/codex-claude-transfer/internal/bundle"
+	"github.com/ahmojo/codex-claude-transfer/internal/doctor"
+	"github.com/ahmojo/codex-claude-transfer/internal/sessions"
 )
 
 func printReport(w io.Writer, report doctor.Report) {
@@ -152,7 +152,7 @@ func printCWDSummary(w io.Writer, summary bundle.CWDSummary, bundlePath string, 
 		fmt.Fprintln(w, "Some of these folders do not exist on this machine, so those sessions")
 		fmt.Fprintln(w, "will be hidden in Codex's sidebar until you create the folder (then")
 		fmt.Fprintln(w, "restart Codex) or remap the cwd on import, e.g.:")
-		fmt.Fprintf(w, "  codex-sync import %s --map-cwd \"<old-cwd>=<new-local-path>\"\n", bundlePath)
+		fmt.Fprintf(w, "  cct import %s --map-cwd \"<old-cwd>=<new-local-path>\"\n", bundlePath)
 	}
 }
 
@@ -240,7 +240,7 @@ func printImport(w io.Writer, path string, res bundle.ImportResult) {
 	if res.Imported > 0 || res.Replaced > 0 || res.ImportedCopies > 0 {
 		fmt.Fprintln(w, "Import complete.")
 		fmt.Fprintln(w, "Next: restart the Codex App (or run Codex again) so it scans and")
-		fmt.Fprintln(w, "reconciles the imported rollout files. codex-sync does not modify Codex's SQLite.")
+		fmt.Fprintln(w, "reconciles the imported rollout files. cct does not modify Codex's SQLite.")
 	} else {
 		fmt.Fprintln(w, "Nothing to import (all sessions already present or skipped).")
 	}

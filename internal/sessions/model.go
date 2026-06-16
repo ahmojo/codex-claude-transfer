@@ -3,7 +3,7 @@
 // Codex stores each session as a JSONL rollout file under
 // ~/.codex/sessions/YYYY/MM/DD/. Files may be plain (.jsonl) or zstd-compressed
 // (.jsonl.zst). The JSONL format is Codex's durable, canonical record; SQLite is
-// only an index. codex-sync therefore treats these rollout files as the source
+// only an index. cct therefore treats these rollout files as the source
 // of truth and never touches SQLite.
 //
 // The Codex on-disk format can change. All parsing here is best-effort and

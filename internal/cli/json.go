@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/ahmojo/Codex_Sync/internal/bundle"
-	"github.com/ahmojo/Codex_Sync/internal/doctor"
-	"github.com/ahmojo/Codex_Sync/internal/sessions"
+	"github.com/ahmojo/codex-claude-transfer/internal/bundle"
+	"github.com/ahmojo/codex-claude-transfer/internal/doctor"
+	"github.com/ahmojo/codex-claude-transfer/internal/sessions"
 )
 
 // This file holds the --json renderers. They emit a single, stable JSON object
-// to stdout so codex-sync can be scripted (jq, automation, other tools). Human
+// to stdout so cct can be scripted (jq, automation, other tools). Human
 // status text and warnings still go to stderr; stdout stays pure JSON.
 
 // writeJSON marshals v as indented JSON followed by a newline. A marshal error

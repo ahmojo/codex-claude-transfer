@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ahmojo/Codex_Sync/internal/safety"
+	"github.com/ahmojo/codex-claude-transfer/internal/safety"
 )
 
 // metaSessionBytes builds a minimal but realistic plain-JSONL rollout with a

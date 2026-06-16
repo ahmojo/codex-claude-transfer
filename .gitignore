@@ -1,6 +1,6 @@
-# Built binaries (root-anchored so the cmd/codex-sync/ source dir is NOT ignored)
-/codex-sync
-/codex-sync.exe
+# Built binaries (root-anchored so the cmd/cct/ source dir is NOT ignored)
+/cct
+/cct.exe
 /dist/
 /build/
 

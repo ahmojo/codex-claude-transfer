@@ -1,9 +1,9 @@
 // Package crypt provides optional bundle encryption by shelling out to the
 // `age` CLI (https://github.com/FiloSottile/age). It deliberately does not embed
-// a crypto library: like the git integration, codex-sync stays a single,
+// a crypto library: like the git integration, cct stays a single,
 // dependency-free binary and reuses a well-known external tool when the user
 // opts into encryption. If `age` is not installed, encryption simply errors with
-// guidance and nothing else in codex-sync is affected.
+// guidance and nothing else in cct is affected.
 package crypt
 
 import (

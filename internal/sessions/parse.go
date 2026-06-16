@@ -9,7 +9,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/ahmojo/Codex_Sync/internal/zstdcli"
+	"github.com/ahmojo/codex-claude-transfer/internal/zstdcli"
 )
 
 // Scan limits, mirroring the spirit of Codex's own head/event scan limits. We

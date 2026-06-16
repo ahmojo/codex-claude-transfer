@@ -15,7 +15,7 @@ func CopyAtomic(dest string, r io.Reader) (err error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(dir, ".codex-sync-*.tmp")
+	tmp, err := os.CreateTemp(dir, ".cct-*.tmp")
 	if err != nil {
 		return err
 	}

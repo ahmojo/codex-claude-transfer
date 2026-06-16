@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ahmojo/Codex_Sync/internal/sessions"
-	"github.com/ahmojo/Codex_Sync/internal/zstdcli"
+	"github.com/ahmojo/codex-claude-transfer/internal/sessions"
+	"github.com/ahmojo/codex-claude-transfer/internal/zstdcli"
 )
 
 // Fixed non-session_meta lines used to prove they are preserved byte-for-byte.

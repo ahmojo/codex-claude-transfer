@@ -1,0 +1,23 @@
+{
+    "version": "0.1.13",
+    "description": "Local Codex session portability across machines (unofficial)",
+    "homepage": "https://github.com/ahmojo/codex-claude-transfer",
+    "license": "MIT",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/ahmojo/codex-claude-transfer/releases/download/v0.1.13/cct_v0.1.13_windows_amd64.tar.gz",
+            "hash": "562646671b4db86fa03226c61e07e352f45db792a8332857caf280f1acaa44db",
+            "extract_dir": "cct_v0.1.13_windows_amd64"
+        }
+    },
+    "bin": "cct.exe",
+    "checkver": "github",
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/ahmojo/codex-claude-transfer/releases/download/v$version/cct_v$version_windows_amd64.tar.gz",
+                "extract_dir": "cct_v$version_windows_amd64"
+            }
+        }
+    }
+}

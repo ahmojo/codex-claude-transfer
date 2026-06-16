@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ahmojo/Codex_Sync/internal/zstdcli"
+	"github.com/ahmojo/codex-claude-transfer/internal/zstdcli"
 )
 
 // writeCompressedRollout writes a real zstd-compressed rollout file named

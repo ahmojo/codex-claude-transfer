@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ahmojo/Codex_Sync/internal/safety"
+	"github.com/ahmojo/codex-claude-transfer/internal/safety"
 )
 
 const sampleRel = "sessions/2026/06/13/rollout-2026-06-13T18-22-01-aaaa1111-2222-3333-4444-555566667777.jsonl"

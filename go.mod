@@ -1,4 +1,4 @@
-module github.com/ahmojo/Codex_Sync
+module github.com/ahmojo/codex-claude-transfer
 
 go 1.23.0
 

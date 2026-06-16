@@ -1,11 +1,25 @@
 # Changelog
 
-All notable changes to codex-sync are documented here.
+All notable changes to codex-claude-transfer are documented here.
+
+## [Unreleased]
+
+### Changed
+- **Renamed the project from `codex-sync` to `codex-claude-transfer`**, with the
+  command shortened to **`cct`**. The old "sync" name was misleading (the tool
+  does a deliberate manual *transfer*, not automatic syncing), and the new name
+  reflects that it is becoming a multi-agent tool (Codex today, Claude Code
+  support in progress). The Go module path
+  (`github.com/ahmojo/codex-claude-transfer`), `cmd/` directory (`cmd/cct`), docs,
+  workflows, and packaging manifests were renamed. **Unchanged for
+  compatibility:** the `.codexbundle` extension, the `codex-sync-bundle-v1` bundle
+  format version, and the `--codex-home` / `$CODEX_HOME` flags (these name the
+  Codex tool, not this project), so existing bundles still import.
 
 ## [0.1.13] - 2026-06-16
 
 ### Added
-- `codex-sync app`: a desktop GUI. It launches a small **loopback-only** local web
+- `cct app`: a desktop GUI. It launches a small **loopback-only** local web
   server and opens your browser to a single-page app with Doctor, Sessions,
   Export, Inspect, and Import views, all backed by the same core as the CLI. It is
   pure standard library (no web framework, no build step), so it ships to every
@@ -21,7 +35,7 @@ All notable changes to codex-sync are documented here.
   pushes the project's current branch to its own git remote (`git push <remote>
   <branch>`) so the commit recorded in the bundle is actually fetchable on the
   other machine. It uploads **your code to your own remote only — never your
-  sessions, and never to any codex-sync service**, and is deliberately
+  sessions, and never to any cct service**, and is deliberately
   conservative: it never force-pushes, never pushes tags, and never creates a
   remote (a diverged remote is rejected as a non-fast-forward). Scoped to a single
   project (not `--all`/`--session`); if the push fails, the export stops rather
@@ -31,10 +45,10 @@ All notable changes to codex-sync are documented here.
 ## [0.1.11] - 2026-06-15
 
 ### Added
-- `codex-sync version` (and `--version`) prints the build version plus OS/arch
+- `cct version` (and `--version`) prints the build version plus OS/arch
   and Go version. Release binaries embed the tag via the linker; `go install`
   builds report the module version.
-- `codex-sync completion <bash|zsh|fish>` prints a shell completion script for
+- `cct completion <bash|zsh|fish>` prints a shell completion script for
   the commands and flags.
 - `doctor --json` now has machine-readable output too (joining list/inspect/
   export/import).
@@ -91,7 +105,7 @@ All notable changes to codex-sync are documented here.
 ## [0.1.8] - 2026-06-14
 
 ### Changed
-- `codex-sync ui` is much easier to use, especially for import:
+- `cct ui` is much easier to use, especially for import:
   - **Import now reads the bundle first** and shows, in plain language, which
     project folders the sessions came from and which of those are missing on this
     computer. For each missing folder it offers three clear choices — *create
@@ -123,7 +137,7 @@ All notable changes to codex-sync are documented here.
 ## [0.1.7] - 2026-06-14
 
 ### Fixed
-- `codex-sync ui`: path prompts (project, bundle, output, clone, identity) now
+- `cct ui`: path prompts (project, bundle, output, clone, identity) now
   tolerate a path typed with surrounding quotes. Previously a quoted Windows
   path like `"C:\Users\you\project"` kept its literal quotes, so it was treated
   as a relative path and prefixed with the current directory — producing a
@@ -134,10 +148,10 @@ All notable changes to codex-sync are documented here.
 ## [0.1.6] - 2026-06-14
 
 ### Added
-- Interactive mode: `codex-sync ui` opens a guided terminal menu
+- Interactive mode: `cct ui` opens a guided terminal menu
   (Export / Import / Inspect / List / Doctor) that asks only the questions
   relevant to your choice, populates the export "pick a session" list from your
-  local sessions, prints the exact equivalent `codex-sync …` command, and runs
+  local sessions, prints the exact equivalent `cct …` command, and runs
   it through the same code path as the flags (so behavior is identical and
   nothing is hidden). Imports are always previewed with `--dry-run` first and
   only applied after you confirm. Requires an interactive terminal; in a pipe or
@@ -174,7 +188,7 @@ All notable changes to codex-sync are documented here.
 
 ### Added
 - Optional bundle encryption via the external `age` tool
-  (https://github.com/FiloSottile/age), keeping codex-sync a single,
+  (https://github.com/FiloSottile/age), keeping cct a single,
   dependency-free binary (like the git integration, it shells out):
   - `export --encrypt-to <recipient>`: encrypt the bundle to one or more age
     recipients (`age1...`, `ssh-ed25519 ...`); repeatable. Output is written to
@@ -186,7 +200,7 @@ All notable changes to codex-sync are documented here.
     file, requiring `--identity <file>` or `--passphrase`. The temporary
     plaintext is removed when the command finishes.
   - If `age` is not installed, encryption/decryption fails with install guidance
-    and nothing else in codex-sync is affected. codex-sync still never uploads.
+    and nothing else in cct is affected. cct still never uploads.
 
 ## [0.1.3] - 2026-06-14
 
@@ -205,7 +219,7 @@ All notable changes to codex-sync are documented here.
     (`git clone … && git checkout <commit>`) are printed.
   - `import --clone <dir>`: after importing sessions, clone the bundle's
     recorded remote into `<dir>` and check out the recorded commit. Opt-in;
-    skipped under `--dry-run`. codex-sync still never pushes or uploads.
+    skipped under `--dry-run`. cct still never pushes or uploads.
 
 ## [0.1.2] - 2026-06-14
 

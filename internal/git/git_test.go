@@ -12,9 +12,9 @@ import (
 // the machine's global git config.
 func gitEnv(t *testing.T) {
 	t.Helper()
-	t.Setenv("GIT_AUTHOR_NAME", "codex-sync-test")
+	t.Setenv("GIT_AUTHOR_NAME", "cct-test")
 	t.Setenv("GIT_AUTHOR_EMAIL", "test@example.com")
-	t.Setenv("GIT_COMMITTER_NAME", "codex-sync-test")
+	t.Setenv("GIT_COMMITTER_NAME", "cct-test")
 	t.Setenv("GIT_COMMITTER_EMAIL", "test@example.com")
 }
 

@@ -21,7 +21,7 @@ var completionCommands = []completionCommand{
 	{"inspect", "Show a bundle's contents (read-only)"},
 	{"import", "Import a bundle into your Codex home"},
 	{"ui", "Interactive guided menu"},
-	{"version", "Print the codex-sync version"},
+	{"version", "Print the cct version"},
 	{"completion", "Print a shell completion script"},
 	{"help", "Show help"},
 }
@@ -36,7 +36,7 @@ var completionFlags = []string{
 // runCompletion prints a completion script for the requested shell.
 func runCompletion(args []string, stdout, stderr io.Writer) int {
 	if len(args) != 1 {
-		fmt.Fprintln(stderr, "usage: codex-sync completion <bash|zsh|fish>")
+		fmt.Fprintln(stderr, "usage: cct completion <bash|zsh|fish>")
 		return 2
 	}
 	switch args[0] {
@@ -62,8 +62,8 @@ func commandNames() string {
 }
 
 func bashCompletion() string {
-	return fmt.Sprintf(`# bash completion for codex-sync
-# Enable with:  source <(codex-sync completion bash)
+	return fmt.Sprintf(`# bash completion for cct
+# Enable with:  source <(cct completion bash)
 _codex_sync() {
     local cur commands flags
     cur="${COMP_WORDS[COMP_CWORD]}"
@@ -80,7 +80,7 @@ _codex_sync() {
     COMPREPLY=( $(compgen -f -- "$cur") )
     return 0
 }
-complete -o default -F _codex_sync codex-sync
+complete -o default -F _codex_sync cct
 `, commandNames(), strings.Join(completionFlags, " "))
 }
 
@@ -93,39 +93,39 @@ func zshCompletion() string {
 	for _, f := range completionFlags {
 		fmt.Fprintf(&flags, "    '%s' \\\n", f)
 	}
-	return fmt.Sprintf(`#compdef codex-sync
-# zsh completion for codex-sync
-# Enable with:  source <(codex-sync completion zsh)
+	return fmt.Sprintf(`#compdef cct
+# zsh completion for cct
+# Enable with:  source <(cct completion zsh)
 _codex_sync() {
   local -a cmds
   cmds=(
 %s  )
   if (( CURRENT == 2 )); then
-    _describe -t commands 'codex-sync command' cmds
+    _describe -t commands 'cct command' cmds
     return
   fi
   _arguments -s \
 %s    '*:file:_files'
 }
-compdef _codex_sync codex-sync
+compdef _codex_sync cct
 `, cmds.String(), flags.String())
 }
 
 func fishCompletion() string {
 	var b strings.Builder
-	b.WriteString("# fish completion for codex-sync\n")
-	b.WriteString("# Enable with:  codex-sync completion fish | source\n")
+	b.WriteString("# fish completion for cct\n")
+	b.WriteString("# Enable with:  cct completion fish | source\n")
 	for _, c := range completionCommands {
-		fmt.Fprintf(&b, "complete -c codex-sync -n __fish_use_subcommand -a %s -d %q\n", c.name, c.desc)
+		fmt.Fprintf(&b, "complete -c cct -n __fish_use_subcommand -a %s -d %q\n", c.name, c.desc)
 	}
 	for _, f := range completionFlags {
 		switch {
 		case f == "-o":
 			// handled together with --output below
 		case f == "--output":
-			b.WriteString("complete -c codex-sync -s o -l output -d 'Bundle output path'\n")
+			b.WriteString("complete -c cct -s o -l output -d 'Bundle output path'\n")
 		case strings.HasPrefix(f, "--"):
-			fmt.Fprintf(&b, "complete -c codex-sync -l %s\n", strings.TrimPrefix(f, "--"))
+			fmt.Fprintf(&b, "complete -c cct -l %s\n", strings.TrimPrefix(f, "--"))
 		}
 	}
 	return b.String()

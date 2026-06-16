@@ -105,7 +105,7 @@ func TestRoundTripWithRecipientsFile(t *testing.T) {
 	}
 
 	plain := filepath.Join(dir, "in.bundle")
-	want := []byte("hello codex-sync bundle bytes")
+	want := []byte("hello cct bundle bytes")
 	if err := os.WriteFile(plain, want, 0o600); err != nil {
 		t.Fatal(err)
 	}

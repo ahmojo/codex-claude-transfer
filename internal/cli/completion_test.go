@@ -8,9 +8,9 @@ import (
 
 func TestCompletionScripts(t *testing.T) {
 	cases := map[string]string{
-		"bash": "complete -o default -F _codex_sync codex-sync",
-		"zsh":  "compdef _codex_sync codex-sync",
-		"fish": "complete -c codex-sync",
+		"bash": "complete -o default -F _codex_sync cct",
+		"zsh":  "compdef _codex_sync cct",
+		"fish": "complete -c cct",
 	}
 	for shell, marker := range cases {
 		var out, errOut bytes.Buffer

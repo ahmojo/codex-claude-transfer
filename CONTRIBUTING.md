@@ -1,6 +1,6 @@
-# Contributing to codex-sync
+# Contributing to cct
 
-Thanks for your interest in contributing. `codex-sync` is intentionally small
+Thanks for your interest in contributing. `cct` is intentionally small
 and conservative — please keep changes focused and safe.
 
 ## Before opening a PR

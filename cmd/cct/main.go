@@ -1,4 +1,4 @@
-// Command codex-sync is an unofficial CLI for local Codex session portability:
+// Command cct is an unofficial CLI for local Codex session portability:
 // export sessions on one device, move the bundle manually, import on another.
 // No hosting, accounts, cloud sync, or SQLite modification.
 package main
@@ -6,7 +6,7 @@ package main
 import (
 	"os"
 
-	"github.com/ahmojo/Codex_Sync/internal/cli"
+	"github.com/ahmojo/codex-claude-transfer/internal/cli"
 )
 
 func main() {

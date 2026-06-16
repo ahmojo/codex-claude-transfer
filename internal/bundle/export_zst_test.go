@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ahmojo/Codex_Sync/internal/zstdcli"
+	"github.com/ahmojo/codex-claude-transfer/internal/zstdcli"
 )
 
 // writeCompressedSession writes a real zstd-compressed rollout under the home's

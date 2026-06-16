@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ahmojo/Codex_Sync/internal/codexhome"
+	"github.com/ahmojo/codex-claude-transfer/internal/codexhome"
 )
 
 const testToken = "testtoken123"
@@ -103,7 +103,7 @@ func TestServesIndex(t *testing.T) {
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("index: got %d", res.StatusCode)
 	}
-	if !strings.Contains(string(data), "<title>codex-sync</title>") {
+	if !strings.Contains(string(data), "<title>cct</title>") {
 		t.Errorf("index.html not served")
 	}
 	// Static assets serve too.

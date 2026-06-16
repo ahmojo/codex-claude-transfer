@@ -5,12 +5,12 @@ import (
 	"net/http"
 	"path/filepath"
 
-	"github.com/ahmojo/Codex_Sync/internal/bundle"
-	"github.com/ahmojo/Codex_Sync/internal/crypt"
-	"github.com/ahmojo/Codex_Sync/internal/doctor"
-	"github.com/ahmojo/Codex_Sync/internal/git"
-	"github.com/ahmojo/Codex_Sync/internal/sessions"
-	"github.com/ahmojo/Codex_Sync/internal/zstdcli"
+	"github.com/ahmojo/codex-claude-transfer/internal/bundle"
+	"github.com/ahmojo/codex-claude-transfer/internal/crypt"
+	"github.com/ahmojo/codex-claude-transfer/internal/doctor"
+	"github.com/ahmojo/codex-claude-transfer/internal/git"
+	"github.com/ahmojo/codex-claude-transfer/internal/sessions"
+	"github.com/ahmojo/codex-claude-transfer/internal/zstdcli"
 )
 
 // writeJSON encodes v as the response body.

@@ -2,13 +2,13 @@
 
 > Status: **Complete**. This document records the verified findings from inspecting the
 > open-source [`openai/codex`](https://github.com/openai/codex) repository and the resulting
-> technical direction for `codex-sync` v0.1.
+> technical direction for `cct` v0.1.
 >
 > Update: v0.1.1 later added the opt-in `--map-cwd` import flag. That feature is intentionally
 > narrow: it rewrites only the canonical `cwd` field inside plain `.jsonl` `session_meta` lines
 > and still never touches SQLite.
 
-`codex-sync` is an **unofficial** tool. Codex internals may change at any time; everything below
+`cct` is an **unofficial** tool. Codex internals may change at any time; everything below
 reflects the source as inspected and should be re-verified when Codex changes its storage format.
 
 ---
@@ -161,7 +161,7 @@ Options A (raw JSONL copy) and C (copy + rely on scan-repair) **converge**: copy
   plain `.jsonl` files.
 - **No global path rewriting** — never replace path strings throughout prompts, messages, tool
   output, or other session content.
-- **CLI first** — the desktop GUI shipped later as `codex-sync app` (a loopback-only local web UI
+- **CLI first** — the desktop GUI shipped later as `cct app` (a loopback-only local web UI
   over the same Go core), rather than a native Wails app, to keep the CGO-free single-binary model.
 - **Safe export/import only** — never overwrite existing session files silently; conflicts are
   reported and skipped by default.

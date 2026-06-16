@@ -1,34 +1,42 @@
-# codex-sync
+# codex-claude-transfer
 
-**Export. Move. Import. Continue your local Codex sessions anywhere.**
+**Transfer your local Codex & Claude Code sessions between machines.**
+The command is **`cct`**.
 
-![CI](https://github.com/ahmojo/Codex_Sync/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/ahmojo/codex-claude-transfer/actions/workflows/ci.yml/badge.svg)
 ![Go](https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Status](https://img.shields.io/badge/status-v0.1.13-orange)
 
-> ⚠️ **Unofficial.** Not affiliated with or endorsed by OpenAI. Codex's internals
-> can change at any time and break this tool. Use at your own risk — see the
-> [Disclaimer](#disclaimer).
+> ⚠️ **Unofficial.** Not affiliated with or endorsed by OpenAI or Anthropic.
+> These tools' internals can change at any time and break this tool. Use at your
+> own risk — see the [Disclaimer](#disclaimer).
 
-`codex-sync` is a small, local-only CLI that moves your
-[Codex](https://github.com/openai/codex) sessions between machines by hand. You
+> **Status:** **Codex** session portability works today. **Claude Code** support
+> is in progress — the storage format and the file-based resume contract have been
+> verified (see [`docs/research/claude-code-sessions-investigation.md`](docs/research/claude-code-sessions-investigation.md)),
+> and the shared export/import core is being extended to it. The name reflects
+> that direction.
+
+`cct` is a small, local-only CLI that moves your
+[Codex](https://github.com/openai/codex) sessions between machines by hand (with
+[Claude Code](https://github.com/anthropics/claude-code) support coming). You
 export a project's sessions into one `.codexbundle` file, copy it across however
 you like (USB stick, `scp`, Syncthing, an encrypted drive), and import it on the
-other machine. **No cloud, no account, no server, no daemon** — and Codex's
-SQLite index is never touched.
+other machine. **No cloud, no account, no server, no daemon** — and the agent's
+index/state is never touched.
 
 ```text
-Machine A:  codex-sync export --project .      →  project.codexbundle
+Machine A:  cct export --project .      →  project.codexbundle
                         ⇣  (copy the file across yourself)
-Machine B:  codex-sync import ./project.codexbundle
+Machine B:  cct import ./project.codexbundle
 ```
 
 ## How it works
 
 Codex stores each session as a durable JSONL **rollout file** under
 `~/.codex/sessions/YYYY/MM/DD/`; its SQLite database is just a rebuildable index.
-`codex-sync` works only with those rollout files: **export** packages them (with a
+`cct` works only with those rollout files: **export** packages them (with a
 manifest and SHA-256 checksums) into a `.codexbundle` ZIP, and **import** copies
 them back into place after verifying every checksum. It never writes SQLite —
 Codex re-indexes the files itself on its next run, so imported sessions show up
@@ -38,15 +46,15 @@ the next time you start it.
 
 ```bash
 # From source (Go 1.23+)
-go install github.com/ahmojo/Codex_Sync/cmd/codex-sync@latest
+go install github.com/ahmojo/codex-claude-transfer/cmd/cct@latest
 ```
 
-Or download a prebuilt binary from [Releases](https://github.com/ahmojo/Codex_Sync/releases),
+Or download a prebuilt binary from [Releases](https://github.com/ahmojo/codex-claude-transfer/releases),
 or build from a clone:
 
 ```bash
-git clone https://github.com/ahmojo/Codex_Sync.git
-cd Codex_Sync && go build -o codex-sync ./cmd/codex-sync
+git clone https://github.com/ahmojo/codex-claude-transfer.git
+cd codex-claude-transfer && go build -o cct ./cmd/cct
 ```
 
 Package manifests for **Homebrew** and **Scoop** live in
@@ -73,38 +81,38 @@ encrypt/decrypt locally — they never change the "nothing is uploaded" guarante
 
 ## Quickstart
 
-codex-sync is a CLI first — the commands below are the whole tool. Two **optional**
-front-ends are included if you prefer not to type flags: `codex-sync app` (a
-graphical app in your browser) and `codex-sync ui` (a guided terminal menu).
+cct is a CLI first — the commands below are the whole tool. Two **optional**
+front-ends are included if you prefer not to type flags: `cct app` (a
+graphical app in your browser) and `cct ui` (a guided terminal menu).
 Neither is required; everything they do is just the flags.
 
 ```bash
-codex-sync doctor                           # check it can see your sessions
-codex-sync list                             # list discovered sessions
-codex-sync export --project .               # → project.codexbundle
+cct doctor                           # check it can see your sessions
+cct list                             # list discovered sessions
+cct export --project .               # → project.codexbundle
 # … copy the bundle to the other machine …
-codex-sync inspect ./project.codexbundle    # look inside (read-only)
-codex-sync import  ./project.codexbundle --dry-run   # preview, write nothing
-codex-sync import  ./project.codexbundle             # import for real
+cct inspect ./project.codexbundle    # look inside (read-only)
+cct import  ./project.codexbundle --dry-run   # preview, write nothing
+cct import  ./project.codexbundle             # import for real
 ```
 
 After importing, **restart Codex (or run it again)** so it re-scans the files.
 
 ## Desktop app (optional)
 
-If you'd rather click than type, `codex-sync app` gives you a small graphical
+If you'd rather click than type, `cct app` gives you a small graphical
 interface with **Doctor, Sessions, Export, Inspect, and Import** views — the same
 operations as the CLI, with project folders and sessions shown in lists and every
 import previewed before anything is written.
 
 ```bash
-codex-sync app                  # opens the app in your default browser
-codex-sync app --no-browser     # just print the URL (open it yourself)
-codex-sync app --port 8765      # pin a port (default: a free one is chosen)
+cct app                  # opens the app in your default browser
+cct app --no-browser     # just print the URL (open it yourself)
+cct app --port 8765      # pin a port (default: a free one is chosen)
 ```
 
 **How it works.** It is *not* a separate program or an Electron-style native
-window — it is the same `codex-sync` binary serving a tiny web page to your own
+window — it is the same `cct` binary serving a tiny web page to your own
 browser. On launch it starts a small web server bound to **`127.0.0.1` only**
 (your machine, not the network), prints a URL, and opens it. The page talks to the
 local server, which runs the exact same export/import code as the CLI. It is
@@ -125,7 +133,7 @@ sidebar filters by the session's recorded working directory, so remap it on
 import (preview with `--dry-run` first):
 
 ```bash
-codex-sync import ./project.codexbundle \
+cct import ./project.codexbundle \
   --map-cwd "/Users/me/dev/project=C:\\Users\\me\\dev\\project"
 ```
 
@@ -140,8 +148,8 @@ code to your own remote only, never your sessions**. Without `--clone`, import
 just prints the `git clone … && git checkout <commit>` commands for you.
 
 ```bash
-codex-sync export --project . --with-git --git-push
-codex-sync import ./project.codexbundle --clone ~/dev/project
+cct export --project . --with-git --git-push
+cct import ./project.codexbundle --clone ~/dev/project
 ```
 
 **Encrypt a bundle in transit** (via [`age`](https://github.com/FiloSottile/age)).
@@ -149,8 +157,8 @@ codex-sync import ./project.codexbundle --clone ~/dev/project
 the plaintext; `import`/`inspect` auto-detect and decrypt a `.age` bundle.
 
 ```bash
-codex-sync export --project . --encrypt-to age1qz...
-codex-sync import ./project.codexbundle.age --identity ~/.age/key.txt
+cct export --project . --encrypt-to age1qz...
+cct import ./project.codexbundle.age --identity ~/.age/key.txt
 ```
 
 **Just one session, or a subset.** `export --session <id>` exports a single
@@ -166,16 +174,16 @@ as a brand-new session, leaving yours untouched).
 
 | Command | Description |
 | ------- | ----------- |
-| `codex-sync app` | Launch the desktop GUI: a loopback-only local web app that opens in your browser. Nothing is uploaded. |
-| `codex-sync ui` | Interactive guided menu; builds and runs the commands below (and prints each one). Requires a terminal. |
-| `codex-sync doctor` | Read-only health check: Codex home, session counts, missing-cwd and optional-tool (`git`/`age`/`zstd`) status. |
-| `codex-sync list` | List discovered sessions (preview, thread id, cwd, source, updated time). |
-| `codex-sync export [--project <path> \| --all \| --session <id>]` | Package matching sessions into a `.codexbundle`. |
-| `codex-sync inspect <bundle>` | Show a bundle's manifest and contents, read-only, and flag any recorded project folder that's missing locally. |
-| `codex-sync import <bundle>` | Import rollout files into your Codex home. Verifies checksums; never overwrites by default. |
-| `codex-sync version` | Print the version (also `--version`). |
-| `codex-sync completion <bash\|zsh\|fish>` | Print a shell completion script. |
-| `codex-sync help` | Show help. |
+| `cct app` | Launch the desktop GUI: a loopback-only local web app that opens in your browser. Nothing is uploaded. |
+| `cct ui` | Interactive guided menu; builds and runs the commands below (and prints each one). Requires a terminal. |
+| `cct doctor` | Read-only health check: Codex home, session counts, missing-cwd and optional-tool (`git`/`age`/`zstd`) status. |
+| `cct list` | List discovered sessions (preview, thread id, cwd, source, updated time). |
+| `cct export [--project <path> \| --all \| --session <id>]` | Package matching sessions into a `.codexbundle`. |
+| `cct inspect <bundle>` | Show a bundle's manifest and contents, read-only, and flag any recorded project folder that's missing locally. |
+| `cct import <bundle>` | Import rollout files into your Codex home. Verifies checksums; never overwrites by default. |
+| `cct version` | Print the version (also `--version`). |
+| `cct completion <bash\|zsh\|fish>` | Print a shell completion script. |
+| `cct help` | Show help. |
 
 ### Flags
 
@@ -233,7 +241,7 @@ project.codexbundle
 └── sessions/YYYY/MM/DD/rollout-…-<uuid>.jsonl[.zst]
 ```
 
-Format version `codex-sync-bundle-v1`. Compressed `.jsonl.zst` rollouts are copied
+Format version `cct-bundle-v1`. Compressed `.jsonl.zst` rollouts are copied
 in **byte-for-byte** and never recompressed or modified; their metadata may be
 read (decompressed) on export when `zstd` is installed.
 
@@ -249,7 +257,7 @@ read (decompressed) on export when `zstd` is installed.
   project until you `--map-cwd` it.
 - **No global path rewriting, no merge, no cloud sync.** `--map-cwd` only changes
   the `cwd` field in `session_meta`; sessions are copied, not merged.
-- **The desktop GUI runs in your browser**, not a native window — `codex-sync app`
+- **The desktop GUI runs in your browser**, not a native window — `cct app`
   serves a local, loopback-only web app (no native packaging, no extra toolchain).
 
 ## Roadmap
@@ -259,7 +267,7 @@ Shipped since v0.1.0: `--map-cwd`, `export --all`/`--since`/`--session`/`--with-
 interactive `ui`, `--import-as-copy`, `zstd`-based compressed-session support,
 `doctor` tool checks, `--json` output, selective `import --session`,
 `version`/`completion` commands, opt-in `export --git-push`, and a desktop GUI
-(`codex-sync app`, a loopback-only local web app over the same Go core).
+(`cct app`, a loopback-only local web app over the same Go core).
 
 Planned, explicitly **not** in v0.1.x: optional Claude support. **Never** planned:
 cloud sync, accounts, hosting, background sync, direct SQLite writes, global path

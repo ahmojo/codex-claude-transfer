@@ -1,8 +1,8 @@
 # Claude Code — Session-Storage Investigation
 
 > Status: **Initial findings complete; build not started.** This document records what was
-> learned about how **Claude Code** stores its sessions locally, and whether `codex-sync`'s
-> file-based export → move → import model can be applied to it (a "codex-sync for Claude Code").
+> learned about how **Claude Code** stores its sessions locally, and whether `cct`'s
+> file-based export → move → import model can be applied to it (a "cct for Claude Code").
 >
 > Claude Code is **closed-source**, so — unlike the Codex investigation, which read the
 > open-source `openai/codex` repository — these findings come from **inspecting a live install**
@@ -33,7 +33,7 @@ Claude Code panel, and IDE extensions at once.
 **Out of scope:** the desktop app's regular chats. They are server-side (account-tied), stored
 locally only as an Electron `IndexedDB`/`Local Storage` cache keyed to `https_claude.ai` — there
 is no portable session file to move, and reaching them would require the cloud/account, breaking
-codex-sync's no-cloud / no-accounts principle. They also already sync when you log in elsewhere,
+cct's no-cloud / no-accounts principle. They also already sync when you log in elsewhere,
 so portability is moot.
 
 ---
@@ -91,7 +91,7 @@ Key points:
 
 The most important unknown was whether Claude Code makes a session resumable **purely from the
 transcript file existing in the right `projects/<encoded-cwd>/` folder** (the "drop the file in,
-the app reconciles" contract codex-sync depends on). It does. Verified on v2.1.170:
+the app reconciles" contract cct depends on). It does. Verified on v2.1.170:
 
 - **No session registry.** `~/.claude.json` has a `projects` map, but its entries are only config
   (allowed tools, MCP servers, trust-dialog/onboarding flags) — **not** a session index. The JSONL
@@ -101,7 +101,7 @@ the app reconciles" contract codex-sync depends on). It does. Verified on v2.1.1
   - resume an **existing** transcript in the cwd's folder → `Not logged in · Please run /login`
     (i.e. the session was **found**; it then hit the auth gate).
   - resume a **non-existent** id → `No conversation found with session ID: …` (not found).
-- **Relocate test (the codex-sync scenario):** copy a transcript into a **different** project
+- **Relocate test (the cct scenario):** copy a transcript into a **different** project
   path's encoded folder and resume from that cwd → **found** (`Not logged in`). Negative control —
   resume the same id from a third cwd whose folder lacks the file → **not found**.
 
@@ -114,11 +114,11 @@ the app reconciles" contract codex-sync depends on). It does. Verified on v2.1.1
 **Conclusion:** session discovery is filesystem-based and scoped to the current cwd's encoded
 folder. Dropping a transcript into the destination's `projects/<encoded-cwd>/` makes it
 resumable, with no database/registry to update. This is the same scan-and-reconcile contract that
-makes codex-sync possible.
+makes cct possible.
 
 ---
 
-## 2. What maps cleanly from codex-sync, and what is harder
+## 2. What maps cleanly from cct, and what is harder
 
 **Same / reusable:** the whole export → move → import core, the safety model (verify checksums
 before writing, never overwrite silently, atomic writes), the bundle/manifest/checksums shape, and
@@ -167,7 +167,7 @@ defensive JSONL parsing.
 
 ## 4. Proposed scope for the build
 
-A "codex-sync for Claude Code" mirrors the Codex tool:
+A "cct for Claude Code" mirrors the Codex tool:
 
 - **Export** the `<uuid>.jsonl` transcript(s) for a project (its encoded folder) into a
   `.codexbundle`-style bundle with a manifest and checksums.
@@ -177,7 +177,7 @@ A "codex-sync for Claude Code" mirrors the Codex tool:
   project path, and optionally rewrite the per-line `cwd`.
 - **Never touch** the cloud, the account, `~/.claude.json`, or the desktop app's chat storage.
 
-**Architecture decision still open:** ship as a **separate tool**, or extend codex-sync with a
+**Architecture decision still open:** ship as a **separate tool**, or extend cct with a
 `--tool claude|codex` (auto-detected) target. The core (bundle/safety/manifest) is reusable either
 way; the per-tool parts are the home location, the path↔folder addressing, and the schema-specific
 remap. Leaning toward one binary with a tool target, since the safe export/import machinery is

@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ahmojo/Codex_Sync/internal/codexhome"
+	"github.com/ahmojo/codex-claude-transfer/internal/codexhome"
 )
 
 // fakeHome builds a Home rooted at a temp dir. It never touches the real

@@ -14,9 +14,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ahmojo/Codex_Sync/internal/codexhome"
-	"github.com/ahmojo/Codex_Sync/internal/git"
-	"github.com/ahmojo/Codex_Sync/internal/sessions"
+	"github.com/ahmojo/codex-claude-transfer/internal/codexhome"
+	"github.com/ahmojo/codex-claude-transfer/internal/git"
+	"github.com/ahmojo/codex-claude-transfer/internal/sessions"
 )
 
 // ExportOptions configures an export.

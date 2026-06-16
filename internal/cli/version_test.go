@@ -13,7 +13,7 @@ func TestVersionCommand(t *testing.T) {
 			t.Fatalf("%s exit = %d, stderr=%s", arg, code, errOut.String())
 		}
 		s := out.String()
-		if !strings.HasPrefix(s, "codex-sync ") {
+		if !strings.HasPrefix(s, "cct ") {
 			t.Errorf("%s output missing banner: %q", arg, s)
 		}
 		// versionString falls back to "dev" in tests (no linker injection).

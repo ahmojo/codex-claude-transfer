@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ahmojo/Codex_Sync/internal/codexhome"
-	"github.com/ahmojo/Codex_Sync/internal/safety"
-	"github.com/ahmojo/Codex_Sync/internal/zstdcli"
+	"github.com/ahmojo/codex-claude-transfer/internal/codexhome"
+	"github.com/ahmojo/codex-claude-transfer/internal/safety"
+	"github.com/ahmojo/codex-claude-transfer/internal/zstdcli"
 )
 
 // Action describes what import decided to do with one bundle entry.

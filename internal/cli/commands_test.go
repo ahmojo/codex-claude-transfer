@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ahmojo/Codex_Sync/internal/bundle"
+	"github.com/ahmojo/codex-claude-transfer/internal/bundle"
 )
 
 func writeSession(t *testing.T, home, threadID, cwd string) {

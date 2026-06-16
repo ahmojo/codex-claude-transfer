@@ -43,19 +43,19 @@ jobs:
         shell: bash
         run: |
           version="${GITHUB_REF_NAME}"
-          name="codex-sync"
+          name="cct"
           ext=""
           if [ "$GOOS" = "windows" ]; then ext=".exe"; fi
           outdir="dist/${name}_${version}_${GOOS}_${GOARCH}"
           mkdir -p "$outdir"
-          go build -trimpath -ldflags "-s -w -X github.com/ahmojo/Codex_Sync/internal/cli.Version=${version}" -o "$outdir/${name}${ext}" ./cmd/codex-sync
+          go build -trimpath -ldflags "-s -w -X github.com/ahmojo/codex-claude-transfer/internal/cli.Version=${version}" -o "$outdir/${name}${ext}" ./cmd/cct
           cp README.md docs/safety.md "$outdir/" 2>/dev/null || true
           ( cd dist && tar -czf "${name}_${version}_${GOOS}_${GOARCH}.tar.gz" "$(basename "$outdir")" )
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: codex-sync_${{ matrix.goos }}_${{ matrix.goarch }}
+          name: cct_${{ matrix.goos }}_${{ matrix.goarch }}
           path: dist/*.tar.gz
 
   release:

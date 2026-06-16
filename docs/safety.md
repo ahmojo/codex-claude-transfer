@@ -1,6 +1,6 @@
 # Safety & Privacy
 
-`codex-sync` is designed to be **safe by default** and to never silently destroy
+`cct` is designed to be **safe by default** and to never silently destroy
 your local Codex sessions. This document explains the safety model in detail and,
 just as importantly, the **privacy risks of `.codexbundle` files**.
 
@@ -46,15 +46,15 @@ That has two consequences for bundles:
 - Move bundles over channels you trust (USB stick, `scp`/`rsync` over SSH,
   Syncthing, an encrypted drive).
 - **Encrypt the bundle** if it must travel over a channel you do not fully
-  control: `codex-sync export … --encrypt-to <age-recipient>` (or
+  control: `cct export … --encrypt-to <age-recipient>` (or
   `--passphrase`) produces a `.codexbundle.age` that only the holder of the key
   or passphrase can read (see §11).
 - If you must share a bundle for debugging, **inspect it first**
-  (`codex-sync inspect bundle.codexbundle`) and assume the JSONL inside contains
+  (`cct inspect bundle.codexbundle`) and assume the JSONL inside contains
   everything from those sessions.
 - Delete bundles you no longer need.
 
-`codex-sync` does **not** upload anything anywhere. The only data movement is you
+`cct` does **not** upload anything anywhere. The only data movement is you
 copying the file by hand. The privacy risk is entirely about **who you hand the
 file to**.
 
@@ -65,7 +65,7 @@ file to**.
 Import is deliberately conservative. For each session in the bundle, exactly one
 of these happens:
 
-| Situation | What `codex-sync` does |
+| Situation | What `cct` does |
 | --------- | ---------------------- |
 | The session does **not** exist locally | **Imported** (new file written). |
 | The session exists locally and is **identical to the effective import content** | **Skipped** (already present). |
@@ -83,7 +83,7 @@ and if you see conflicts reported, your existing sessions were not modified.
 A conflict means the same session exists on both machines but has diverged — for
 example you continued the chat locally after a previous import. If you want the
 bundle's version to win, pass `--replace-with-backup`. For each conflicting file
-`codex-sync` then:
+`cct` then:
 
 1. copies the existing local file to a sibling backup named
    `…jsonl.codexsync-bak-<timestamp>`. That suffix does **not** match Codex's
@@ -99,7 +99,7 @@ is opt-in, is reported as "Replaced (backup kept): N", and writes nothing under
 
 If you would rather **keep both** versions of a diverged session, pass
 `--import-as-copy` instead. For each conflicting plain `.jsonl` session,
-`codex-sync`:
+`cct`:
 
 1. assigns the bundle's version a **fresh session id** (a new random UUID),
    rewriting only the canonical `id` field of the `session_meta` line — every
@@ -122,13 +122,13 @@ conflict.
 
 Every bundle carries a `checksums.json` mapping each file to its SHA-256.
 
-- On **import**, `codex-sync` verifies the checksum of every file in the bundle
+- On **import**, `cct` verifies the checksum of every file in the bundle
   **before it writes a single byte** to your Codex home.
 - If any checksum does not match — a corrupt download, a truncated copy, or a
   tampered bundle — the import **aborts with nothing changed**.
 - If `--map-cwd` is used, the original bundle checksum is still verified first.
   Then the mapped file intentionally differs from the bundle entry, so
-  `codex-sync` computes a new effective checksum for conflict detection.
+  `cct` computes a new effective checksum for conflict detection.
 
 This is a whole-bundle gate: either the bundle is intact and import proceeds, or
 it is rejected and your Codex home is left exactly as it was.
@@ -137,7 +137,7 @@ it is rejected and your Codex home is left exactly as it was.
 
 ## 4. Path-traversal and unexpected entries are rejected
 
-Bundles are ZIP files, and ZIP files can be malicious. `codex-sync` defends
+Bundles are ZIP files, and ZIP files can be malicious. `cct` defends
 against this:
 
 - **Zip-slip / path traversal** (`..` segments) is rejected.
@@ -146,7 +146,7 @@ against this:
 - Only entries matching `sessions/YYYY/MM/DD/rollout-*.jsonl[.zst]` are eligible
   for import. Anything else is **skipped**, never written.
 
-A crafted bundle cannot make `codex-sync` write outside
+A crafted bundle cannot make `cct` write outside
 `~/.codex/sessions/`.
 
 ---
@@ -156,7 +156,7 @@ A crafted bundle cannot make `codex-sync` write outside
 Codex keeps an internal SQLite database as an **index/cache**. The durable,
 canonical record of every session is the JSONL rollout file on disk.
 
-`codex-sync` works **only** with those rollout files. It **never** opens, writes,
+`cct` works **only** with those rollout files. It **never** opens, writes,
 or migrates Codex's SQLite database. After you import, Codex rebuilds its own
 index from the JSONL files on its next normal scan.
 
@@ -183,7 +183,7 @@ If your project lives at a different path on the two machines — for example
 imported session is stored correctly and is fully intact, but Codex may **not
 show it under that project's view**, because the recorded cwd no longer matches.
 
-`codex-sync` helps you find and fix this:
+`cct` helps you find and fix this:
 
 - **Discovery (read-only).** `inspect` lists the distinct project folders (cwds)
   recorded in a bundle and flags any that do not exist on the current machine;
@@ -200,13 +200,13 @@ show it under that project's view**, because the recorded cwd no longer matches.
 Example:
 
 ```bash
-codex-sync import ./project.codexbundle \
+cct import ./project.codexbundle \
   --map-cwd "/home/you/dev/app=C:\\Users\\you\\projects\\app" \
   --dry-run
 ```
 
 Use `--dry-run` first. Path mapping is useful, but it is the only feature in
-`codex-sync` that intentionally mutates session content.
+`cct` that intentionally mutates session content.
 
 ---
 
@@ -233,7 +233,7 @@ When a mapping matches a plain `.jsonl` session:
 - file paths mentioned in normal chat content
 
 When a mapping matches a compressed `.jsonl.zst` session and the external `zstd`
-tool is installed, codex-sync decompresses it, rewrites the `cwd` exactly as
+tool is installed, cct decompresses it, rewrites the `cwd` exactly as
 above (only the `session_meta` line, validated), and recompresses it —
 additionally verifying that the recompressed frame decompresses back to the
 rewritten content before anything is written. Without `zstd`, a compressed
@@ -245,7 +245,7 @@ remapped.
 ## 9. Compressed sessions: read-only metadata recovery, copied byte-for-byte
 
 Compressed rollout files (`.jsonl.zst`) are always copied into a bundle
-**byte-for-byte** and verified by checksum like any other file. `codex-sync`
+**byte-for-byte** and verified by checksum like any other file. `cct`
 never recompresses, rewrites, or otherwise modifies them.
 
 To make them more useful, `export` and `list` can **read** (decompress) the head
@@ -274,7 +274,7 @@ by decompressing, rewriting, and recompressing it (round-trip verified); see §8
 `--with-git`/`--git-push` (export) and `--clone` (import) help move the **project
 code** that a session refers to, without weakening the safety model. They act on
 **git** — your code and your own git remote — and **never** on your sessions:
-codex-sync still never uploads a session or `.codexbundle` anywhere.
+cct still never uploads a session or `.codexbundle` anywhere.
 
 - **On export**, `--with-git` only **reads** git. It records the project's
   remote URL, branch, commit SHA, and whether the tree was dirty/unpushed into
@@ -287,10 +287,10 @@ codex-sync still never uploads a session or `.codexbundle` anywhere.
   on the other machine. It is deliberately conservative: it **never force-pushes**,
   never pushes tags, and never creates a remote (a diverged remote is rejected as
   a non-fast-forward, not overwritten). It uploads **your code to your remote**,
-  never your sessions, and never to any codex-sync service. If it fails, the
+  never your sessions, and never to any cct service. If it fails, the
   export stops rather than produce a bundle that falsely claims the commit is
   fetchable.
-- **On import**, with no `--clone` flag, codex-sync only **prints** the
+- **On import**, with no `--clone` flag, cct only **prints** the
   `git clone … && git checkout <commit>` commands. Nothing runs.
 - **`import --clone <dir>`** runs `git clone <recorded-remote> <dir>` and then
   `git checkout <recorded-commit>`. It is explicit, it only **fetches** (never
@@ -299,7 +299,7 @@ codex-sync still never uploads a session or `.codexbundle` anywhere.
 
 So the only two outbound git actions are both opt-in: `--git-push` (push your code
 to your remote) and `--clone` (fetch your code from your remote). If a bundle came
-from an untrusted source, review the recorded remote URL with `codex-sync inspect`
+from an untrusted source, review the recorded remote URL with `cct inspect`
 before using `--clone`, since cloning executes git against whatever URL the
 manifest contains.
 
@@ -308,9 +308,9 @@ manifest contains.
 ## 11. Encryption is optional, opt-in, and external
 
 A `.codexbundle` is plaintext by default (see §1). When you must move one over a
-channel you do not fully control, codex-sync can encrypt it for you. Like the git
+channel you do not fully control, cct can encrypt it for you. Like the git
 integration, it does **not** embed a crypto library: it shells out to the
-well-known [`age`](https://github.com/FiloSottile/age) tool, keeping codex-sync a
+well-known [`age`](https://github.com/FiloSottile/age) tool, keeping cct a
 single, dependency-free binary.
 
 - **On export**, `--encrypt-to <recipient>` (repeatable), `--recipients-file`,
@@ -334,14 +334,14 @@ an unencrypted bundle would be. It does not scrub secrets from the transcript
 
 ## 12. Dry run
 
-Use `codex-sync import bundle.codexbundle --dry-run` to validate a bundle and see
+Use `cct import bundle.codexbundle --dry-run` to validate a bundle and see
 exactly what *would* happen — new vs. already-present vs. conflict, and how many
 sessions would be cwd-mapped — **without writing anything**. This is the safe way
 to preview an import.
 
 ---
 
-## 13. What codex-sync deliberately does NOT do
+## 13. What cct deliberately does NOT do
 
 These are intentional non-goals. They keep the tool small, predictable, and safe:
 
@@ -364,7 +364,7 @@ These are intentional non-goals. They keep the tool small, predictable, and safe
   exception is `--map-cwd`, which (with `zstd`) decompresses, rewrites only the
   `cwd` field, and recompresses — verifying the round-trip first.
 - **Does not upload your sessions anywhere.** It never sends a session or
-  `.codexbundle` off your machine — no cloud, no telemetry, no codex-sync server,
+  `.codexbundle` off your machine — no cloud, no telemetry, no cct server,
   no account. The only outbound actions are the two opt-in **git** features, which
   act on your code and your own git remote, never your sessions: `export
   --git-push` (a plain `git push` of your branch to your remote, never a
@@ -382,23 +382,23 @@ These are intentional non-goals. They keep the tool small, predictable, and safe
 
 ## 14. Recommended safe workflow
 
-1. On the source machine, run `codex-sync export --project .` from your project
+1. On the source machine, run `cct export --project .` from your project
    directory.
-2. **Inspect the bundle** before moving it: `codex-sync inspect ./project.codexbundle`.
+2. **Inspect the bundle** before moving it: `cct inspect ./project.codexbundle`.
    Remember the JSONL inside contains the full session transcript.
 3. Move the bundle over a channel you trust (USB, `scp`/`rsync` over SSH,
    Syncthing, an encrypted drive). Do **not** post it publicly. If the channel
    is not fully trusted, export with `--encrypt-to <recipient>` (or
    `--passphrase`) and move the resulting `.age` file instead (see §11).
 4. On the destination machine, **dry-run first**:
-   `codex-sync import ./project.codexbundle --dry-run`. Check the
+   `cct import ./project.codexbundle --dry-run`. Check the
    **Project folders (recorded cwd)** summary: any folder flagged `[missing]`
    will be hidden from Codex's sidebar until you create it or remap it.
 5. If the project path differs, dry-run with an explicit mapping:
-   `codex-sync import ./project.codexbundle --map-cwd "OLD=NEW" --dry-run`.
+   `cct import ./project.codexbundle --map-cwd "OLD=NEW" --dry-run`.
 6. If the dry-run looks right, import for real:
-   `codex-sync import ./project.codexbundle` or
-   `codex-sync import ./project.codexbundle --map-cwd "OLD=NEW"`. If a session
+   `cct import ./project.codexbundle` or
+   `cct import ./project.codexbundle --map-cwd "OLD=NEW"`. If a session
    diverged on this machine and you want the bundle's version, add
    `--replace-with-backup` (a backup of the local file is kept).
 7. **Restart the Codex App (or run Codex again)** so it scans and reconciles the
@@ -411,9 +411,9 @@ These are intentional non-goals. They keep the tool small, predictable, and safe
 
 ---
 
-## 15. The desktop GUI (`codex-sync app`) is local-only
+## 15. The desktop GUI (`cct app`) is local-only
 
-`codex-sync app` is a convenience face over the same operations, not a new trust
+`cct app` is a convenience face over the same operations, not a new trust
 boundary. It runs a small web server **on your machine only** and is built to stay
 there:
 
@@ -449,4 +449,4 @@ machine you trust, and stop it (Ctrl-C) when you are done.
   rewriting the canonical `cwd` field in `session_meta`.
 - Bundles can be **encrypted** with the external `age` tool (`--encrypt-to` /
   `--passphrase`); this controls who can open a bundle but does not scrub the
-  secrets inside it, and codex-sync still never uploads anything.
+  secrets inside it, and cct still never uploads anything.

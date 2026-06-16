@@ -1,35 +1,35 @@
 # Packaging manifests
 
-Community-installable manifests for codex-sync. They point at the prebuilt
-binaries attached to each [GitHub Release](https://github.com/ahmojo/Codex_Sync/releases),
+Community-installable manifests for cct. They point at the prebuilt
+binaries attached to each [GitHub Release](https://github.com/ahmojo/codex-claude-transfer/releases),
 so they are version-pinned: bump the `version` and the `sha256`/`hash` values when
 a new release is published.
 
 ## Homebrew (macOS / Linux)
 
-[`homebrew/codex-sync.rb`](homebrew/codex-sync.rb) is a formula that installs the
+[`homebrew/cct.rb`](homebrew/cct.rb) is a formula that installs the
 matching prebuilt binary.
 
 ```bash
 # Install directly from the formula file:
-brew install --formula ./packaging/homebrew/codex-sync.rb
+brew install --formula ./packaging/homebrew/cct.rb
 
 # Or, after copying it into a tap repo (github.com/<you>/homebrew-tap):
-brew install <you>/tap/codex-sync
+brew install <you>/tap/cct
 ```
 
 Refresh the four `sha256` values per release, e.g.
-`shasum -a 256 codex-sync_vX.Y.Z_darwin_arm64.tar.gz`.
+`shasum -a 256 cct_vX.Y.Z_darwin_arm64.tar.gz`.
 
 ## Scoop (Windows)
 
-[`scoop/codex-sync.json`](scoop/codex-sync.json) is a Scoop manifest.
+[`scoop/cct.json`](scoop/cct.json) is a Scoop manifest.
 
 ```powershell
 # Install directly from the manifest:
-scoop install https://raw.githubusercontent.com/ahmojo/Codex_Sync/Main/packaging/scoop/codex-sync.json
+scoop install https://raw.githubusercontent.com/ahmojo/codex-claude-transfer/Main/packaging/scoop/cct.json
 
-# Or add it to a bucket and `scoop install codex-sync`.
+# Or add it to a bucket and `scoop install cct`.
 ```
 
 `checkver`/`autoupdate` are set so Scoop can compute new URLs and hashes

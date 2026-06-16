@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/ahmojo/Codex_Sync/internal/bundle"
-	"github.com/ahmojo/Codex_Sync/internal/codexhome"
-	"github.com/ahmojo/Codex_Sync/internal/git"
-	"github.com/ahmojo/Codex_Sync/internal/sessions"
+	"github.com/ahmojo/codex-claude-transfer/internal/bundle"
+	"github.com/ahmojo/codex-claude-transfer/internal/codexhome"
+	"github.com/ahmojo/codex-claude-transfer/internal/git"
+	"github.com/ahmojo/codex-claude-transfer/internal/sessions"
 	"github.com/charmbracelet/huh"
 	"github.com/mattn/go-isatty"
 )
@@ -178,16 +178,16 @@ func runUI(args []string, stdout, stderr io.Writer) int {
 	// input there is nothing to drive it, so fail fast with guidance instead of
 	// blocking on a prompt that can never be answered.
 	if !isatty.IsTerminal(os.Stdin.Fd()) && !isatty.IsCygwinTerminal(os.Stdin.Fd()) {
-		fmt.Fprintln(stderr, "error: `codex-sync ui` needs an interactive terminal.")
+		fmt.Fprintln(stderr, "error: `cct ui` needs an interactive terminal.")
 		fmt.Fprintln(stderr, "Run it directly in your terminal, or use the flag-based commands")
-		fmt.Fprintln(stderr, "(see `codex-sync help`).")
+		fmt.Fprintln(stderr, "(see `cct help`).")
 		return 2
 	}
 
 	for {
 		var action string
 		err := huh.NewSelect[string]().
-			Title("codex-sync — what would you like to do?").
+			Title("cct — what would you like to do?").
 			Options(
 				huh.NewOption("Export sessions to a bundle", "export"),
 				huh.NewOption("Import a bundle", "import"),
@@ -234,7 +234,7 @@ func withHome(argv []string, f commonFlags) []string {
 
 // runBuilt echoes the composed command and runs it through the normal CLI path.
 func runBuilt(argv []string, stdout, stderr io.Writer) {
-	fmt.Fprintf(stdout, "\n$ codex-sync %s\n\n", formatArgv(argv))
+	fmt.Fprintf(stdout, "\n$ cct %s\n\n", formatArgv(argv))
 	Run(argv, stdout, stderr)
 	fmt.Fprintln(stdout)
 }

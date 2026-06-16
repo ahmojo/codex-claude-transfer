@@ -5,7 +5,7 @@
 // between devices. It never includes or modifies Codex's SQLite state DB.
 package bundle
 
-import "github.com/ahmojo/Codex_Sync/internal/git"
+import "github.com/ahmojo/codex-claude-transfer/internal/git"
 
 // FormatVersion identifies the bundle layout. Bump this on breaking changes.
 const FormatVersion = "codex-sync-bundle-v1"

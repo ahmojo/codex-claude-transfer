@@ -1,5 +1,5 @@
 // Package doctor performs read-only health checks on the local Codex setup so
-// users can confirm codex-sync can see their sessions before exporting or
+// users can confirm cct can see their sessions before exporting or
 // importing. It never writes anything and never touches Codex's SQLite state DB.
 package doctor
 
@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ahmojo/Codex_Sync/internal/codexhome"
-	"github.com/ahmojo/Codex_Sync/internal/crypt"
-	"github.com/ahmojo/Codex_Sync/internal/git"
-	"github.com/ahmojo/Codex_Sync/internal/sessions"
-	"github.com/ahmojo/Codex_Sync/internal/zstdcli"
+	"github.com/ahmojo/codex-claude-transfer/internal/codexhome"
+	"github.com/ahmojo/codex-claude-transfer/internal/crypt"
+	"github.com/ahmojo/codex-claude-transfer/internal/git"
+	"github.com/ahmojo/codex-claude-transfer/internal/sessions"
+	"github.com/ahmojo/codex-claude-transfer/internal/zstdcli"
 )
 
 // Status is the result level of a single check.

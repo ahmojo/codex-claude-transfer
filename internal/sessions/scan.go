@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ahmojo/Codex_Sync/internal/codexhome"
+	"github.com/ahmojo/codex-claude-transfer/internal/codexhome"
 )
 
 // ScanOptions controls how a Codex home is scanned.
