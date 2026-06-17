@@ -21,6 +21,12 @@ async function api(path, body) {
 }
 
 function el(id) { return document.getElementById(id); }
+// Strip surrounding double-quotes from a path pasted from Explorer or a terminal.
+function cleanPath(s) {
+  s = (s || "").trim();
+  if (s.length >= 2 && s[0] === '"' && s[s.length - 1] === '"') s = s.slice(1, -1);
+  return s;
+}
 // The selected agent (Codex or Claude Code). Sent to read endpoints via ?tool=
 // and to export via the body; import always follows the bundle's own tool.
 function currentTool() { return el("tool-select").value; }
@@ -71,14 +77,33 @@ async function runSessions() {
     const d = await api(withTool("/api/sessions"));
     cachedProjects = d.projects || [];
     if (!d.count) { out.innerHTML = '<div class="card muted">No ' + esc(toolLabel()) + ' sessions found.</div>'; return; }
-    let h = '<p class="muted">' + d.count + " session(s)</p>";
+
+    // Group by cwd, sort newest first within each group, groups sorted by newest.
+    const groups = new Map();
     d.sessions.forEach(s => {
-      h += '<div class="card"><div class="row"><span class="grow"><strong>' +
-        esc(s.preview || "(no preview)") + "</strong></span>" +
-        (s.compressed ? '<span class="pill info">zst</span>' : "") +
-        (s.archived ? '<span class="pill info">archived</span>' : "") + "</div>" +
-        '<div class="row muted"><span class="grow mono">' + esc(s.cwd || "(no cwd)") +
-        "</span><span>" + esc(s.updated_at) + "</span></div></div>";
+      const key = (s.cwd || "").toLowerCase().replace(/[\\/]+$/, "");
+      if (!groups.has(key)) groups.set(key, { cwd: s.cwd || "", sessions: [], newest: "" });
+      const g = groups.get(key);
+      g.sessions.push(s);
+      if (!g.newest || s.updated_at > g.newest) g.newest = s.updated_at;
+    });
+    // Sort sessions within each group newest first.
+    groups.forEach(g => g.sessions.sort((a, b) => b.updated_at.localeCompare(a.updated_at)));
+    // Sort groups by newest session descending.
+    const sorted = [...groups.values()].sort((a, b) => b.newest.localeCompare(a.newest));
+
+    let h = '<p class="muted">' + d.count + " session(s)</p>";
+    sorted.forEach(g => {
+      const label = g.cwd || "(no project)";
+      h += '<div class="card"><div class="row"><strong class="grow mono">' + esc(label) +
+        '</strong><span class="muted">' + g.sessions.length + " session" + (g.sessions.length === 1 ? "" : "s") + "</span></div>";
+      g.sessions.forEach(s => {
+        h += '<div class="row"><span class="grow">' + esc(s.preview || "(no preview)") + "</span>" +
+          (s.compressed ? '<span class="pill info">zst</span>' : "") +
+          (s.archived ? '<span class="pill info">archived</span>' : "") +
+          '<span class="muted">' + esc(s.updated_at) + "</span></div>";
+      });
+      h += "</div>";
     });
     out.innerHTML = h;
   } catch (e) { setError(out, e); }
@@ -120,15 +145,15 @@ el("export-run").addEventListener("click", async () => {
     const d = await api("/api/export", {
       mode: el("export-mode").value,
       tool: currentTool(),
-      project: el("export-project").value,
+      project: cleanPath(el("export-project").value),
       session: el("export-session").value.trim(),
       since: el("export-since").value.trim(),
-      output: el("export-output").value.trim(),
+      output: cleanPath(el("export-output").value),
       include_archived: el("export-archived").checked,
       with_git: el("export-withgit").checked,
       git_push: el("export-gitpush").checked,
       encrypt_to: splitList(el("export-encrypt-to").value),
-      recipients_file: el("export-recipients-file").value.trim(),
+      recipients_file: cleanPath(el("export-recipients-file").value),
     });
     let h = '<div class="card"><div class="success">Exported ' + d.included + " session(s)." +
       (d.encrypted ? " Encrypted." : "") + "</div>" +
@@ -160,7 +185,7 @@ el("inspect-run").addEventListener("click", async () => {
   const out = el("inspect-out");
   setBusy(out, "Reading…");
   try {
-    const d = await api("/api/inspect", { path: el("inspect-path").value.trim(), identity: el("inspect-identity").value.trim() });
+    const d = await api("/api/inspect", { path: cleanPath(el("inspect-path").value), identity: cleanPath(el("inspect-identity").value) });
     let h = '<div class="card"><div class="row"><strong>Sessions</strong><span class="grow">' + d.sessions + "</span></div>" +
       '<div class="row"><strong>Format</strong><span class="grow mono">' + esc(d.format) + "</span></div>" +
       (d.created ? '<div class="row"><strong>Created</strong><span class="grow">' + esc(d.created) +
@@ -185,16 +210,16 @@ function importBody(dryRun) {
     if (i[0].value.trim() && i[1].value.trim()) maps.push({ old: i[0].value.trim(), new: i[1].value.trim() });
   });
   return {
-    path: el("import-path").value.trim(),
-    identity: el("import-identity").value.trim(),
+    path: cleanPath(el("import-path").value),
+    identity: cleanPath(el("import-identity").value),
     translate_to: el("import-translate").value,
     dry_run: dryRun,
     merge: conflict === "merge",
     replace_with_backup: conflict === "replace",
     import_as_copy: conflict === "copy",
-    project: el("import-project").value.trim(),
+    project: cleanPath(el("import-project").value),
     sessions: splitList(el("import-sessions").value),
-    clone_dir: el("import-clone").value.trim(),
+    clone_dir: cleanPath(el("import-clone").value),
     map_cwd: maps,
   };
 }

@@ -3,6 +3,9 @@ package cli
 import (
 	"fmt"
 	"io"
+	"sort"
+	"strings"
+	"time"
 
 	"github.com/ahmojo/codex-claude-transfer/internal/agent"
 	"github.com/ahmojo/codex-claude-transfer/internal/bundle"
@@ -27,7 +30,7 @@ func symbol(s doctor.Status) string {
 	}
 }
 
-func printList(w io.Writer, kind agent.Kind, scan sessions.ScanResult) {
+func printList(w io.Writer, kind agent.Kind, scan sessions.ScanResult, flat bool) {
 	label := kind.Label()
 	if len(scan.Sessions) == 0 {
 		fmt.Fprintf(w, "No %s sessions found.\n", label)
@@ -35,28 +38,21 @@ func printList(w io.Writer, kind agent.Kind, scan sessions.ScanResult) {
 	}
 
 	fmt.Fprintf(w, "Found %d %s session(s)\n\n", len(scan.Sessions), label)
-	for i, s := range scan.Sessions {
-		fmt.Fprintf(w, "%d. %s\n", i+1, title(s))
-		if s.ThreadID != "" {
-			fmt.Fprintf(w, "   Thread: %s\n", s.ThreadID)
+
+	if flat {
+		// Flat list, newest first.
+		ss := make([]sessions.Session, len(scan.Sessions))
+		copy(ss, scan.Sessions)
+		sort.Slice(ss, func(i, j int) bool {
+			return ss[i].UpdatedAt().After(ss[j].UpdatedAt())
+		})
+		for i, s := range ss {
+			printSession(w, i+1, s)
 		}
-		if s.CWD != "" {
-			fmt.Fprintf(w, "   CWD: %s\n", s.CWD)
-		}
-		fmt.Fprintf(w, "   Updated: %s\n", s.UpdatedAt().Format("2006-01-02 15:04"))
-		if s.Source != "" {
-			fmt.Fprintf(w, "   Source: %s\n", s.Source)
-		}
-		labels := flags(s)
-		if labels != "" {
-			fmt.Fprintf(w, "   %s\n", labels)
-		}
-		fmt.Fprintln(w)
+	} else {
+		printListGrouped(w, scan.Sessions)
 	}
 
-	// Compressed sessions may now be parsed (via zstd), so they can be Valid and
-	// Compressed at once. Count the genuinely unparsed (non-compressed) files
-	// directly from the sessions to avoid a misleading or negative number.
 	unparsed := 0
 	for _, s := range scan.Sessions {
 		if !s.Parsed && !s.Compressed {
@@ -65,6 +61,73 @@ func printList(w io.Writer, kind agent.Kind, scan sessions.ScanResult) {
 	}
 	fmt.Fprintf(w, "Files: %d  Valid: %d  Compressed: %d  Unparsed/invalid: %d\n",
 		scan.Files, scan.Valid, scan.Compressed, unparsed)
+}
+
+func printListGrouped(w io.Writer, ss []sessions.Session) {
+	type group struct {
+		cwd      string
+		sessions []sessions.Session
+		newest   time.Time
+	}
+
+	keyOf := func(cwd string) string {
+		return strings.ToLower(strings.TrimRight(cwd, `/\`))
+	}
+
+	order := []string{}
+	groups := map[string]*group{}
+	for _, s := range ss {
+		k := keyOf(s.CWD)
+		if _, ok := groups[k]; !ok {
+			order = append(order, k)
+			groups[k] = &group{cwd: s.CWD}
+		}
+		g := groups[k]
+		g.sessions = append(g.sessions, s)
+		if t := s.UpdatedAt(); t.After(g.newest) {
+			g.newest = t
+		}
+	}
+
+	// Sort groups by most-recent session descending.
+	sort.Slice(order, func(i, j int) bool {
+		return groups[order[i]].newest.After(groups[order[j]].newest)
+	})
+
+	n := 1
+	for _, k := range order {
+		g := groups[k]
+		cwd := g.cwd
+		if cwd == "" {
+			cwd = "(no project)"
+		}
+		fmt.Fprintf(w, "── %s  (%s)\n\n", cwd, plural(len(g.sessions), "session"))
+
+		// Sort sessions within group newest first.
+		sort.Slice(g.sessions, func(i, j int) bool {
+			return g.sessions[i].UpdatedAt().After(g.sessions[j].UpdatedAt())
+		})
+		for _, s := range g.sessions {
+			printSession(w, n, s)
+			n++
+		}
+	}
+}
+
+func printSession(w io.Writer, n int, s sessions.Session) {
+	fmt.Fprintf(w, "%d. %s\n", n, title(s))
+	if s.ThreadID != "" {
+		fmt.Fprintf(w, "   Thread: %s\n", s.ThreadID)
+	}
+	fmt.Fprintf(w, "   Updated: %s\n", s.UpdatedAt().Format("2006-01-02 15:04"))
+	if s.Source != "" {
+		fmt.Fprintf(w, "   Source: %s\n", s.Source)
+	}
+	labels := flags(s)
+	if labels != "" {
+		fmt.Fprintf(w, "   %s\n", labels)
+	}
+	fmt.Fprintln(w)
 }
 
 func printExport(w io.Writer, kind agent.Kind, project, session string, result bundle.ExportResult) {

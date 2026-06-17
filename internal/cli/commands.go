@@ -89,6 +89,7 @@ type commonFlags struct {
 	replaceBackup   bool
 	importAsCopy    bool
 	merge           bool
+	flat            bool
 	jsonOut         bool
 	port            int
 	noBrowser       bool
@@ -220,6 +221,8 @@ func parseFlags(args []string) (commonFlags, error) {
 			f.importAsCopy = true
 		case arg == "--merge":
 			f.merge = true
+		case arg == "--flat":
+			f.flat = true
 		case arg == "--include-archived":
 			f.includeArchived = true
 		case arg == "--json":
@@ -414,7 +417,7 @@ func runList(args []string, stdout, stderr io.Writer) int {
 	if f.jsonOut {
 		printListJSON(stdout, scan)
 	} else {
-		printList(stdout, kind, scan)
+		printList(stdout, kind, scan, f.flat)
 	}
 	return 0
 }
