@@ -88,6 +88,7 @@ type commonFlags struct {
 	identity        string
 	replaceBackup   bool
 	importAsCopy    bool
+	merge           bool
 	jsonOut         bool
 	port            int
 	noBrowser       bool
@@ -217,6 +218,8 @@ func parseFlags(args []string) (commonFlags, error) {
 			f.replaceBackup = true
 		case arg == "--import-as-copy":
 			f.importAsCopy = true
+		case arg == "--merge":
+			f.merge = true
 		case arg == "--include-archived":
 			f.includeArchived = true
 		case arg == "--json":
@@ -567,35 +570,10 @@ func runExport(args []string, stdout, stderr io.Writer) int {
 // requested but the age binary is not installed.
 const ageMissingMessage = "age is not installed or not on PATH; install age (https://github.com/FiloSottile/age) to use bundle encryption"
 
-// parseSince accepts either an absolute date (YYYY-MM-DD, interpreted as UTC
-// midnight) or a relative duration ending in d/h/m (e.g. 7d, 48h, 90m) measured
-// back from now. It returns the cutoff instant; sessions updated at or after it
-// are exported.
+// parseSince delegates to bundle.ParseSince so the CLI and the desktop UI share
+// one definition of the --since grammar (a date or a d/h/m duration).
 func parseSince(s string) (time.Time, error) {
-	if t, err := time.Parse("2006-01-02", s); err == nil {
-		return t, nil
-	}
-	if d, err := parseDayDuration(s); err == nil {
-		return time.Now().Add(-d), nil
-	}
-	return time.Time{}, fmt.Errorf("invalid --since %q: use a date (YYYY-MM-DD) or a duration like 7d, 48h, 90m", s)
-}
-
-// parseDayDuration extends time.ParseDuration with a "d" (days) unit, which the
-// standard library does not support.
-func parseDayDuration(s string) (time.Duration, error) {
-	if days, ok := strings.CutSuffix(s, "d"); ok {
-		n, err := strconv.Atoi(days)
-		if err != nil || n < 0 {
-			return 0, fmt.Errorf("invalid day duration %q", s)
-		}
-		return time.Duration(n) * 24 * time.Hour, nil
-	}
-	d, err := time.ParseDuration(s)
-	if err != nil || d < 0 {
-		return 0, fmt.Errorf("invalid duration %q", s)
-	}
-	return d, nil
+	return bundle.ParseSince(s)
 }
 
 // sanitizeForFilename keeps only characters safe in a filename (thread ids are
@@ -700,7 +678,7 @@ func runImport(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if len(f.positional) != 1 {
-		fmt.Fprintln(stderr, "usage: cct import <file.codexbundle> [--dry-run] [--session <id>] [--project <path>] [--map-cwd OLD=NEW] [--replace-with-backup] [--import-as-copy] [--clone <dir>]")
+		fmt.Fprintln(stderr, "usage: cct import <file.codexbundle> [--dry-run] [--merge] [--session <id>] [--project <path>] [--map-cwd OLD=NEW] [--replace-with-backup] [--import-as-copy] [--clone <dir>]")
 		return 2
 	}
 	if f.replaceBackup && f.importAsCopy {
@@ -750,6 +728,7 @@ func runImport(args []string, stdout, stderr io.Writer) int {
 		MapCWD:            mappings,
 		ReplaceWithBackup: f.replaceBackup,
 		ImportAsCopy:      f.importAsCopy,
+		Merge:             f.merge,
 		SessionIDs:        f.sessions,
 	})
 	if err != nil {
@@ -934,6 +913,12 @@ Flags:
                         never your sessions. Opt-in; needs a project and a remote
   --output, -o <path>   export: bundle output path (default <project>.codexbundle)
   --dry-run             import: validate and report only, write nothing
+  --merge               import: incremental sync. When a session already exists
+                        locally but grew on the other device, append only the new
+                        messages (the local file is a prefix of the bundle's, so
+                        this is lossless). Sessions that changed on both sides stay
+                        conflicts; combine with --replace-with-backup/--import-as-
+                        copy to resolve those too
   --to <codex|claude>   import: cross-agent handoff. Instead of importing the
                         bundle's sessions natively, translate them into the OTHER
                         agent's format and write them into that agent's home. A
@@ -987,6 +972,7 @@ Examples:
   cct inspect ./my-project.codexbundle
   cct import ./my-project.codexbundle --dry-run
   cct import ./my-project.codexbundle
+  cct import ./my-project.codexbundle --merge   # append new messages to grown sessions
   cct import ./my-project.codexbundle --map-cwd "/old/path=/new/path"
   cct import ./my-project.codexbundle --replace-with-backup
   cct import ./my-project.codexbundle --import-as-copy

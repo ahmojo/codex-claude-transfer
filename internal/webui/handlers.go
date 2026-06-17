@@ -3,7 +3,10 @@ package webui
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/ahmojo/codex-claude-transfer/internal/agent"
 	"github.com/ahmojo/codex-claude-transfer/internal/bundle"
@@ -53,6 +56,38 @@ func decodeBody(r *http.Request, v any) error {
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	return dec.Decode(v)
+}
+
+// resolveBundle returns a plaintext bundle path for inspect/import. A plain
+// bundle is returned unchanged with a no-op cleanup. An encrypted (.age) bundle
+// is decrypted to a temporary file using an age identity (private-key) file and
+// the returned cleanup removes it. Passphrase-based decryption is intentionally
+// not supported here: the age CLI reads a passphrase only from an interactive
+// terminal, which a loopback browser does not have; those bundles must be
+// handled from the terminal (`cct import … --passphrase`). The string return is
+// an error message for the UI (empty when ok).
+func resolveBundle(path, identity string) (string, func(), string) {
+	noop := func() {}
+	if !strings.EqualFold(filepath.Ext(path), crypt.Extension) {
+		return path, noop, ""
+	}
+	if identity == "" {
+		return "", noop, "this bundle is encrypted; provide an age identity (key) file to decrypt it in the browser. Passphrase-encrypted bundles must be imported from the terminal."
+	}
+	if !crypt.Available() {
+		return "", noop, "age is not installed or not on PATH; install age to read encrypted bundles"
+	}
+	tmpDir, err := os.MkdirTemp("", "cct-dec-")
+	if err != nil {
+		return "", noop, "cannot create temp dir: " + err.Error()
+	}
+	cleanup := func() { os.RemoveAll(tmpDir) }
+	out := filepath.Join(tmpDir, "bundle.codexbundle")
+	if err := crypt.Decrypt(path, out, crypt.DecryptOptions{IdentityFile: identity}); err != nil {
+		cleanup()
+		return "", noop, "decrypt failed: " + err.Error()
+	}
+	return out, cleanup, ""
 }
 
 // ---- doctor ----
@@ -158,13 +193,17 @@ type projectDTO struct {
 // ---- export ----
 
 type exportReq struct {
-	Mode            string `json:"mode"` // "project" | "all"
-	Tool            string `json:"tool"` // "codex" | "claude"
-	Project         string `json:"project"`
-	Output          string `json:"output"`
-	IncludeArchived bool   `json:"include_archived"`
-	WithGit         bool   `json:"with_git"`
-	GitPush         bool   `json:"git_push"`
+	Mode            string   `json:"mode"` // "project" | "all" | "session"
+	Tool            string   `json:"tool"` // "codex" | "claude"
+	Project         string   `json:"project"`
+	Session         string   `json:"session"` // thread id (or unique prefix) when mode == "session"
+	Since           string   `json:"since"`   // date (YYYY-MM-DD) or duration (7d/48h/90m); applies to project/all
+	Output          string   `json:"output"`
+	IncludeArchived bool     `json:"include_archived"`
+	WithGit         bool     `json:"with_git"`
+	GitPush         bool     `json:"git_push"`
+	EncryptTo       []string `json:"encrypt_to"`      // age recipients; encrypts the bundle to <output>.age
+	RecipientsFile  string   `json:"recipients_file"` // file of age recipients
 }
 
 func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
@@ -178,8 +217,13 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 		kind = k
 	}
 
+	// A bundle covers exactly one of: one project folder, one session, or
+	// everything. Resolve the project path only in "project" mode.
 	var absProject string
-	if req.Mode != "all" {
+	switch req.Mode {
+	case "all", "session":
+		// no project filter
+	default: // "project"
 		p := req.Project
 		if p == "" {
 			apiError(w, http.StatusBadRequest, "choose a project folder, or export everything")
@@ -192,10 +236,36 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 		}
 		absProject = abs
 	}
+	if req.Mode == "session" && strings.TrimSpace(req.Session) == "" {
+		apiError(w, http.StatusBadRequest, "enter a session id (or a unique prefix) to export one session")
+		return
+	}
 
+	var since time.Time
+	if req.Since != "" {
+		t, err := bundle.ParseSince(req.Since)
+		if err != nil {
+			apiError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		since = t
+	}
+
+	// Encryption is opt-in and uses age recipients/identity files (non-interactive).
+	// Passphrase mode is terminal-only and not offered here (age needs a TTY).
+	encryptRequested := len(req.EncryptTo) > 0 || req.RecipientsFile != ""
+	if encryptRequested && !crypt.Available() {
+		apiError(w, http.StatusBadRequest, "age is not installed or not on PATH; install age to encrypt bundles")
+		return
+	}
+
+	// --git-push is the only outbound action on export: it pushes YOUR code to
+	// YOUR git remote (never sessions, never to any cct service). Capture what was
+	// pushed so the UI can state it plainly.
+	var pushedRemote, pushedBranch string
 	if req.GitPush {
-		if req.Mode == "all" {
-			apiError(w, http.StatusBadRequest, "git push needs a single project, not 'export everything'")
+		if req.Mode != "project" {
+			apiError(w, http.StatusBadRequest, "git push needs a single project, not 'everything' or a single session")
 			return
 		}
 		if !git.Available() {
@@ -206,21 +276,24 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 			apiError(w, http.StatusBadRequest, absProject+" is not a git repository")
 			return
 		}
-		if _, _, err := git.Push(absProject); err != nil {
+		remote, branch, err := git.Push(absProject)
+		if err != nil {
 			apiError(w, http.StatusBadGateway, "git push failed: "+err.Error())
 			return
 		}
+		pushedRemote, pushedBranch = remote, branch
 	}
 
 	output := req.Output
 	if output == "" {
-		if req.Mode == "all" {
-			if kind == agent.Claude {
-				output = "claude-sessions.codexbundle"
-			} else {
-				output = "codex-sessions.codexbundle"
-			}
-		} else {
+		switch {
+		case req.Mode == "session":
+			output = "session.codexbundle"
+		case req.Mode == "all" && kind == agent.Claude:
+			output = "claude-sessions.codexbundle"
+		case req.Mode == "all":
+			output = "codex-sessions.codexbundle"
+		default:
 			output = filepath.Base(absProject) + ".codexbundle"
 		}
 		output, _ = filepath.Abs(output)
@@ -230,6 +303,8 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 		Tool:            kind,
 		ClaudeHome:      s.claudeHome,
 		ProjectPath:     absProject,
+		SessionID:       req.Session,
+		Since:           since,
 		OutputPath:      output,
 		IncludeArchived: req.IncludeArchived,
 		WithGit:         req.WithGit,
@@ -238,17 +313,40 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
+
+	bundlePath := res.BundlePath
+	if encryptRequested {
+		encPath := output + crypt.Extension
+		err := crypt.Encrypt(output, encPath, crypt.EncryptOptions{
+			Recipients:     req.EncryptTo,
+			RecipientsFile: req.RecipientsFile,
+		})
+		// The plaintext bundle is intermediate; remove it whether or not
+		// encryption succeeded so a clear bundle is never left behind.
+		os.Remove(output)
+		if err != nil {
+			os.Remove(encPath)
+			apiError(w, http.StatusUnprocessableEntity, "encrypt failed: "+err.Error())
+			return
+		}
+		bundlePath = encPath
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
-		"bundle":   res.BundlePath,
-		"included": res.IncludedCount,
-		"warnings": res.Warnings,
+		"bundle":        bundlePath,
+		"included":      res.IncludedCount,
+		"encrypted":     encryptRequested,
+		"pushed_remote": pushedRemote,
+		"pushed_branch": pushedBranch,
+		"warnings":      res.Warnings,
 	})
 }
 
 // ---- inspect ----
 
 type pathReq struct {
-	Path string `json:"path"`
+	Path     string `json:"path"`
+	Identity string `json:"identity"` // age key file, for an encrypted (.age) bundle
 }
 
 func (s *Server) handleInspect(w http.ResponseWriter, r *http.Request) {
@@ -261,7 +359,13 @@ func (s *Server) handleInspect(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusBadRequest, "choose a .codexbundle file")
 		return
 	}
-	res, err := bundle.Inspect(req.Path)
+	path, cleanup, derr := resolveBundle(req.Path, req.Identity)
+	if derr != "" {
+		apiError(w, http.StatusBadRequest, derr)
+		return
+	}
+	defer cleanup()
+	res, err := bundle.Inspect(path)
 	if err != nil {
 		apiError(w, http.StatusUnprocessableEntity, err.Error())
 		return
@@ -285,9 +389,15 @@ func (s *Server) handleInspect(w http.ResponseWriter, r *http.Request) {
 
 type importReq struct {
 	Path              string      `json:"path"`
+	Identity          string      `json:"identity"` // age key file, for an encrypted (.age) bundle
 	DryRun            bool        `json:"dry_run"`
+	Merge             bool        `json:"merge"`
 	ReplaceWithBackup bool        `json:"replace_with_backup"`
 	ImportAsCopy      bool        `json:"import_as_copy"`
+	Project           string      `json:"project"`  // warn on cwd mismatch against this path
+	Sessions          []string    `json:"sessions"` // only import these thread ids (unique prefixes)
+	TranslateTo       string      `json:"translate_to"`
+	CloneDir          string      `json:"clone_dir"` // after import, clone the recorded git remote here
 	MapCWD            []cwdMapDTO `json:"map_cwd"`
 }
 
@@ -310,6 +420,21 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusBadRequest, "choose either replace-with-backup or import-as-copy, not both")
 		return
 	}
+
+	path, cleanup, derr := resolveBundle(req.Path, req.Identity)
+	if derr != "" {
+		apiError(w, http.StatusBadRequest, derr)
+		return
+	}
+	defer cleanup()
+
+	// Cross-agent handoff: translate the bundle's sessions into the other agent's
+	// format and write them into that agent's home, instead of importing natively.
+	if req.TranslateTo != "" {
+		s.handleTranslateImport(w, req, path)
+		return
+	}
+
 	var specs []string
 	for _, m := range req.MapCWD {
 		if m.Old != "" && m.New != "" {
@@ -322,8 +447,17 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var absProject string
+	if req.Project != "" {
+		absProject, err = filepath.Abs(req.Project)
+		if err != nil {
+			apiError(w, http.StatusBadRequest, "invalid project path: "+err.Error())
+			return
+		}
+	}
+
 	// The bundle records its own tool; that decides the destination home.
-	insp, err := bundle.Inspect(req.Path)
+	insp, err := bundle.Inspect(path)
 	if err != nil {
 		apiError(w, http.StatusUnprocessableEntity, err.Error())
 		return
@@ -331,25 +465,84 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 	home := s.importHomeFor(agent.Normalize(agent.Kind(insp.Manifest.Tool)))
 
 	res, err := bundle.Import(home, bundle.ImportOptions{
-		BundlePath:        req.Path,
+		BundlePath:        path,
 		DryRun:            req.DryRun,
+		Merge:             req.Merge,
 		MapCWD:            mappings,
 		ReplaceWithBackup: req.ReplaceWithBackup,
 		ImportAsCopy:      req.ImportAsCopy,
+		ProjectPath:       absProject,
+		SessionIDs:        req.Sessions,
+	})
+	if err != nil {
+		apiError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+
+	// Opt-in git clone, mirroring the CLI: only on a real import, only when the
+	// bundle records a remote and the user gave a target directory.
+	var cloned string
+	var cloneErr string
+	if req.CloneDir != "" && !res.DryRun {
+		gi := res.Manifest.Git
+		switch {
+		case gi == nil || gi.RemoteURL == "":
+			cloneErr = "the bundle records no git remote URL to clone"
+		default:
+			if err := git.Clone(gi.RemoteURL, req.CloneDir, gi.CommitSHA); err != nil {
+				cloneErr = "clone failed: " + err.Error()
+			} else {
+				cloned = req.CloneDir
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"dry_run":            res.DryRun,
+		"imported":           res.Imported,
+		"updated":            res.Updated,
+		"lines_added":        res.LinesAdded,
+		"already_ahead":      res.AlreadyAhead,
+		"skipped_identical":  res.SkippedIdentical,
+		"conflicts":          res.Conflicts,
+		"replaced":           res.Replaced,
+		"imported_copies":    res.ImportedCopies,
+		"remapped":           res.Mapped,
+		"cwd_mismatch":       res.CWDMismatchCount,
+		"sessions_in_bundle": len(res.Manifest.Sessions),
+		"cloned":             cloned,
+		"clone_error":        cloneErr,
+		"warnings":           res.Warnings,
+	})
+}
+
+// handleTranslateImport performs a cross-agent handoff (import --to): it reads the
+// bundle in its own agent's format, translates each session into the target
+// agent's format, and writes the results into that agent's home.
+func (s *Server) handleTranslateImport(w http.ResponseWriter, req importReq, path string) {
+	target, err := agent.Parse(req.TranslateTo)
+	if err != nil {
+		apiError(w, http.StatusBadRequest, "translate target: "+err.Error())
+		return
+	}
+	home := s.importHomeFor(target)
+	res, err := bundle.TranslateImport(home, bundle.TranslateOptions{
+		BundlePath: path,
+		TargetTool: target,
+		DryRun:     req.DryRun,
 	})
 	if err != nil {
 		apiError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"dry_run":            res.DryRun,
-		"imported":           res.Imported,
-		"skipped_identical":  res.SkippedIdentical,
-		"conflicts":          res.Conflicts,
-		"replaced":           res.Replaced,
-		"imported_copies":    res.ImportedCopies,
-		"remapped":           res.Mapped,
-		"sessions_in_bundle": len(res.Manifest.Sessions),
-		"warnings":           res.Warnings,
+		"dry_run":           res.DryRun,
+		"translated":        true,
+		"source_tool":       res.SourceTool.Label(),
+		"target_tool":       res.TargetTool.Label(),
+		"written":           res.Translated,
+		"skipped_identical": res.SkippedExisting,
+		"skipped":           res.Skipped,
+		"warnings":          res.Warnings,
 	})
 }

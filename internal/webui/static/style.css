@@ -70,10 +70,11 @@ body {
 
 .field { display: block; margin: 14px 0; }
 .field > span { display: block; font-weight: 600; margin-bottom: 5px; font-size: 13px; }
-input[type=text], select {
+input[type=text], select, textarea {
   width: 100%; padding: 9px 11px; border: 1px solid var(--border);
   border-radius: 8px; background: var(--panel); color: var(--ink); font: inherit;
 }
+textarea { resize: vertical; }
 .check { display: flex; align-items: center; gap: 8px; margin: 9px 0; cursor: pointer; }
 .check input { width: auto; }
 
@@ -109,3 +110,20 @@ code { background: var(--code); padding: 1px 5px; border-radius: 5px; font-size:
 .maprow { display: flex; gap: 8px; margin: 8px 0; }
 .maprow input { flex: 1; }
 .preview-tip { font-size: 13px; color: var(--muted); margin-top: 6px; }
+.row.warn { color: var(--warn); }
+.row.success { color: var(--ok); }
+.small { font-size: 12px; }
+.hint { font-size: 12px; color: var(--muted); margin: 3px 0 10px; line-height: 1.45; }
+.hint code { font-size: 11px; }
+
+details.adv {
+  margin: 14px 0; border: 1px solid var(--border); border-radius: 8px;
+  padding: 6px 12px; background: var(--panel);
+}
+details.adv summary { cursor: pointer; font-weight: 600; font-size: 13px; padding: 4px 0; }
+details.adv[open] summary { margin-bottom: 6px; }
+
+fieldset.conflict {
+  margin: 14px 0; border: 1px solid var(--border); border-radius: 8px; padding: 6px 14px 12px;
+}
+fieldset.conflict legend { font-weight: 600; font-size: 13px; padding: 0 6px; color: var(--muted); }

@@ -174,6 +174,16 @@ func printImport(w io.Writer, kind agent.Kind, path string, res bundle.ImportRes
 	fmt.Fprintf(w, "New sessions: %d\n", res.Imported)
 	fmt.Fprintf(w, "Already existing: %d\n", res.SkippedIdentical)
 	fmt.Fprintf(w, "Conflicts: %d\n", res.Conflicts)
+	if res.Updated > 0 {
+		if res.LinesAdded > 0 {
+			fmt.Fprintf(w, "Updated (new messages appended): %d (+%s)\n", res.Updated, plural(res.LinesAdded, "line"))
+		} else {
+			fmt.Fprintf(w, "Updated (new messages appended): %d\n", res.Updated)
+		}
+	}
+	if res.AlreadyAhead > 0 {
+		fmt.Fprintf(w, "Already up to date (local is ahead): %d\n", res.AlreadyAhead)
+	}
 	if res.Replaced > 0 {
 		fmt.Fprintf(w, "Replaced (backup kept): %d\n", res.Replaced)
 	}
@@ -242,7 +252,7 @@ func printImport(w io.Writer, kind agent.Kind, path string, res bundle.ImportRes
 		fmt.Fprintln(w, "No files were changed because --dry-run was used.")
 		return
 	}
-	if res.Imported > 0 || res.Replaced > 0 || res.ImportedCopies > 0 {
+	if res.Imported > 0 || res.Replaced > 0 || res.ImportedCopies > 0 || res.Updated > 0 {
 		fmt.Fprintln(w, "Import complete.")
 		if kind == agent.Claude {
 			fmt.Fprintln(w, "Next: run Claude Code again so it discovers the imported transcripts.")

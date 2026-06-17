@@ -27,6 +27,8 @@ const (
 	ActionConflict       Action = "conflict"         // target exists with different checksum; not overwritten
 	ActionReplace        Action = "replace"          // conflict, overwritten after backing up the local file
 	ActionImportCopy     Action = "import-copy"      // conflict, imported as a brand-new session (fresh id + filename)
+	ActionUpdate         Action = "update"           // --merge: local is a prefix of the bundle; extended in place (append-only, lossless)
+	ActionSkipAhead      Action = "skip-ahead"       // --merge: bundle is a prefix of the local file; local already current
 	ActionSkipArchived   Action = "skip-archived"    // archived_sessions entry; not imported in v0.1
 	ActionSkipNonSession Action = "skip-non-session" // unexpected non-session file
 	ActionSkipDeselected Action = "skip-deselected"  // not among the --session ids requested for import
@@ -49,6 +51,10 @@ type ImportItem struct {
 	// BackupPath, when non-empty, is where the pre-existing local file was
 	// backed up before being replaced (ActionReplace, --replace-with-backup).
 	BackupPath string
+	// LinesAdded is the number of new lines a --merge update appended on top of
+	// the existing local file (ActionUpdate). It is an approximate, line-based
+	// count for reporting only.
+	LinesAdded int
 	// content, when non-nil, is the (cwd-mapped) bytes to write instead of
 	// streaming the entry verbatim from the bundle.
 	content []byte
@@ -82,6 +88,18 @@ type ImportOptions struct {
 	// compressed (.jsonl.zst) conflict, or one without a session_meta id, stays a
 	// skipped conflict. Mutually exclusive with ReplaceWithBackup at the CLI.
 	ImportAsCopy bool
+	// Merge enables append-only incremental sync. Session files are append-only
+	// logs, so when a session that already exists locally grew on the other
+	// device, the bundle's copy is a byte-prefix superset of the local file.
+	// With Merge set, such a "grown" session is updated in place (ActionUpdate):
+	// the longer bundle version is written, which appends the new lines without
+	// losing anything. When the local file is already a superset of the bundle's
+	// (the local copy is ahead), the session is left untouched (ActionSkipAhead).
+	// Sessions that genuinely diverged (neither side is a prefix of the other)
+	// remain conflicts, handled by ReplaceWithBackup/ImportAsCopy or skipped.
+	// Merge composes with those two flags: it resolves clean growth first and
+	// hands true divergence to them.
+	Merge bool
 }
 
 // ImportResult summarizes an import.
@@ -98,6 +116,14 @@ type ImportResult struct {
 	// Replaced counts conflicting sessions that were overwritten after the local
 	// file was backed up (--replace-with-backup).
 	Replaced int
+	// Updated counts sessions that grew on the other device and were extended in
+	// place by --merge (ActionUpdate). LinesAdded is the total number of lines
+	// those updates appended.
+	Updated    int
+	LinesAdded int
+	// AlreadyAhead counts sessions left untouched by --merge because the local
+	// copy already contained everything in the bundle (and possibly more).
+	AlreadyAhead int
 	// ImportedCopies counts conflicting sessions imported as brand-new sessions
 	// (--import-as-copy).
 	ImportedCopies int
@@ -280,6 +306,18 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 		if err != nil {
 			return result, err
 		}
+		// --merge resolves the common "the session simply grew on the other
+		// device" case first: if the local file is a byte-prefix of the bundle's
+		// version, the bundle only added trailing lines and the file is updated
+		// in place (lossless). If the local file is already ahead, it is left
+		// untouched. Anything that genuinely diverged stays a conflict and is
+		// handled by the resolution flags below (with which --merge composes).
+		if action == ActionConflict && opts.Merge {
+			action, err = planMerge(&zr.Reader, &item, rel, &result)
+			if err != nil {
+				return result, err
+			}
+		}
 		// A conflict can be resolved in one of two opt-in ways. With
 		// --replace-with-backup the local file is preserved as a backup and then
 		// overwritten (write phase below). With --import-as-copy the bundle's
@@ -315,6 +353,14 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 				result.Mapped++
 			}
 			result.Warnings = append(result.Warnings, fmt.Sprintf("%s: target exists with different content; the local file will be backed up and replaced", rel))
+		case ActionUpdate:
+			result.Updated++
+			result.LinesAdded += item.LinesAdded
+			if item.Mapped {
+				result.Mapped++
+			}
+		case ActionSkipAhead:
+			result.AlreadyAhead++
 		case ActionSkipIdentical:
 			result.SkippedIdentical++
 		case ActionConflict:
@@ -335,7 +381,7 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 	}
 	for i := range result.Items {
 		item := &result.Items[i]
-		if item.Action != ActionImport && item.Action != ActionReplace && item.Action != ActionImportCopy {
+		if item.Action != ActionImport && item.Action != ActionReplace && item.Action != ActionImportCopy && item.Action != ActionUpdate {
 			continue
 		}
 		// For a replace, back up the existing local file first so nothing is

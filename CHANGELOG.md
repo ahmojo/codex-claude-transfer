@@ -2,6 +2,51 @@
 
 All notable changes to codex-claude-transfer are documented here.
 
+## [0.4.0] - 2026-06-17
+
+### Added
+- **Incremental sync: `import --merge`.** When you work on the same conversation
+  from two machines, re-importing used to report the grown session as a conflict
+  and skip it. With `--merge`, cct recognizes that session files are append-only
+  logs: if your local copy is a byte-prefix of the bundle's version, the session
+  simply grew on the other device, so cct **appends only the new messages** to the
+  local file instead of re-pasting the whole chat. This is lossless by construction
+  (nothing in the local file is dropped), needs no backup, and is idempotent
+  (re-importing the same bundle is a no-op). The import reports `Updated (new
+  messages appended): N (+M lines)`.
+  - When the local copy is already *ahead* of the bundle, that session is left
+    untouched and reported as already up to date.
+  - A session that genuinely changed on *both* sides stays a conflict. `--merge`
+    composes with `--replace-with-backup` / `--import-as-copy`, which resolve those
+    true divergences; `--merge` handles the clean append-only case first.
+  - Compressed `.jsonl.zst` sessions are compared on their decompressed contents
+    when the `zstd` tool is available; without it, a differing compressed session
+    stays a conflict with a clear warning.
+  - Wired through the CLI, `--json` output (`updated`, `lines_added`,
+    `already_ahead`), and the interactive `ui` conflict prompt (offered as the
+    recommended "Sync" choice).
+
+- **Desktop GUI (`cct app`) brought to feature parity with the CLI.** The browser
+  app previously exposed only a subset of operations; it now covers essentially
+  everything:
+  - Export: by one project, everything, or a **single session** (by id), an
+    optional **`--since`** date/duration filter, and **recipient-based encryption**
+    (age recipients or a recipients file → `<bundle>.age`).
+  - Import: the new **`--merge`** incremental sync (offered as a "Sync" conflict
+    choice), **selective `--session`** import, **`--project`** cwd-mismatch check,
+    **cross-agent handoff** (translate the bundle into Codex or Claude Code),
+    **`--clone`** of the recorded git remote, and decryption of `.age` bundles via
+    an **age identity file**.
+  - The two network actions (`--git-push`, `--clone`) carry plain-language hints in
+    the UI stating they upload/download **code only — never sessions, never to any
+    cct server**, and the export result confirms the exact branch/remote it pushed.
+  - Inspecting an encrypted `.age` bundle (via an identity file).
+  - **Passphrase** encryption/decryption is the sole intentional gap: the `age`
+    CLI requires an interactive terminal for passphrases, which a loopback browser
+    has no way to provide, so those bundles stay a terminal-only operation (the UI
+    says so and uses recipient/identity key files instead).
+  - The CLI and the desktop UI now share one `--since` parser (`bundle.ParseSince`).
+
 ## [0.3.0] - 2026-06-16
 
 ### Added

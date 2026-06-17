@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ahmojo/codex-claude-transfer/internal/claudehome"
 	"github.com/ahmojo/codex-claude-transfer/internal/codexhome"
 )
 
@@ -21,10 +22,29 @@ func testServer(t *testing.T) (*Server, *httptest.Server) {
 	if err != nil {
 		t.Fatalf("detect: %v", err)
 	}
-	s := &Server{home: home, token: testToken, out: io.Discard}
+	clHome, err := claudehome.Detect(t.TempDir())
+	if err != nil {
+		t.Fatalf("detect claude: %v", err)
+	}
+	s := &Server{home: home, claudeHome: clHome, token: testToken, out: io.Discard}
 	ts := httptest.NewServer(s.routes())
 	t.Cleanup(ts.Close)
 	return s, ts
+}
+
+// appendLine appends one JSONL line to an existing session file, simulating a
+// session that grew (more turns) on the source device.
+func appendLine(t *testing.T, home codexhome.Home, id, line string) {
+	t.Helper()
+	p := filepath.Join(home.SessionsDir, "2026", "06", "13", "rollout-2026-06-13T18-22-01-"+id+".jsonl")
+	f, err := os.OpenFile(p, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if _, err := f.WriteString(line + "\n"); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func writeSession(t *testing.T, home codexhome.Home, id, cwd string) {
@@ -183,5 +203,129 @@ func TestImportConflictingResolversRejected(t *testing.T) {
 		`{"path":"x.codexbundle","replace_with_backup":true,"import_as_copy":true}`)
 	if res.StatusCode != http.StatusBadRequest {
 		t.Errorf("expected 400 for both resolvers, got %d", res.StatusCode)
+	}
+}
+
+const sessID = "abcd1234-1111-2222-3333-444455556666"
+
+// exportAll exports every session from the given server to a fresh bundle path.
+func exportAll(t *testing.T, ts *httptest.Server, name string) string {
+	t.Helper()
+	out := filepath.ToSlash(filepath.Join(t.TempDir(), name))
+	res, data := do(t, ts, "POST", "/api/export", testToken, `{"mode":"all","output":"`+out+`"}`)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("export %s: %d %s", name, res.StatusCode, data)
+	}
+	return out
+}
+
+// TestImportMergeViaAPI exercises the headline feature over HTTP: a session that
+// grew on the source is a conflict without merge, and is appended-to with merge.
+func TestImportMergeViaAPI(t *testing.T) {
+	src, srcTS := testServer(t)
+	writeSession(t, src.home, sessID, "/work/p")
+	b1 := exportAll(t, srcTS, "b1.codexbundle")
+
+	dst, dstTS := testServer(t)
+	if res, data := do(t, dstTS, "POST", "/api/import", testToken, `{"path":"`+b1+`","dry_run":false}`); res.StatusCode != http.StatusOK {
+		t.Fatalf("seed import: %d %s", res.StatusCode, data)
+	}
+	_ = dst
+
+	// The session grows on the source, then is re-exported.
+	appendLine(t, src.home, sessID, `{"type":"event_msg","payload":{"type":"user_message","message":"a later question"}}`)
+	b2 := exportAll(t, srcTS, "b2.codexbundle")
+
+	// Without merge: reported as a conflict, nothing written.
+	_, data := do(t, dstTS, "POST", "/api/import", testToken, `{"path":"`+b2+`","dry_run":false}`)
+	var noMerge struct {
+		Conflicts int `json:"conflicts"`
+		Updated   int `json:"updated"`
+	}
+	json.Unmarshal(data, &noMerge)
+	if noMerge.Conflicts != 1 || noMerge.Updated != 0 {
+		t.Fatalf("without merge: conflicts=%d updated=%d (%s)", noMerge.Conflicts, noMerge.Updated, data)
+	}
+
+	// With merge: the new line is appended in place.
+	_, data = do(t, dstTS, "POST", "/api/import", testToken, `{"path":"`+b2+`","dry_run":false,"merge":true}`)
+	var merged struct {
+		Updated    int `json:"updated"`
+		LinesAdded int `json:"lines_added"`
+		Conflicts  int `json:"conflicts"`
+	}
+	json.Unmarshal(data, &merged)
+	if merged.Updated != 1 || merged.LinesAdded != 1 || merged.Conflicts != 0 {
+		t.Fatalf("with merge: updated=%d lines=%d conflicts=%d (%s)", merged.Updated, merged.LinesAdded, merged.Conflicts, data)
+	}
+}
+
+// TestExportSessionMode exports a single session by id prefix.
+func TestExportSessionMode(t *testing.T) {
+	src, ts := testServer(t)
+	writeSession(t, src.home, sessID, "/work/p")
+	out := filepath.ToSlash(filepath.Join(t.TempDir(), "one.codexbundle"))
+	res, data := do(t, ts, "POST", "/api/export", testToken, `{"mode":"session","session":"abcd1234","output":"`+out+`"}`)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("export session: %d %s", res.StatusCode, data)
+	}
+	var out1 struct {
+		Included int `json:"included"`
+	}
+	json.Unmarshal(data, &out1)
+	if out1.Included != 1 {
+		t.Errorf("included = %d, want 1 (%s)", out1.Included, data)
+	}
+
+	// A missing session id is a 400, not a silent empty bundle.
+	if res, _ := do(t, ts, "POST", "/api/export", testToken, `{"mode":"session","session":""}`); res.StatusCode != http.StatusBadRequest {
+		t.Errorf("empty session id: got %d, want 400", res.StatusCode)
+	}
+}
+
+// TestExportSinceAccepted confirms the --since grammar is wired (a bad value 400s).
+func TestExportSinceAccepted(t *testing.T) {
+	src, ts := testServer(t)
+	writeSession(t, src.home, sessID, "/work/p")
+	out := filepath.ToSlash(filepath.Join(t.TempDir(), "s.codexbundle"))
+	if res, data := do(t, ts, "POST", "/api/export", testToken, `{"mode":"all","since":"7d","output":"`+out+`"}`); res.StatusCode != http.StatusOK {
+		t.Fatalf("since 7d: %d %s", res.StatusCode, data)
+	}
+	if res, _ := do(t, ts, "POST", "/api/export", testToken, `{"mode":"all","since":"not-a-date"}`); res.StatusCode != http.StatusBadRequest {
+		t.Errorf("bad since: want 400")
+	}
+}
+
+// TestTranslateViaAPI does a cross-agent handoff (Codex bundle -> Claude) dry-run.
+func TestTranslateViaAPI(t *testing.T) {
+	src, srcTS := testServer(t)
+	writeSession(t, src.home, sessID, "/work/p")
+	b := exportAll(t, srcTS, "codex.codexbundle")
+
+	_, dstTS := testServer(t)
+	res, data := do(t, dstTS, "POST", "/api/import", testToken, `{"path":"`+b+`","translate_to":"claude","dry_run":true}`)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("translate: %d %s", res.StatusCode, data)
+	}
+	var tr struct {
+		Translated bool   `json:"translated"`
+		Written    int    `json:"written"`
+		Target     string `json:"target_tool"`
+	}
+	json.Unmarshal(data, &tr)
+	if !tr.Translated || tr.Written != 1 {
+		t.Fatalf("translate result: %s", data)
+	}
+}
+
+// TestEncryptedBundleNeedsIdentity: a .age bundle without an identity is rejected
+// up front (the browser cannot do passphrase prompts), for both import and inspect.
+func TestEncryptedBundleNeedsIdentity(t *testing.T) {
+	_, ts := testServer(t)
+	for _, path := range []string{"/api/import", "/api/inspect"} {
+		res, data := do(t, ts, "POST", path, testToken, `{"path":"secret.codexbundle.age"}`)
+		if res.StatusCode != http.StatusBadRequest {
+			t.Errorf("%s without identity: got %d, want 400 (%s)", path, res.StatusCode, data)
+		}
 	}
 }

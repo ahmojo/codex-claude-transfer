@@ -168,6 +168,9 @@ type importJSON struct {
 	Imported                int      `json:"imported"`
 	SkippedIdentical        int      `json:"skipped_identical"`
 	Conflicts               int      `json:"conflicts"`
+	Updated                 int      `json:"updated"`
+	LinesAdded              int      `json:"lines_added"`
+	AlreadyAhead            int      `json:"already_ahead"`
 	Replaced                int      `json:"replaced"`
 	ImportedCopies          int      `json:"imported_copies"`
 	SkippedDeselected       int      `json:"skipped_deselected"`
@@ -186,6 +189,9 @@ func printImportJSON(w io.Writer, path string, res bundle.ImportResult) {
 		Imported:                res.Imported,
 		SkippedIdentical:        res.SkippedIdentical,
 		Conflicts:               res.Conflicts,
+		Updated:                 res.Updated,
+		LinesAdded:              res.LinesAdded,
+		AlreadyAhead:            res.AlreadyAhead,
 		Replaced:                res.Replaced,
 		ImportedCopies:          res.ImportedCopies,
 		SkippedDeselected:       res.SkippedDeselected,

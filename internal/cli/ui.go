@@ -38,6 +38,7 @@ type exportChoices struct {
 // importChoices holds the answers gathered by the interactive import wizard.
 type importChoices struct {
 	bundle        string
+	merge         bool
 	replaceBackup bool
 	importAsCopy  bool
 	project       string
@@ -100,6 +101,9 @@ func buildImportArgs(c importChoices, dryRun bool) []string {
 	args := []string{"import", stripQuotes(c.bundle)}
 	if dryRun {
 		args = append(args, "--dry-run")
+	}
+	if c.merge {
+		args = append(args, "--merge")
 	}
 	if c.replaceBackup {
 		args = append(args, "--replace-with-backup")
@@ -517,6 +521,7 @@ func uiImport(f commonFlags, stdout, stderr io.Writer) {
 		if !runField(huh.NewSelect[string]().
 			Title(fmt.Sprintf("%s already exist here but differ from the bundle.\nWhat should I do with them?", plural(dry.Conflicts, "session"))).
 			Options(
+				huh.NewOption("Sync — append new messages where a session just grew; keep mine where both changed", "merge"),
 				huh.NewOption("Keep mine (skip the bundle's versions)", "skip"),
 				huh.NewOption("Replace mine with the bundle's version (keep a backup of each)", "replace"),
 				huh.NewOption("Keep both — import the bundle's versions as new sessions", "copy"),
@@ -525,6 +530,8 @@ func uiImport(f commonFlags, stdout, stderr io.Writer) {
 			return
 		}
 		switch conflictChoice {
+		case "merge":
+			c.merge = true
 		case "replace":
 			c.replaceBackup = true
 		case "copy":

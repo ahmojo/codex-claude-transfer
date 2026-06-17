@@ -100,10 +100,18 @@ function refreshExportProjects() {
     sel.appendChild(o);
   });
 }
-el("export-mode").addEventListener("change", () => {
-  el("export-project-row").classList.toggle("hidden", el("export-mode").value === "all");
-});
+function syncExportMode() {
+  const mode = el("export-mode").value;
+  el("export-project-row").classList.toggle("hidden", mode !== "project");
+  el("export-session-row").classList.toggle("hidden", mode !== "session");
+}
+el("export-mode").addEventListener("change", syncExportMode);
 document.querySelector('[data-view="export"]').addEventListener("click", refreshExportProjects);
+
+// Split a recipients textarea into a clean list (newline or comma separated).
+function splitList(s) {
+  return (s || "").split(/[\n,]+/).map(x => x.trim()).filter(Boolean);
+}
 
 el("export-run").addEventListener("click", async () => {
   const out = el("export-out");
@@ -113,13 +121,23 @@ el("export-run").addEventListener("click", async () => {
       mode: el("export-mode").value,
       tool: currentTool(),
       project: el("export-project").value,
+      session: el("export-session").value.trim(),
+      since: el("export-since").value.trim(),
       output: el("export-output").value.trim(),
       include_archived: el("export-archived").checked,
       with_git: el("export-withgit").checked,
       git_push: el("export-gitpush").checked,
+      encrypt_to: splitList(el("export-encrypt-to").value),
+      recipients_file: el("export-recipients-file").value.trim(),
     });
-    let h = '<div class="card"><div class="success">Exported ' + d.included + " session(s).</div>" +
-      '<div class="row"><strong>Bundle</strong><span class="grow mono">' + esc(d.bundle) + "</span></div></div>";
+    let h = '<div class="card"><div class="success">Exported ' + d.included + " session(s)." +
+      (d.encrypted ? " Encrypted." : "") + "</div>" +
+      '<div class="row"><strong>Bundle</strong><span class="grow mono">' + esc(d.bundle) + "</span></div>";
+    if (d.pushed_remote) {
+      h += '<div class="row success">Pushed branch ' + esc(d.pushed_branch) + " to your git remote " +
+        esc(d.pushed_remote) + " (code only — no sessions).</div>";
+    }
+    h += "</div>";
     if (d.warnings && d.warnings.length) {
       h += '<div class="card">' + d.warnings.map(w => '<div class="row warn">' + esc(w) + "</div>").join("") + "</div>";
     }
@@ -142,7 +160,7 @@ el("inspect-run").addEventListener("click", async () => {
   const out = el("inspect-out");
   setBusy(out, "Reading…");
   try {
-    const d = await api("/api/inspect", { path: el("inspect-path").value.trim() });
+    const d = await api("/api/inspect", { path: el("inspect-path").value.trim(), identity: el("inspect-identity").value.trim() });
     let h = '<div class="card"><div class="row"><strong>Sessions</strong><span class="grow">' + d.sessions + "</span></div>" +
       '<div class="row"><strong>Format</strong><span class="grow mono">' + esc(d.format) + "</span></div>" +
       (d.created ? '<div class="row"><strong>Created</strong><span class="grow">' + esc(d.created) +
@@ -157,59 +175,97 @@ el("inspect-run").addEventListener("click", async () => {
 });
 
 // ---- import ----
-let lastPreview = null;
-el("import-preview").addEventListener("click", async () => {
-  const out = el("import-preview-out");
-  el("import-options").classList.add("hidden");
-  setBusy(out, "Reading bundle…");
-  try {
-    const d = await api("/api/import", { path: el("import-path").value.trim(), dry_run: true });
-    lastPreview = d;
-    let h = '<div class="card"><strong>Preview</strong>' +
-      '<div class="row"><span class="grow">New sessions to add</span><strong>' + d.imported + "</strong></div>" +
-      '<div class="row"><span class="grow">Already here</span><strong>' + d.skipped_identical + "</strong></div>" +
-      '<div class="row"><span class="grow">Differ from a local copy</span><strong>' + d.conflicts + "</strong></div></div>";
-    if (d.warnings && d.warnings.length) {
-      h += '<div class="card">' + d.warnings.slice(0, 12).map(w => '<div class="row muted">' + esc(w) + "</div>").join("") + "</div>";
-    }
-    out.innerHTML = h;
-    el("import-options").classList.remove("hidden");
-    document.querySelectorAll('input[name="conflict"]').forEach(r => {
-      r.parentElement.style.display = d.conflicts > 0 ? "flex" : "none";
-    });
-  } catch (e) { setError(out, e); lastPreview = null; }
-});
-
-el("import-add-map").addEventListener("click", () => {
-  const row = document.createElement("div");
-  row.className = "maprow";
-  row.innerHTML = '<input type="text" placeholder="old cwd (from the bundle)" /><input type="text" placeholder="new local folder" />';
-  el("import-maps").appendChild(row);
-});
-
-el("import-run").addEventListener("click", async () => {
-  const out = el("import-out");
+// Build the import request body from the form. `dryRun` and the chosen conflict
+// resolution are passed in so the same fields drive both preview and real run.
+function importBody(dryRun) {
   const conflict = (document.querySelector('input[name="conflict"]:checked') || {}).value;
   const maps = [];
   el("import-maps").querySelectorAll(".maprow").forEach(r => {
     const i = r.querySelectorAll("input");
     if (i[0].value.trim() && i[1].value.trim()) maps.push({ old: i[0].value.trim(), new: i[1].value.trim() });
   });
+  return {
+    path: el("import-path").value.trim(),
+    identity: el("import-identity").value.trim(),
+    translate_to: el("import-translate").value,
+    dry_run: dryRun,
+    merge: conflict === "merge",
+    replace_with_backup: conflict === "replace",
+    import_as_copy: conflict === "copy",
+    project: el("import-project").value.trim(),
+    sessions: splitList(el("import-sessions").value),
+    clone_dir: el("import-clone").value.trim(),
+    map_cwd: maps,
+  };
+}
+
+function row(label, value) {
+  return '<div class="row"><span class="grow">' + esc(label) + "</span><strong>" + esc(value) + "</strong></div>";
+}
+
+let lastPreview = null;
+el("import-preview").addEventListener("click", async () => {
+  const out = el("import-preview-out");
+  el("import-options").classList.add("hidden");
+  setBusy(out, "Reading bundle…");
+  try {
+    // Preview never clones or writes; force dry-run and drop the clone target.
+    const body = importBody(true);
+    body.clone_dir = "";
+    const d = await api("/api/import", body);
+    lastPreview = d;
+    let h = '<div class="card"><strong>Preview</strong>';
+    if (d.translated) {
+      h += row("Cross-agent handoff", d.source_tool + " → " + d.target_tool) +
+        row("Sessions to write", d.written) +
+        row("Already translated", d.skipped_identical) +
+        row("Skipped", d.skipped || 0) + "</div>";
+    } else {
+      h += row("New sessions to add", d.imported) +
+        row("Already here", d.skipped_identical) +
+        row("Differ from a local copy", d.conflicts) + "</div>";
+    }
+    if (d.warnings && d.warnings.length) {
+      h += '<div class="card">' + d.warnings.slice(0, 12).map(w => '<div class="row muted">' + esc(w) + "</div>").join("") + "</div>";
+    }
+    out.innerHTML = h;
+    el("import-options").classList.remove("hidden");
+    // Translate mode resolves nothing; conflict choices apply only to a normal
+    // import that found differing local sessions.
+    el("import-conflict").style.display = (!d.translated && d.conflicts > 0) ? "block" : "none";
+  } catch (e) { setError(out, e); lastPreview = null; }
+});
+
+el("import-add-map").addEventListener("click", () => {
+  const r = document.createElement("div");
+  r.className = "maprow";
+  r.innerHTML = '<input type="text" placeholder="old cwd (from the bundle)" /><input type="text" placeholder="new local folder" />';
+  el("import-maps").appendChild(r);
+});
+
+el("import-run").addEventListener("click", async () => {
+  const out = el("import-out");
   setBusy(out, "Importing…");
   try {
-    const d = await api("/api/import", {
-      path: el("import-path").value.trim(),
-      dry_run: false,
-      replace_with_backup: conflict === "replace",
-      import_as_copy: conflict === "copy",
-      map_cwd: maps,
-    });
-    let summary = "Imported " + d.imported + " new";
-    if (d.remapped) summary += ", " + d.remapped + " remapped";
-    if (d.replaced) summary += ", " + d.replaced + " replaced";
-    if (d.imported_copies) summary += ", " + d.imported_copies + " as copies";
-    out.innerHTML = '<div class="card"><div class="success">' + esc(summary) + ".</div>" +
-      '<div class="preview-tip">Run your agent again (restart Codex, or relaunch Claude Code) so it picks up the imported sessions.</div></div>";
+    const d = await api("/api/import", importBody(false));
+    let summary;
+    if (d.translated) {
+      summary = "Translated " + d.source_tool + " → " + d.target_tool + ": wrote " + d.written + " session(s)";
+    } else {
+      const parts = [d.imported + " new"];
+      if (d.updated) parts.push(d.updated + " updated (+" + d.lines_added + " lines)");
+      if (d.already_ahead) parts.push(d.already_ahead + " already up to date");
+      if (d.remapped) parts.push(d.remapped + " remapped");
+      if (d.replaced) parts.push(d.replaced + " replaced");
+      if (d.imported_copies) parts.push(d.imported_copies + " as copies");
+      summary = "Imported " + parts.join(", ");
+    }
+    let h = '<div class="card"><div class="success">' + esc(summary) + ".</div>";
+    if (d.cloned) h += '<div class="row success">Cloned the project code into ' + esc(d.cloned) + " (code only).</div>";
+    if (d.clone_error) h += '<div class="row warn">Clone: ' + esc(d.clone_error) + "</div>";
+    if (d.cwd_mismatch) h += '<div class="row warn">' + d.cwd_mismatch + " session(s) had a cwd different from the project you named.</div>";
+    h += '<div class="preview-tip">Run your agent again (restart Codex, or relaunch Claude Code) so it picks up the imported sessions.</div></div>';
+    out.innerHTML = h;
   } catch (e) { setError(out, e); }
 });
 
@@ -222,4 +278,5 @@ el("tool-select").addEventListener("change", () => {
 });
 
 // initial load
+syncExportMode();
 runDoctor();

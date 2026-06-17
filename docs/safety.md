@@ -77,7 +77,7 @@ of these happens:
 | --------- | ---------------------- |
 | The session does **not** exist locally | **Imported** (new file written). |
 | The session exists locally and is **identical to the effective import content** | **Skipped** (already present). |
-| The session exists locally but **differs** | **Reported as a conflict and skipped** by default — your local file is left untouched. With `--replace-with-backup`, the local file is first backed up and then overwritten; with `--import-as-copy`, the bundle's version is imported as a brand-new session and your local file is left untouched (see below). |
+| The session exists locally but **differs** | **Reported as a conflict and skipped** by default — your local file is left untouched. With `--merge`, a session that merely *grew* on the other device is extended in place (append-only, lossless). With `--replace-with-backup`, the local file is first backed up and then overwritten; with `--import-as-copy`, the bundle's version is imported as a brand-new session and your local file is left untouched (see below). |
 
 For normal imports, the effective import content is the byte-for-byte bundle
 entry. For `--map-cwd` imports, the effective content is the safely rewritten
@@ -85,6 +85,35 @@ plain `.jsonl` file.
 
 By default there is no force overwrite: a differing file is **never** replaced,
 and if you see conflicts reported, your existing sessions were not modified.
+
+### Incremental sync (`--merge`): append-only, lossless
+
+Session files (Codex rollouts and Claude transcripts) are **append-only logs** —
+new turns are added to the end; existing lines are never edited. So when you keep
+working on the same conversation on the source device and re-export, the bundle's
+copy is the local copy **plus extra trailing lines**.
+
+`--merge` uses this. For each conflicting session it compares the bundle's content
+with your local file as a byte prefix:
+
+- **Local file is a prefix of the bundle's version** → the session just grew. `cct`
+  writes the longer bundle version (atomic temp-file + rename), which **appends the
+  new lines and discards nothing** — your local content is, by definition, fully
+  contained in what is written. No backup is needed because nothing is lost. This
+  is reported as "Updated (new messages appended): N (+M lines)".
+- **Bundle is a prefix of your local file** → your machine is *ahead*; the local
+  file already contains everything in the bundle. It is left untouched ("already up
+  to date").
+- **Neither is a prefix of the other** → the session genuinely diverged on both
+  sides. `--merge` does **not** try to combine them; it leaves the entry a conflict
+  for `--replace-with-backup` / `--import-as-copy` or the default skip.
+
+`--merge` only ever extends an append-only log; it never reorders, edits, or merges
+conflicting content. It is idempotent (re-importing the same bundle is a no-op),
+writes nothing under `--dry-run`, and composes with the two flags below (it
+resolves clean growth first and hands true divergence to them). Compressed
+`.jsonl.zst` sessions are compared on their decompressed contents only when the
+`zstd` tool is installed; otherwise a differing compressed session stays a conflict.
 
 ### Opting in to replacing a conflict (`--replace-with-backup`)
 
@@ -405,10 +434,14 @@ These are intentional non-goals. They keep the tool small, predictable, and safe
 - **Does not globally rewrite paths.** `--map-cwd` only changes the canonical
   `cwd` field inside `session_meta` for matching plain `.jsonl` files.
 - **Does not overwrite or merge existing sessions by default.** Conflicts are
-  reported and skipped. The only ways to act on a conflict are the opt-in
+  reported and skipped. The opt-in ways to act on a conflict are
+  `--merge` (append-only sync: extend a session that grew on another device, when
+  the local file is a byte-prefix of the bundle's — lossless, nothing dropped),
   `--replace-with-backup` (overwrite, keeping a recoverable backup of the local
-  file first) and `--import-as-copy` (import the bundle's version as a brand-new
-  session, leaving the local file untouched); see §2. Even then nothing is merged.
+  file first), and `--import-as-copy` (import the bundle's version as a brand-new
+  session, leaving the local file untouched); see §2. Even `--merge` never
+  *combines* edits — it only ever appends to an append-only log; a session that
+  changed on both sides stays a conflict.
 - **Does not rewrite `.jsonl.zst` files except under opt-in `--map-cwd`.** They
   are copied byte-for-byte by default; their contents may be decompressed
   read-only to recover metadata when `zstd` is available (see §9). The single
@@ -479,6 +512,17 @@ there:
 - **Same safety model.** Export/import go through the exact same core code as the
   CLI: checksums verified before writes, no silent overwrites, SQLite untouched,
   and it **never uploads anything**. The browser is just the UI.
+- **Feature parity, with one principled exception.** The GUI now drives the same
+  options as the CLI — incremental `--merge`, selective sessions, `--since`,
+  cross-agent handoff, git record/push/clone, and recipient/identity-file
+  encryption. The exception is **passphrase** encryption/decryption: `age` only
+  reads a passphrase from an interactive terminal, which a loopback web request
+  cannot supply, so the GUI uses age recipient/identity *key files* and leaves
+  passphrase bundles to the terminal (`--passphrase`). The GUI never feeds a
+  passphrase to `age` in a way that would hang on the launching console.
+- **Outbound actions are still explicit and opt-in.** Just like the CLI, the only
+  network actions are `--git-push` (export) and `--clone` (import), and they touch
+  *your* git remote only — never your sessions, never any cct service.
 
 It is still a local tool operating on sensitive session files, so run it on a
 machine you trust, and stop it (Ctrl-C) when you are done.
@@ -488,9 +532,10 @@ machine you trust, and stop it (Ctrl-C) when you are done.
 - Bundles can contain **prompts, code, terminal output, paths, and secrets** —
   do not share them publicly.
 - Import **never** overwrites silently; conflicts are reported and skipped unless
-  you opt in with `--replace-with-backup` (overwrite, keeping a recoverable
-  backup) or `--import-as-copy` (import the bundle's version as a new session,
-  leaving yours untouched).
+  you opt in with `--merge` (append-only sync for a session that grew on another
+  device — lossless, no backup needed), `--replace-with-backup` (overwrite,
+  keeping a recoverable backup), or `--import-as-copy` (import the bundle's version
+  as a new session, leaving yours untouched).
 - Checksums are verified **before** any write; a bad bundle changes nothing.
 - Path traversal and non-session entries are rejected.
 - **SQLite is never touched**; Codex rebuilds its index itself.

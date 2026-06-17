@@ -53,19 +53,42 @@
           <select id="export-mode">
             <option value="project">One project folder</option>
             <option value="all">Everything (all sessions)</option>
+            <option value="session">One session (by id)</option>
           </select>
         </label>
         <div id="export-project-row" class="field">
           <span>Project folder</span>
           <select id="export-project"></select>
         </div>
+        <label id="export-session-row" class="field hidden">
+          <span>Session id (a unique prefix is enough)</span>
+          <input id="export-session" type="text" placeholder="e.g. 9f3c1a2b" />
+        </label>
+        <label class="field">
+          <span>Only sessions updated since (optional)</span>
+          <input id="export-since" type="text" placeholder="a date (2026-06-01) or a duration (7d, 48h)" />
+        </label>
         <label class="field">
           <span>Output file (blank = default name)</span>
           <input id="export-output" type="text" placeholder="e.g. C:\Users\you\project.codexbundle" />
         </label>
         <label class="check"><input type="checkbox" id="export-archived" /> Include archived sessions</label>
-        <label class="check"><input type="checkbox" id="export-withgit" /> Record git remote/commit (--with-git)</label>
-        <label class="check"><input type="checkbox" id="export-gitpush" /> Also push my code to its git remote first (--git-push)</label>
+        <label class="check"><input type="checkbox" id="export-withgit" /> Record the project's git remote, branch &amp; commit (--with-git)</label>
+        <p class="hint">Saves a <em>pointer</em> to your code (remote URL + commit id) inside the bundle so the other machine knows what to check out. Reads git locally &mdash; uploads nothing.</p>
+        <label class="check"><input type="checkbox" id="export-gitpush" /> Push my code to its git remote first (--git-push)</label>
+        <p class="hint"><strong>Network upload.</strong> Runs <code>git push</code> of the current branch to <strong>your own</strong> git remote, so the commit recorded in the bundle is actually fetchable on the other machine. Pushes <strong>code only</strong> &mdash; never your sessions, and never to any cct server. Needs a single project with a remote.</p>
+        <details class="adv">
+          <summary>Encrypt the bundle (optional, needs <code>age</code>)</summary>
+          <label class="field">
+            <span>Recipients (age public keys, one per line or comma-separated)</span>
+            <textarea id="export-encrypt-to" rows="2" placeholder="age1... / ssh-ed25519 ..."></textarea>
+          </label>
+          <label class="field">
+            <span>…or a recipients file</span>
+            <input id="export-recipients-file" type="text" placeholder="path to a file of age recipients" />
+          </label>
+          <p class="muted small">Passphrase encryption is terminal-only (<code>cct export --passphrase</code>); the browser uses recipient keys, which need no prompt.</p>
+        </details>
         <button class="primary" id="export-run">Export</button>
         <div id="export-out" class="out"></div>
       </section>
@@ -76,7 +99,11 @@
         <p class="muted">Read a <code>.codexbundle</code> without extracting anything.</p>
         <label class="field">
           <span>Bundle file</span>
-          <input id="inspect-path" type="text" placeholder="path to .codexbundle" />
+          <input id="inspect-path" type="text" placeholder="path to .codexbundle (or .age)" />
+        </label>
+        <label class="field">
+          <span>Age identity file (only for an encrypted .age bundle)</span>
+          <input id="inspect-identity" type="text" placeholder="path to your age key file" />
         </label>
         <button class="primary" id="inspect-run">Inspect</button>
         <div id="inspect-out" class="out"></div>
@@ -88,18 +115,47 @@
         <p class="muted">Bring sessions from a bundle into the matching agent's home on this machine. Always previewed first.</p>
         <label class="field">
           <span>Bundle file</span>
-          <input id="import-path" type="text" placeholder="path to .codexbundle" />
+          <input id="import-path" type="text" placeholder="path to .codexbundle (or .age)" />
+        </label>
+        <label class="field">
+          <span>Age identity file (only for an encrypted .age bundle)</span>
+          <input id="import-identity" type="text" placeholder="path to your age key file" />
+        </label>
+        <label class="field">
+          <span>Import as</span>
+          <select id="import-translate">
+            <option value="">This bundle's own agent (normal import)</option>
+            <option value="codex">Translate into Codex (cross-agent handoff)</option>
+            <option value="claude">Translate into Claude Code (cross-agent handoff)</option>
+          </select>
         </label>
         <button class="primary" id="import-preview">Preview (dry run)</button>
         <div id="import-preview-out" class="out"></div>
 
         <div id="import-options" class="hidden">
           <h2>Options</h2>
+          <label class="field">
+            <span>Only these sessions (thread ids, comma-separated &mdash; blank = all)</span>
+            <input id="import-sessions" type="text" placeholder="e.g. 9f3c1a2b, 7d2e…" />
+          </label>
+          <label class="field">
+            <span>Project folder to check cwd against (optional, just warns)</span>
+            <input id="import-project" type="text" placeholder="local project path" />
+          </label>
           <div id="import-maps"></div>
           <button class="ghost" id="import-add-map">+ Redirect a folder (map cwd)</button>
-          <label class="check"><input type="radio" name="conflict" value="skip" checked /> Skip sessions that differ (default)</label>
-          <label class="check"><input type="radio" name="conflict" value="replace" /> Replace them, keeping a backup</label>
-          <label class="check"><input type="radio" name="conflict" value="copy" /> Keep both &mdash; import differing ones as new sessions</label>
+          <fieldset id="import-conflict" class="conflict">
+            <legend>When a session already exists here but differs</legend>
+            <label class="check"><input type="radio" name="conflict" value="skip" checked /> Skip it (default)</label>
+            <label class="check"><input type="radio" name="conflict" value="merge" /> Sync &mdash; append new messages if it just grew on the other device</label>
+            <label class="check"><input type="radio" name="conflict" value="replace" /> Replace it, keeping a backup</label>
+            <label class="check"><input type="radio" name="conflict" value="copy" /> Keep both &mdash; import it as a new session</label>
+          </fieldset>
+          <label class="field">
+            <span>Also clone the project's code from git into (optional)</span>
+            <input id="import-clone" type="text" placeholder="folder to clone the recorded git remote into" />
+          </label>
+          <p class="hint"><strong>Network download.</strong> Runs <code>git clone</code> of the remote recorded in this bundle into the folder above and checks out the recorded commit. Fetches <strong>code only</strong> from that remote; your sessions are imported separately (above). Leave blank to skip.</p>
           <button class="primary danger" id="import-run">Import for real</button>
           <div id="import-out" class="out"></div>
         </div>

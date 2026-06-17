@@ -6,7 +6,7 @@ The command is **`cct`**.
 ![CI](https://github.com/ahmojo/codex-claude-transfer/actions/workflows/ci.yml/badge.svg)
 ![Go](https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go)
 ![License](https://img.shields.io/badge/license-MIT-blue)
-![Status](https://img.shields.io/badge/status-v0.3.0-orange)
+![Status](https://img.shields.io/badge/status-v0.4.0-orange)
 
 > ⚠️ **Unofficial.** Not affiliated with or endorsed by OpenAI or Anthropic.
 > These tools' internals can change at any time and break this tool. Use at your
@@ -119,9 +119,15 @@ so it re-scans the files.
 ## Desktop app (optional)
 
 If you'd rather click than type, `cct app` gives you a small graphical
-interface with **Doctor, Sessions, Export, Inspect, and Import** views — the same
-operations as the CLI, with project folders and sessions shown in lists and every
-import previewed before anything is written.
+interface with **Doctor, Sessions, Export, Inspect, and Import** views. It is at
+**feature parity with the CLI**: export by project / everything / one session,
+with `--since`, git record/push, and recipient-based encryption; import with
+preview, incremental `--merge` sync, conflict handling, cwd remap/check, selective
+sessions, cross-agent handoff, and git clone. Project folders and sessions are
+shown in lists and every import is previewed before anything is written. The one
+exception is **passphrase** encryption/decryption: the `age` CLI reads a passphrase
+only from an interactive terminal, so the browser uses age *recipient/identity key
+files* instead — passphrase bundles stay a terminal-only operation.
 
 ```bash
 cct app                  # opens the app in your default browser
@@ -183,6 +189,25 @@ cct import ./project.codexbundle.age --identity ~/.age/key.txt
 conversation (a unique prefix is enough); `import --session <id>` (repeatable)
 imports only the chosen ones.
 
+**Keep a session in sync as it grows (incremental sync).** When you work on the
+same conversation from two machines, re-importing normally reports the grown
+session as a conflict. Add `--merge` and cct recognizes that the session is
+append-only and simply **appends the new messages** to your local copy — it never
+re-pastes the whole chat:
+
+```bash
+# Desktop: export, work more, export again. Laptop: import --merge to catch up.
+cct import ./project.codexbundle --merge
+# -> Updated (new messages appended): 1 (+12 lines)
+```
+
+It's lossless by construction (your local copy is a prefix of the bundle's, so
+nothing is lost), needs no backup, and is idempotent — importing the same bundle
+twice is a no-op. If your laptop is *ahead* of the bundle, that session is left
+untouched ("already up to date"). A session that genuinely changed on *both* sides
+stays a conflict; combine `--merge` with the resolution flags below to handle those
+too.
+
 **Resolve a diverged session.** By default, a local session that differs from the
 bundle is reported as a conflict and skipped. Opt into `--replace-with-backup`
 (overwrite, keeping a backup) or `--import-as-copy` (import the bundle's version
@@ -241,6 +266,7 @@ idempotent skip rather than a duplicate.
 | `--dry-run` | import | Validate and report only; write nothing. |
 | `--to <codex\|claude>` | import | Cross-agent handoff: translate the bundle's sessions into the *other* agent's format and write them into that agent's home (best-effort: conversation + context preamble, tool calls summarized). |
 | `--map-cwd OLD=NEW` | import | Rewrite matching sessions' recorded cwd. Plain `.jsonl` always; `.jsonl.zst` when `zstd` is installed. Repeatable. |
+| `--merge` | import | Incremental sync. When a session grew on the other device (the local file is a prefix of the bundle's), append only the new messages instead of reporting a conflict. Lossless; composes with the resolution flags for genuinely diverged sessions. |
 | `--replace-with-backup` | import | On a conflict, back up the local file and overwrite it with the bundle's version. |
 | `--import-as-copy` | import | On a conflict, import the bundle's version as a new session, leaving yours untouched. Excludes `--replace-with-backup`. |
 | `--clone <dir>` | import | After importing, clone the bundle's recorded git remote into `<dir>` and check out its commit. |
@@ -258,7 +284,7 @@ Safe by default — the full model and privacy notes are in
   changes nothing.
 - **No silent overwrites:** new files are written, identical ones skipped, and a
   differing one is reported as a conflict and skipped — unless you opt into
-  `--replace-with-backup` or `--import-as-copy`.
+  `--merge` (append-only, lossless), `--replace-with-backup`, or `--import-as-copy`.
 - **SQLite is never modified;** path-traversal/zip-slip and absolute paths are
   rejected; writes are atomic (temp file + rename).
 - **Default import is byte-for-byte.** The only content changes are opt-in and
@@ -320,12 +346,16 @@ interactive `ui`, `--import-as-copy`, `zstd`-based compressed-session support,
 `version`/`completion` commands, opt-in `export --git-push`, a desktop GUI
 (`cct app`, a loopback-only local web app over the same Go core),
 **Claude Code support** (`--tool claude`) across every command and both
-front-ends, and **cross-agent handoff** (`import --to codex|claude`) that
-translates a session from one agent into the other.
+front-ends, **cross-agent handoff** (`import --to codex|claude`) that
+translates a session from one agent into the other, and **opt-in incremental
+sync** (`import --merge`) that appends only the new messages to a session that
+grew on another device.
 
 **Never** planned: cloud sync, accounts, hosting, background sync, direct
-index/SQLite writes, global path rewriting, automatic merge, or uploading your
-sessions anywhere.
+index/SQLite writes, global path rewriting, automatic (silent or default) merging
+of sessions that diverged on both sides, or uploading your sessions anywhere.
+`--merge` is opt-in and only ever *appends* to an append-only log; it never
+combines conflicting edits.
 
 ## Built with AI assistance
 
