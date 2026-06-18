@@ -4,9 +4,9 @@
 # This uses ONLY fake demo homes (under ~/cct-rec and ~/projects) — it never
 # touches a real ~/.codex or ~/.claude. Run from anywhere; paths are absolute.
 #
-#   wsl -d Ubuntu -- bash -lc 'bash /mnt/c/Users/faruk/Documents/Codex_sync/demo/record.sh'
+#   wsl -d Ubuntu -- bash -lc 'bash /mnt/c/Users/faruk/Documents/Codex_sync/demo/recording/record.sh'
 #
-# Outputs ~/cct-rec/*.gif (also copied into the repo's demo/ folder).
+# Outputs ~/cct-rec/*.gif (also copied into the repo's demo/clips/ folder).
 set -euo pipefail
 
 export PATH="$HOME/.local/bin:$HOME/.local/opt/go/bin:$HOME/go/bin:$PATH"
@@ -42,9 +42,9 @@ echo "Building cct…"
 for f in prep.sh \
          01-overview.tape 02-sync.tape 03-claude-handoff.tape 04-encryption.tape \
          05-conflicts-remap.tape 06-export-filters.tape 07-git-handoff.tape 08-cli-ui.tape; do
-  tr -d '\r' < "$REPO/demo/$f" > "$REC/$f"
+  tr -d '\r' < "$REPO/demo/recording/$f" > "$REC/$f"
 done
-tr -d '\r' < "$REPO/demo/09-compressed.tape" > "$REC/09-compressed.tape"
+tr -d '\r' < "$REPO/demo/recording/09-compressed.tape" > "$REC/09-compressed.tape"
 
 cd "$REC"
 
@@ -68,7 +68,7 @@ render 08-cli-ui.tape          base
 render 09-compressed.tape      zstd
 
 # --- 6. Copy the GIFs back into the repo -----------------------------------
-cp "$REC"/*.gif "$REPO/demo/"
+cp "$REC"/*.gif "$REPO/demo/clips/"
 echo
 echo "Done:"
 ls -la "$REC"/*.gif

@@ -42,21 +42,21 @@ Machine B:  cct import ./project.codexbundle      # the bundle knows it's Claude
 Export on one machine, then incrementally sync onto the other — only what's new
 is appended, nothing is ever re-pasted or overwritten:
 
-![Overview: doctor, grouped list, export](demo/01-overview.gif)
+![Overview: doctor, grouped list, export](demo/clips/01-overview.gif)
 
-![Incremental sync with import --merge](demo/02-sync.gif)
+![Incremental sync with import --merge](demo/clips/02-sync.gif)
 
 There's also a local desktop GUI (`cct app`) with the same features:
 
-![The cct desktop WebUI](demo/10-webui.gif)
+![The cct desktop WebUI](demo/clips/10-webui.gif)
 
-More clips in [`demo/`](demo/): [cross-agent handoff](demo/03-claude-handoff.gif),
-[encryption](demo/04-encryption.gif),
-[conflict resolution & cwd remap](demo/05-conflicts-remap.gif),
-[export filters](demo/06-export-filters.gif),
-[git handoff](demo/07-git-handoff.gif), the
-[interactive `cct ui` wizard](demo/08-cli-ui.gif), and
-[reading compressed `.jsonl.zst` sessions](demo/09-compressed.gif). All
+More clips in [`demo/`](demo/): [cross-agent handoff](demo/clips/03-claude-handoff.gif),
+[encryption](demo/clips/04-encryption.gif),
+[conflict resolution & cwd remap](demo/clips/05-conflicts-remap.gif),
+[export filters](demo/clips/06-export-filters.gif),
+[git handoff](demo/clips/07-git-handoff.gif), the
+[interactive `cct ui` wizard](demo/clips/08-cli-ui.gif), and
+[reading compressed `.jsonl.zst` sessions](demo/clips/09-compressed.gif). All
 recordings use throwaway demo sessions — never a real `~/.codex` or `~/.claude`.
 
 ## How it works

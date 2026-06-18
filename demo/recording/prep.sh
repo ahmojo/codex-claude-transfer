@@ -19,7 +19,7 @@ mkdir -p "$HOME/projects/todo-api" "$HOME/projects/weather-cli" \
 
 gen_base() {
   rm -rf "$REC/laptop" "$REC/pc"
-  python3 "$REPO/demo/gen_demo_home.py" "$REC" >/dev/null
+  python3 "$REPO/demo/recording/gen_demo_home.py" "$REC" >/dev/null
   cct export --all --codex-home "$REC/laptop/codex-home" \
       -o "$REC/sessions.codexbundle" >/dev/null
 }
