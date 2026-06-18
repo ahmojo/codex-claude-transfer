@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/ahmojo/codex-claude-transfer/internal/zstdcli"
 )
 
 func TestClassifyGrowth(t *testing.T) {
@@ -142,6 +144,56 @@ func TestMergeComposesWithReplace(t *testing.T) {
 	}
 	if got, _ := os.ReadFile(dest); string(got) != "line one\nbundle change\n" {
 		t.Errorf("dest not replaced: %q", string(got))
+	}
+}
+
+// TestMergeCompressedSessionGrows: a .jsonl.zst session that grew on the other
+// device is merged in place — both sides are decompressed to compare, and the
+// bundle's longer compressed version is written. Requires the zstd tool.
+func TestMergeCompressedSessionGrows(t *testing.T) {
+	if !zstdcli.Available() {
+		t.Skip("zstd not installed; compressed merge needs it")
+	}
+	dir := t.TempDir()
+	rel := "sessions/2026/06/13/rollout-2026-06-13T18-22-01-bbbb2222-3333-4444-5555-666677778888.jsonl.zst"
+	localPlain := []byte("line one\nline two\n")
+	grownPlain := []byte("line one\nline two\nline three\n")
+	localZ, err := zstdcli.Compress(localPlain)
+	if err != nil {
+		t.Fatalf("compress local: %v", err)
+	}
+	grownZ, err := zstdcli.Compress(grownPlain)
+	if err != nil {
+		t.Fatalf("compress grown: %v", err)
+	}
+
+	bundlePath := buildBundle(t, dir, rel, grownZ, "/proj/x", nil)
+	target := fakeHome(t)
+	dest := filepath.Join(target.Root, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dest, localZ, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := Import(target, ImportOptions{BundlePath: bundlePath, Merge: true})
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	if res.Updated != 1 || res.Conflicts != 0 {
+		t.Fatalf("counts: updated=%d conflicts=%d", res.Updated, res.Conflicts)
+	}
+	got, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotPlain, err := zstdcli.Decompress(got)
+	if err != nil {
+		t.Fatalf("decompress dest: %v", err)
+	}
+	if string(gotPlain) != string(grownPlain) {
+		t.Errorf("dest decompressed = %q, want the grown version %q", gotPlain, grownPlain)
 	}
 }
 

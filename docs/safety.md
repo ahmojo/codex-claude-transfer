@@ -41,11 +41,18 @@ When you drop an image (or other attachment) into a Codex session, it is stored
 **inline in the rollout JSONL as base64**, not as a separate file reference.
 That has two consequences for bundles:
 
-- **They travel with the bundle.** Because the image bytes live inside the
-  rollout file, exporting a session also exports every image in it. There is no
-  way to include the transcript but omit the pictures in v0.1.x.
+- **They travel with the bundle by default.** Because the image bytes live inside
+  the rollout file, exporting a session also exports every image in it — unless you
+  pass `--strip-images` (below).
 - **They inflate bundle size.** Base64 encoding is ~33% larger than the raw
   image, so image-heavy sessions produce noticeably larger `.codexbundle` files.
+
+**Omitting images: `export --strip-images`.** This replaces each inline image with
+a short placeholder, keeping the conversation text. It is **lossy** (the picture
+bytes are dropped) and opt-in. Besides shrinking the bundle, it is a quick way to
+avoid carrying screenshots you would rather not move — though it is a size/privacy
+convenience, not a redaction guarantee: review a bundle's contents if it must be
+free of sensitive material.
 
 ### Practical guidance
 

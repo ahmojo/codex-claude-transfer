@@ -80,6 +80,7 @@ type commonFlags struct {
 	sessions        []string
 	withGit         bool
 	gitPush         bool
+	stripImages     bool
 	cloneDir        string
 	mapCWD          []string
 	encryptTo       []string
@@ -181,6 +182,8 @@ func parseFlags(args []string) (commonFlags, error) {
 			f.withGit = true
 		case arg == "--git-push":
 			f.gitPush = true
+		case arg == "--strip-images":
+			f.stripImages = true
 		case arg == "--clone":
 			val, err := takeValue(args, &i, "--clone")
 			if err != nil {
@@ -534,6 +537,7 @@ func runExport(args []string, stdout, stderr io.Writer) int {
 		Since:           since,
 		SessionID:       session,
 		WithGit:         f.withGit,
+		StripImages:     f.stripImages,
 	})
 	if err != nil {
 		for _, w := range result.Warnings {
@@ -914,6 +918,10 @@ Flags:
                         remote first, so the recorded commit is fetchable on the
                         other machine. Uploads your code to your own remote only,
                         never your sessions. Opt-in; needs a project and a remote
+  --strip-images        export: replace inline base64 images in each session with
+                        a small placeholder, to shrink an image-heavy bundle.
+                        Lossy (the pictures are dropped) and opt-in; the
+                        conversation text is kept. Needs zstd for .jsonl.zst
   --output, -o <path>   export: bundle output path (default <project>.codexbundle)
   --dry-run             import: validate and report only, write nothing
   --merge               import: incremental sync. When a session already exists
@@ -968,6 +976,7 @@ Examples:
   cct export --project .            # -> <project>.codexbundle
   cct export --tool claude --project .   # export this project's Claude sessions
   cct export --project . --with-git # also record git remote/commit
+  cct export --project . --strip-images  # drop embedded images to shrink it
   cct export --all                  # -> codex-sessions.codexbundle
   cct export --all --since 7d       # everything updated in the last 7 days
   cct export --project . --since 2026-06-01

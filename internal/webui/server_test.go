@@ -296,6 +296,39 @@ func TestExportSinceAccepted(t *testing.T) {
 	}
 }
 
+// TestExportStripImagesViaAPI confirms the WebUI passes --strip-images through and
+// reports the result.
+func TestExportStripImagesViaAPI(t *testing.T) {
+	src, ts := testServer(t)
+	dir := filepath.Join(src.home.SessionsDir, "2026", "06", "13")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	payload := strings.Repeat("Z", 4000)
+	body := `{"type":"session_meta","payload":{"id":"` + sessID + `","cwd":"/work/p","source":"cli"}}` + "\n" +
+		`{"type":"response_item","payload":{"content":[{"image_url":"data:image/png;base64,` + payload + `"}]}}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "rollout-2026-06-13T18-22-01-"+sessID+".jsonl"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out := filepath.ToSlash(filepath.Join(t.TempDir(), "stripped.codexbundle"))
+	res, data := do(t, ts, "POST", "/api/export", testToken, `{"mode":"all","strip_images":true,"output":"`+out+`"}`)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("export: %d %s", res.StatusCode, data)
+	}
+	var r struct {
+		ImagesStripped int   `json:"images_stripped"`
+		BytesSaved     int64 `json:"bytes_saved"`
+	}
+	json.Unmarshal(data, &r)
+	if r.ImagesStripped != 1 {
+		t.Errorf("images_stripped = %d, want 1 (%s)", r.ImagesStripped, data)
+	}
+	if r.BytesSaved <= 0 {
+		t.Errorf("bytes_saved = %d, want > 0", r.BytesSaved)
+	}
+}
+
 // TestTranslateViaAPI does a cross-agent handoff (Codex bundle -> Claude) dry-run.
 func TestTranslateViaAPI(t *testing.T) {
 	src, srcTS := testServer(t)

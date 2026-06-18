@@ -2,6 +2,27 @@
 
 All notable changes to codex-claude-transfer are documented here.
 
+## [0.5.0] - Unreleased
+
+### Added
+- **`export --strip-images`.** Shrinks an image-heavy bundle by replacing each
+  inline base64 image with a short placeholder, keeping the conversation text. It
+  recognizes both the data-URI shape (`data:image/...;base64,...`) and the
+  base64-source object shape, and rewrites only the objects on the path to an
+  image so everything else stays byte-for-byte. Lossy and opt-in; the export
+  reports `Images stripped: N (saved ~X)`. Compressed `.jsonl.zst` sessions are
+  decompressed, stripped, and recompressed when `zstd` is available (otherwise
+  copied as-is with a warning). Exposed in the desktop GUI too.
+
+### Fixed
+- **Docs:** the Limitations section still claimed "no merge"; `import --merge`
+  shipped in 0.4.0. Corrected, and the incremental-sync/strip-images behavior is
+  now described accurately.
+
+### Tests
+- Added coverage for compressed-`.jsonl.zst` incremental merge (already
+  implemented in 0.4.0 but previously untested) and for image stripping.
+
 ## [0.4.0] - 2026-06-17
 
 ### Added

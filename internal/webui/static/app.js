@@ -37,6 +37,15 @@ function esc(s) {
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }
 function setBusy(node, msg) { node.innerHTML = '<div class="spinner">' + esc(msg || "Working…") + "</div>"; }
+// Approximate human-readable byte size for one-line summaries.
+function humanBytes(n) {
+  n = Number(n) || 0;
+  if (n < 1024) return n + " B";
+  const u = ["KB", "MB", "GB", "TB"];
+  let i = -1;
+  do { n /= 1024; i++; } while (n >= 1024 && i < u.length - 1);
+  return n.toFixed(1) + " " + u[i];
+}
 function setError(node, e) { node.innerHTML = '<div class="error">' + esc(e.message || e) + "</div>"; }
 
 // ---- navigation ----
@@ -152,12 +161,17 @@ el("export-run").addEventListener("click", async () => {
       include_archived: el("export-archived").checked,
       with_git: el("export-withgit").checked,
       git_push: el("export-gitpush").checked,
+      strip_images: el("export-stripimages").checked,
       encrypt_to: splitList(el("export-encrypt-to").value),
       recipients_file: cleanPath(el("export-recipients-file").value),
     });
     let h = '<div class="card"><div class="success">Exported ' + d.included + " session(s)." +
       (d.encrypted ? " Encrypted." : "") + "</div>" +
       '<div class="row"><strong>Bundle</strong><span class="grow mono">' + esc(d.bundle) + "</span></div>";
+    if (d.images_stripped) {
+      h += '<div class="row">Images stripped<span class="grow"></span><strong>' + d.images_stripped +
+        " (saved ~" + humanBytes(d.bytes_saved) + ")</strong></div>";
+    }
     if (d.pushed_remote) {
       h += '<div class="row success">Pushed branch ' + esc(d.pushed_branch) + " to your git remote " +
         esc(d.pushed_remote) + " (code only — no sessions).</div>";

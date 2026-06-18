@@ -77,6 +77,8 @@
         <p class="hint">Saves a <em>pointer</em> to your code (remote URL + commit id) inside the bundle so the other machine knows what to check out. Reads git locally &mdash; uploads nothing.</p>
         <label class="check"><input type="checkbox" id="export-gitpush" /> Push my code to its git remote first (--git-push)</label>
         <p class="hint"><strong>Network upload.</strong> Runs <code>git push</code> of the current branch to <strong>your own</strong> git remote, so the commit recorded in the bundle is actually fetchable on the other machine. Pushes <strong>code only</strong> &mdash; never your sessions, and never to any cct server. Needs a single project with a remote.</p>
+        <label class="check"><input type="checkbox" id="export-stripimages" /> Strip embedded images to shrink the bundle (--strip-images)</label>
+        <p class="hint">Replaces inline screenshots/photos (stored as base64) with a small placeholder. <strong>Lossy</strong> &mdash; the pictures are dropped &mdash; but the conversation text is kept. Handy for image-heavy sessions.</p>
         <details class="adv">
           <summary>Encrypt the bundle (optional, needs <code>age</code>)</summary>
           <label class="field">

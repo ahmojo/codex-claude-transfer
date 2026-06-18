@@ -143,7 +143,8 @@ so it re-scans the files.
 If you'd rather click than type, `cct app` gives you a small graphical
 interface with **Doctor, Sessions, Export, Inspect, and Import** views. It is at
 **feature parity with the CLI**: export by project / everything / one session,
-with `--since`, git record/push, and recipient-based encryption; import with
+with `--since`, git record/push, image stripping, and recipient-based encryption;
+import with
 preview, incremental `--merge` sync, conflict handling, cwd remap/check, selective
 sessions, cross-agent handoff, and git clone. Project folders and sessions are
 shown in lists and every import is previewed before anything is written. The one
@@ -282,6 +283,7 @@ idempotent skip rather than a duplicate.
 | `--since <when>` | export | Only sessions updated at/after a date (`YYYY-MM-DD`) or duration (`7d`, `48h`, `90m`). |
 | `--with-git` | export | Also record the project's git remote/branch/commit (and dirty/unpushed status). |
 | `--git-push` | export | Opt-in. Push the project's current branch to its own git remote first, so the recorded commit is fetchable on the other machine. Uploads your code only, never sessions; never force-pushes. Needs a project and a remote. |
+| `--strip-images` | export | Replace inline base64 images with a small placeholder to shrink the bundle. Lossy (pictures dropped, text kept); needs `zstd` for `.jsonl.zst`. |
 | `--output, -o <path>` | export | Bundle output path (defaults derived from `--project`/`--all`/`--session`). |
 | `--include-archived` | list, export | Also consider archived sessions. |
 | `--json` | doctor, list, inspect, export, import | Print a machine-readable JSON summary on stdout instead of text. |
@@ -343,8 +345,12 @@ read (decompressed) on export when `zstd` is installed.
 - **Project visibility depends on matching cwd paths.** If the project lives at a
   different path on each machine, an imported session may not appear under that
   project until you `--map-cwd` it.
-- **No global path rewriting, no merge, no cloud sync.** `--map-cwd` only changes
-  the `cwd` field in `session_meta`; sessions are copied, not merged.
+- **No global path rewriting and no cloud sync.** `--map-cwd` only changes the
+  `cwd` field in `session_meta`. Incremental sync (`import --merge`) is opt-in and
+  only ever *appends* to a session that grew on one side — it never combines edits
+  that diverged on both.
+- **`--strip-images` is lossy.** It shrinks a bundle by replacing inline images
+  with a placeholder; the picture bytes are dropped (the conversation text stays).
 - **The desktop GUI runs in your browser**, not a native window — `cct app`
   serves a local, loopback-only web app (no native packaging, no extra toolchain).
 - **Claude Code's format is closed-source and moves fast.** Support was verified
@@ -369,9 +375,10 @@ interactive `ui`, `--import-as-copy`, `zstd`-based compressed-session support,
 (`cct app`, a loopback-only local web app over the same Go core),
 **Claude Code support** (`--tool claude`) across every command and both
 front-ends, **cross-agent handoff** (`import --to codex|claude`) that
-translates a session from one agent into the other, and **opt-in incremental
+translates a session from one agent into the other, **opt-in incremental
 sync** (`import --merge`) that appends only the new messages to a session that
-grew on another device.
+grew on another device, and **`export --strip-images`** to shrink image-heavy
+bundles by dropping inline picture data.
 
 **Never** planned: cloud sync, accounts, hosting, background sync, direct
 index/SQLite writes, global path rewriting, automatic (silent or default) merging

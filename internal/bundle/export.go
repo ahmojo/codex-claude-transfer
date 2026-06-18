@@ -20,6 +20,7 @@ import (
 	"github.com/ahmojo/codex-claude-transfer/internal/codexhome"
 	"github.com/ahmojo/codex-claude-transfer/internal/git"
 	"github.com/ahmojo/codex-claude-transfer/internal/sessions"
+	"github.com/ahmojo/codex-claude-transfer/internal/zstdcli"
 )
 
 // ExportOptions configures an export.
@@ -51,6 +52,12 @@ type ExportOptions struct {
 	// (e.g. with --all or --session). When ProjectPath is set, git metadata is
 	// always captured regardless of this flag.
 	WithGit bool
+	// StripImages replaces inline base64 image payloads in each session with a
+	// short placeholder before adding it to the bundle. It is lossy (the picture
+	// bytes are dropped) and opt-in, used to shrink image-heavy bundles. The
+	// conversation text is preserved; compressed .jsonl.zst sessions are stripped
+	// too when the zstd tool is available (otherwise copied as-is with a warning).
+	StripImages bool
 }
 
 // ExportResult summarizes what was exported.
@@ -59,7 +66,9 @@ type ExportResult struct {
 	Manifest          Manifest
 	IncludedCount     int
 	TotalScanned      int
-	CompressedSkipped int // compressed sessions skipped by cwd filter (cwd unknown)
+	CompressedSkipped int   // compressed sessions skipped by cwd filter (cwd unknown)
+	ImagesStripped    int   // images replaced when StripImages is set
+	BytesSaved        int64 // bundle bytes saved by stripping (original minus stored)
 	Warnings          []string
 }
 
@@ -123,7 +132,7 @@ func Export(home codexhome.Home, opts ExportOptions) (ExportResult, error) {
 	// found" notice is itself returned with a nil Info, and must not be dropped.
 	result.Warnings = append(result.Warnings, gitWarns...)
 
-	if err := writeBundle(opts.OutputPath, selected, &manifest, kind); err != nil {
+	if err := writeBundle(opts, selected, &manifest, kind, &result); err != nil {
 		return result, err
 	}
 
@@ -272,7 +281,8 @@ func newManifest(home codexhome.Home, opts ExportOptions) Manifest {
 
 // writeBundle creates the ZIP atomically: it writes to a temp file in the
 // destination directory and renames it into place on success.
-func writeBundle(outputPath string, selected []sessions.Session, manifest *Manifest, kind agent.Kind) error {
+func writeBundle(opts ExportOptions, selected []sessions.Session, manifest *Manifest, kind agent.Kind, result *ExportResult) error {
+	outputPath := opts.OutputPath
 	dir := filepath.Dir(outputPath)
 	tmp, err := os.CreateTemp(dir, ".codexbundle-*.tmp")
 	if err != nil {
@@ -292,12 +302,32 @@ func writeBundle(outputPath string, selected []sessions.Session, manifest *Manif
 
 	for _, s := range selected {
 		bundlePath := bundlePathFor(s, kind)
-		sum, err := addFileToZip(zw, bundlePath, s.Path)
-		if err != nil {
-			return fmt.Errorf("add %s: %w", s.Path, err)
+		sum := ""
+		size := s.SizeBytes
+		if opts.StripImages {
+			var nImg int
+			var warn string
+			sum, size, nImg, warn, err = addStrippedSessionToZip(zw, bundlePath, s)
+			if err != nil {
+				return fmt.Errorf("add %s: %w", s.Path, err)
+			}
+			if warn != "" {
+				result.Warnings = append(result.Warnings, warn)
+			}
+			result.ImagesStripped += nImg
+			if saved := s.SizeBytes - size; saved > 0 {
+				result.BytesSaved += saved
+			}
+		} else {
+			sum, err = addFileToZip(zw, bundlePath, s.Path)
+			if err != nil {
+				return fmt.Errorf("add %s: %w", s.Path, err)
+			}
 		}
 		checksums[bundlePath] = sum
-		manifest.Sessions = append(manifest.Sessions, manifestSession(s, bundlePath, sum))
+		ms := manifestSession(s, bundlePath, sum)
+		ms.SizeBytes = size
+		manifest.Sessions = append(manifest.Sessions, ms)
 		if manifest.CodexVersion == "" && s.CLIVersion != "" {
 			manifest.CodexVersion = s.CLIVersion
 		}
@@ -397,6 +427,47 @@ func addBytesToZip(zw *zip.Writer, bundlePath string, data []byte) error {
 	}
 	_, err = w.Write(data)
 	return err
+}
+
+// addStrippedSessionToZip reads a session, removes inline base64 images, and adds
+// the rewritten bytes to the ZIP. It returns the stored content's SHA-256, its
+// stored size, the number of images stripped, and (for a compressed session that
+// cannot be stripped because zstd is unavailable) a warning; in that case the file
+// is copied as-is. A .jsonl.zst session is decompressed, stripped, and recompressed
+// so it stays in the same on-disk format.
+func addStrippedSessionToZip(zw *zip.Writer, bundlePath string, s sessions.Session) (sum string, sizeOut int64, imagesStripped int, warn string, err error) {
+	raw, err := os.ReadFile(s.Path)
+	if err != nil {
+		return "", 0, 0, "", err
+	}
+	compressed := s.Compressed || strings.HasSuffix(s.Path, compressedSessionSuffix)
+
+	plain := raw
+	if compressed {
+		if !zstdcli.Available() {
+			if err := addBytesToZip(zw, bundlePath, raw); err != nil {
+				return "", 0, 0, "", err
+			}
+			return sha256Hex(raw), int64(len(raw)), 0,
+				fmt.Sprintf("%s: compressed session not image-stripped (zstd not installed); copied as-is", bundlePath), nil
+		}
+		if plain, err = zstdcli.Decompress(raw); err != nil {
+			return "", 0, 0, "", fmt.Errorf("decompress: %w", err)
+		}
+	}
+
+	stripped, n := StripImagesJSONL(plain)
+
+	outBytes := stripped
+	if compressed {
+		if outBytes, err = zstdcli.Compress(stripped); err != nil {
+			return "", 0, 0, "", fmt.Errorf("recompress: %w", err)
+		}
+	}
+	if err := addBytesToZip(zw, bundlePath, outBytes); err != nil {
+		return "", 0, 0, "", err
+	}
+	return sha256Hex(outBytes), int64(len(outBytes)), n, "", nil
 }
 
 // pathEqual compares two filesystem paths after cleaning, case-insensitively on

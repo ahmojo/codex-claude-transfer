@@ -202,6 +202,7 @@ type exportReq struct {
 	IncludeArchived bool     `json:"include_archived"`
 	WithGit         bool     `json:"with_git"`
 	GitPush         bool     `json:"git_push"`
+	StripImages     bool     `json:"strip_images"`
 	EncryptTo       []string `json:"encrypt_to"`      // age recipients; encrypts the bundle to <output>.age
 	RecipientsFile  string   `json:"recipients_file"` // file of age recipients
 }
@@ -308,6 +309,7 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 		OutputPath:      output,
 		IncludeArchived: req.IncludeArchived,
 		WithGit:         req.WithGit,
+		StripImages:     req.StripImages,
 	})
 	if err != nil {
 		apiError(w, http.StatusUnprocessableEntity, err.Error())
@@ -333,12 +335,14 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"bundle":        bundlePath,
-		"included":      res.IncludedCount,
-		"encrypted":     encryptRequested,
-		"pushed_remote": pushedRemote,
-		"pushed_branch": pushedBranch,
-		"warnings":      res.Warnings,
+		"bundle":          bundlePath,
+		"included":        res.IncludedCount,
+		"encrypted":       encryptRequested,
+		"pushed_remote":   pushedRemote,
+		"pushed_branch":   pushedBranch,
+		"images_stripped": res.ImagesStripped,
+		"bytes_saved":     res.BytesSaved,
+		"warnings":        res.Warnings,
 	})
 }
 

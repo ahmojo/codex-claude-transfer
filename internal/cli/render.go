@@ -147,7 +147,25 @@ func printExport(w io.Writer, kind agent.Kind, project, session string, result b
 		fmt.Fprintln(w)
 	}
 	fmt.Fprintf(w, "Included sessions: %d\n", result.IncludedCount)
+	if result.ImagesStripped > 0 {
+		fmt.Fprintf(w, "Images stripped: %d (saved ~%s)\n", result.ImagesStripped, humanBytes(result.BytesSaved))
+	}
 	fmt.Fprintf(w, "Bundle written:\n%s\n", result.BundlePath)
+}
+
+// humanBytes renders a byte count in the largest sensible unit for a one-line
+// summary (e.g. "1.4 MB"). It is approximate and for human output only.
+func humanBytes(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	div, exp := int64(unit), 0
+	for x := n / unit; x >= unit; x /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGT"[exp])
 }
 
 func printInspect(w io.Writer, path string, res bundle.InspectResult) {

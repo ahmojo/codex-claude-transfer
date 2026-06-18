@@ -149,6 +149,8 @@ type exportJSON struct {
 	Included          int      `json:"included"`
 	TotalScanned      int      `json:"total_scanned"`
 	CompressedSkipped int      `json:"compressed_skipped"`
+	ImagesStripped    int      `json:"images_stripped"`
+	BytesSaved        int64    `json:"bytes_saved"`
 	Warnings          []string `json:"warnings,omitempty"`
 }
 
@@ -158,6 +160,8 @@ func printExportJSON(w io.Writer, res bundle.ExportResult) {
 		Included:          res.IncludedCount,
 		TotalScanned:      res.TotalScanned,
 		CompressedSkipped: res.CompressedSkipped,
+		ImagesStripped:    res.ImagesStripped,
+		BytesSaved:        res.BytesSaved,
 		Warnings:          res.Warnings,
 	})
 }
