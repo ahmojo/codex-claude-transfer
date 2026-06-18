@@ -622,12 +622,15 @@ func readEntryBytes(zr *zip.Reader, name string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := checkDeclaredSize(f, MaxSessionBytes, "session "+name); err != nil {
+		return nil, err
+	}
 	rc, err := f.Open()
 	if err != nil {
 		return nil, err
 	}
 	defer rc.Close()
-	return io.ReadAll(rc)
+	return readCapped(rc, MaxSessionBytes, "session "+name)
 }
 
 // decideAction determines conflict handling for a single target path.
@@ -655,6 +658,10 @@ func decideAction(dest, expectedSum string) (Action, error) {
 // verifyBundle validates every entry path and confirms each file's SHA-256
 // matches checksums.json. checksums.json itself is not self-referential.
 func verifyBundle(zr *zip.Reader, checksums Checksums) error {
+	if len(zr.File) > MaxBundleEntries {
+		return fmt.Errorf("bundle has %d entries, over the %d limit", len(zr.File), MaxBundleEntries)
+	}
+	var total uint64
 	for _, f := range zr.File {
 		if f.Name == ChecksumsName {
 			continue
@@ -662,6 +669,19 @@ func verifyBundle(zr *zip.Reader, checksums Checksums) error {
 		// Reject unsafe paths (absolute, drive-letter, zip-slip) before anything else.
 		if _, err := safety.CleanRelPath(f.Name); err != nil {
 			return fmt.Errorf("unsafe bundle entry: %w", err)
+		}
+		// Bound resource use: reject oversized entries cheaply by their declared
+		// size, and cap the total uncompressed footprint of the whole bundle.
+		limit := int64(MaxSessionBytes)
+		if f.Name == ManifestName {
+			limit = MaxMetadataBytes
+		}
+		if err := checkDeclaredSize(f, limit, "bundle entry "+f.Name); err != nil {
+			return err
+		}
+		total += f.UncompressedSize64
+		if total > uint64(MaxBundleUncompressed) {
+			return fmt.Errorf("bundle total uncompressed size exceeds the %d-byte limit", MaxBundleUncompressed)
 		}
 		expected, ok := checksums[f.Name]
 		if !ok {
@@ -762,12 +782,17 @@ func copyEntry(zr *zip.Reader, name, dest string) error {
 	if err != nil {
 		return err
 	}
+	// verifyBundle already capped every entry before any write; this is belt: a
+	// declared-oversize entry never reaches the disk.
+	if err := checkDeclaredSize(f, MaxSessionBytes, "session "+name); err != nil {
+		return err
+	}
 	rc, err := f.Open()
 	if err != nil {
 		return err
 	}
 	defer rc.Close()
-	return safety.CopyAtomic(dest, rc)
+	return safety.CopyAtomic(dest, io.LimitReader(rc, MaxSessionBytes))
 }
 
 func openByName(zr *zip.Reader, name string) (*zip.File, error) {
@@ -786,8 +811,14 @@ func sha256ZipEntry(f *zip.File) (string, error) {
 	}
 	defer rc.Close()
 	h := sha256.New()
-	if _, err := io.Copy(h, rc); err != nil {
+	// Cap the inflated stream so a lying header (declared small, inflates huge)
+	// cannot exhaust CPU/memory during verification.
+	n, err := io.Copy(h, io.LimitReader(rc, MaxSessionBytes+1))
+	if err != nil {
 		return "", err
+	}
+	if n > MaxSessionBytes {
+		return "", fmt.Errorf("entry %q exceeds the %d-byte limit (possible decompression bomb)", f.Name, MaxSessionBytes)
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }

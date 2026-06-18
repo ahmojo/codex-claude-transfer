@@ -171,6 +171,8 @@ el("export-run").addEventListener("click", async () => {
     if (d.images_stripped) {
       h += '<div class="row">Images stripped<span class="grow"></span><strong>' + d.images_stripped +
         " (saved ~" + humanBytes(d.bytes_saved) + ")</strong></div>";
+      h += '<div class="row warn">A stripped bundle isn\'t merge-friendly — import it fresh, ' +
+        "not with incremental sync (it reads as diverged from an unstripped copy).</div>";
     }
     if (d.pushed_remote) {
       h += '<div class="row success">Pushed branch ' + esc(d.pushed_branch) + " to your git remote " +

@@ -424,7 +424,7 @@ func uiImport(f commonFlags, stdout, stderr io.Writer) {
 		if !d.ExistsLocal {
 			where = "NOT on this computer"
 		}
-		fmt.Fprintf(stdout, "  - %s\n      %s, %s\n", d.Path, plural(d.Count, "session"), where)
+		fmt.Fprintf(stdout, "  - %s\n      %s, %s\n", safeTerminal(d.Path), plural(d.Count, "session"), where)
 	}
 	if summary.UnknownCWD > 0 {
 		fmt.Fprintf(stdout, "  - %s with no recorded folder (compressed/unknown)\n", plural(summary.UnknownCWD, "session"))
@@ -443,7 +443,7 @@ func uiImport(f commonFlags, stdout, stderr io.Writer) {
 		var choice string
 		if !runField(huh.NewSelect[string]().
 			Title(fmt.Sprintf("%s recorded in this folder, which is NOT on this computer:\n  %s\nWhat should I do so these sessions appear in %s?",
-				plural(d.Count, "session"), d.Path, bkind.Label())).
+				plural(d.Count, "session"), safeTerminal(d.Path), bkind.Label())).
 			Options(
 				huh.NewOption("Create that exact folder here (keep the original path)", "create"),
 				huh.NewOption("Point these sessions to a different folder on this computer", "remap"),
@@ -543,7 +543,7 @@ func uiImport(f commonFlags, stdout, stderr io.Writer) {
 	if gi := res.Manifest.Git; gi != nil && !gi.Empty() && gi.RemoteURL != "" {
 		var doClone bool
 		if !runField(huh.NewConfirm().
-			Title(fmt.Sprintf("This bundle also records the project's git remote:\n  %s\nClone the code onto this computer too?", gi.RemoteURL)).
+			Title(fmt.Sprintf("This bundle also records the project's git remote:\n  %s\nClone the code onto this computer too?", safeTerminal(gi.RemoteURL))).
 			Value(&doClone), stderr) {
 			return
 		}

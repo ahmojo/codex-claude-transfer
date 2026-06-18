@@ -349,8 +349,12 @@ read (decompressed) on export when `zstd` is installed.
   `cwd` field in `session_meta`. Incremental sync (`import --merge`) is opt-in and
   only ever *appends* to a session that grew on one side — it never combines edits
   that diverged on both.
-- **`--strip-images` is lossy.** It shrinks a bundle by replacing inline images
-  with a placeholder; the picture bytes are dropped (the conversation text stays).
+- **`--strip-images` is lossy and not merge-friendly.** It shrinks a bundle by
+  replacing inline images with a placeholder; the picture bytes are dropped (the
+  conversation text stays). Because the content changes, a stripped bundle no
+  longer matches an unstripped copy of the same session, so `import --merge` reads
+  it as *diverged* instead of appending. Use it for a fresh import to save space —
+  not for incremental sync of a session you also keep unstripped elsewhere.
 - **The desktop GUI runs in your browser**, not a native window — `cct app`
   serves a local, loopback-only web app (no native packaging, no extra toolchain).
 - **Claude Code's format is closed-source and moves fast.** Support was verified

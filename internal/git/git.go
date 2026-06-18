@@ -8,9 +8,37 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 )
+
+// hexOIDRe matches a git object id (a 7–64 char hex string).
+var hexOIDRe = regexp.MustCompile(`^[0-9a-fA-F]{7,64}$`)
+
+// helperTransportRe matches git's "remote helper" transport syntax
+// `<name>::<address>` (e.g. ext::, fd::). The ext helper can run an arbitrary
+// command, so these are blocked. Standard URLs use `<scheme>://`, not `::`, and a
+// local path / scp-style remote contains no `::`, so they are unaffected.
+var helperTransportRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.-]*::`)
+
+// validateRemoteURL guards against a malicious bundle's git remote. It rejects
+// values that look like a command-line flag and git remote-helper transports
+// (ext::/fd::/…), which are the command-execution vector. Ordinary transports
+// (https/http/ssh/git, scp-style user@host:path, file://, and local paths) are
+// allowed, since they cannot execute commands. See SEC-1 in docs/security/audit.md.
+func validateRemoteURL(remote string) error {
+	if remote == "" {
+		return fmt.Errorf("empty git remote")
+	}
+	if strings.HasPrefix(remote, "-") {
+		return fmt.Errorf("refusing git remote that looks like a flag: %q", remote)
+	}
+	if helperTransportRe.MatchString(remote) {
+		return fmt.Errorf("refusing git remote-helper transport (e.g. ext::/fd::): %q", remote)
+	}
+	return nil
+}
 
 // Info holds the git facts we record in a bundle manifest.
 type Info struct {
@@ -73,10 +101,23 @@ func Clone(remote, dir, commit string) error {
 	if remote == "" {
 		return fmt.Errorf("no remote URL to clone")
 	}
+	// The remote and commit come from the (untrusted) bundle manifest. Validate the
+	// transport and the commit shape before handing them to git. See SEC-1 in
+	// docs/security/audit.md.
+	if err := validateRemoteURL(remote); err != nil {
+		return err
+	}
+	if commit != "" && !hexOIDRe.MatchString(commit) {
+		return fmt.Errorf("refusing to check out non-hex commit from bundle: %q", commit)
+	}
 	if _, err := exec.LookPath("git"); err != nil {
 		return fmt.Errorf("git not found in PATH")
 	}
-	if err := runErr("", "clone", remote, dir); err != nil {
+	// Belt-and-suspenders alongside validateRemoteURL: explicitly forbid the
+	// command-executing helper transports at the git-config level, and `--` stops
+	// a stray leading-dash remote from being read as an option.
+	if err := runErr("", "-c", "protocol.ext.allow=never", "-c", "protocol.fd.allow=never",
+		"clone", "--", remote, dir); err != nil {
 		return fmt.Errorf("git clone %s: %w", remote, err)
 	}
 	if commit != "" {

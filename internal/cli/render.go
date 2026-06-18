@@ -115,19 +115,38 @@ func printListGrouped(w io.Writer, ss []sessions.Session) {
 }
 
 func printSession(w io.Writer, n int, s sessions.Session) {
-	fmt.Fprintf(w, "%d. %s\n", n, title(s))
+	fmt.Fprintf(w, "%d. %s\n", n, safeTerminal(title(s)))
 	if s.ThreadID != "" {
 		fmt.Fprintf(w, "   Thread: %s\n", s.ThreadID)
 	}
 	fmt.Fprintf(w, "   Updated: %s\n", s.UpdatedAt().Format("2006-01-02 15:04"))
 	if s.Source != "" {
-		fmt.Fprintf(w, "   Source: %s\n", s.Source)
+		fmt.Fprintf(w, "   Source: %s\n", safeTerminal(s.Source))
 	}
 	labels := flags(s)
 	if labels != "" {
 		fmt.Fprintf(w, "   %s\n", labels)
 	}
 	fmt.Fprintln(w)
+}
+
+// safeTerminal makes an untrusted string safe to print to a terminal. A malicious
+// bundle's metadata (preview, cwd, git remote, warnings) could otherwise contain
+// ANSI/OSC escape sequences that spoof the screen or write the clipboard (OSC 52)
+// during the very inspect/preview step the user relies on to judge a bundle. It
+// drops all C0/C1 control characters (including ESC, CR, and LF, so a value cannot
+// forge extra lines) and turns tabs into spaces. See SEC-10 in docs/security/audit.md.
+func safeTerminal(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r == '\t':
+			return ' '
+		case r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f):
+			return -1
+		default:
+			return r
+		}
+	}, s)
 }
 
 func printExport(w io.Writer, kind agent.Kind, project, session string, result bundle.ExportResult) {
@@ -141,7 +160,7 @@ func printExport(w io.Writer, kind agent.Kind, project, session string, result b
 		fmt.Fprintf(w, "Exporting %s sessions for project:\n%s\n\n", label, project)
 	}
 	for _, warn := range result.Warnings {
-		fmt.Fprintf(w, "warning: %s\n", warn)
+		fmt.Fprintf(w, "warning: %s\n", safeTerminal(warn))
 	}
 	if len(result.Warnings) > 0 {
 		fmt.Fprintln(w)
@@ -149,6 +168,8 @@ func printExport(w io.Writer, kind agent.Kind, project, session string, result b
 	fmt.Fprintf(w, "Included sessions: %d\n", result.IncludedCount)
 	if result.ImagesStripped > 0 {
 		fmt.Fprintf(w, "Images stripped: %d (saved ~%s)\n", result.ImagesStripped, humanBytes(result.BytesSaved))
+		fmt.Fprintln(w, "Note: a stripped bundle isn't merge-friendly — import --merge sees it as diverged")
+		fmt.Fprintln(w, "  from an unstripped copy. Import it fresh; don't use it for incremental sync.")
 	}
 	fmt.Fprintf(w, "Bundle written:\n%s\n", result.BundlePath)
 }
@@ -177,12 +198,12 @@ func printInspect(w io.Writer, path string, res bundle.InspectResult) {
 	if m.CreatedAt != "" {
 		fmt.Fprintf(w, "Created: %s", m.CreatedAt)
 		if m.CreatedByDevice != "" {
-			fmt.Fprintf(w, " by %s", m.CreatedByDevice)
+			fmt.Fprintf(w, " by %s", safeTerminal(m.CreatedByDevice))
 		}
 		fmt.Fprintln(w)
 	}
 	if m.SourceProjectPath != "" {
-		fmt.Fprintf(w, "Source project: %s\n", m.SourceProjectPath)
+		fmt.Fprintf(w, "Source project: %s\n", safeTerminal(m.SourceProjectPath))
 	}
 	fmt.Fprintf(w, "Files in bundle: %d  (checksummed: %d)\n", len(res.Entries), len(res.Checksums))
 	fmt.Fprintf(w, "Sessions: %d\n\n", len(m.Sessions))
@@ -191,15 +212,15 @@ func printInspect(w io.Writer, path string, res bundle.InspectResult) {
 		if name == "" {
 			name = s.BundlePath
 		}
-		fmt.Fprintf(w, "%d. %s\n", i+1, name)
+		fmt.Fprintf(w, "%d. %s\n", i+1, safeTerminal(name))
 		if s.ThreadID != "" {
 			fmt.Fprintf(w, "   Thread: %s\n", s.ThreadID)
 		}
 		if s.OriginalCWD != "" {
-			fmt.Fprintf(w, "   CWD: %s\n", s.OriginalCWD)
+			fmt.Fprintf(w, "   CWD: %s\n", safeTerminal(s.OriginalCWD))
 		}
 		if s.Source != "" {
-			fmt.Fprintf(w, "   Source: %s\n", s.Source)
+			fmt.Fprintf(w, "   Source: %s\n", safeTerminal(s.Source))
 		}
 		if s.Compressed {
 			fmt.Fprintf(w, "   [compressed]\n")
@@ -228,7 +249,7 @@ func printCWDSummary(w io.Writer, kind agent.Kind, summary bundle.CWDSummary, bu
 		if !d.ExistsLocal {
 			mark = "[missing]"
 		}
-		fmt.Fprintf(w, "  %s %s  (%s)\n", mark, d.Path, plural(d.Count, "session"))
+		fmt.Fprintf(w, "  %s %s  (%s)\n", mark, safeTerminal(d.Path), plural(d.Count, "session"))
 	}
 	if summary.UnknownCWD > 0 {
 		fmt.Fprintf(w, "  (%s have no recorded cwd — compressed or unknown)\n", plural(summary.UnknownCWD, "session"))
@@ -290,7 +311,7 @@ func printImport(w io.Writer, kind agent.Kind, path string, res bundle.ImportRes
 	if len(res.Warnings) > 0 {
 		fmt.Fprintln(w)
 		for _, warn := range res.Warnings {
-			fmt.Fprintf(w, "warning: %s\n", warn)
+			fmt.Fprintf(w, "warning: %s\n", safeTerminal(warn))
 		}
 	}
 
@@ -298,13 +319,13 @@ func printImport(w io.Writer, kind agent.Kind, path string, res bundle.ImportRes
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, "This bundle records the project's git state:")
 		if gi.RemoteURL != "" {
-			fmt.Fprintf(w, "  remote: %s\n", gi.RemoteURL)
+			fmt.Fprintf(w, "  remote: %s\n", safeTerminal(gi.RemoteURL))
 		}
 		if gi.Branch != "" {
-			fmt.Fprintf(w, "  branch: %s\n", gi.Branch)
+			fmt.Fprintf(w, "  branch: %s\n", safeTerminal(gi.Branch))
 		}
 		if gi.CommitSHA != "" {
-			fmt.Fprintf(w, "  commit: %s\n", gi.CommitSHA)
+			fmt.Fprintf(w, "  commit: %s\n", safeTerminal(gi.CommitSHA))
 		}
 		if gi.Dirty {
 			fmt.Fprintln(w, "  note: the working tree was dirty at export; the commit is not the exact state.")
@@ -315,9 +336,9 @@ func printImport(w io.Writer, kind agent.Kind, path string, res bundle.ImportRes
 		if gi.RemoteURL != "" {
 			fmt.Fprintln(w, "To get the code on this machine:")
 			if gi.CommitSHA != "" {
-				fmt.Fprintf(w, "  git clone %s <dir> && (cd <dir> && git checkout %s)\n", gi.RemoteURL, gi.CommitSHA)
+				fmt.Fprintf(w, "  git clone %s <dir> && (cd <dir> && git checkout %s)\n", safeTerminal(gi.RemoteURL), safeTerminal(gi.CommitSHA))
 			} else {
-				fmt.Fprintf(w, "  git clone %s <dir>\n", gi.RemoteURL)
+				fmt.Fprintf(w, "  git clone %s <dir>\n", safeTerminal(gi.RemoteURL))
 			}
 			fmt.Fprintln(w, "  or re-run import with: --clone <dir>")
 		}
@@ -365,7 +386,7 @@ func printTranslate(w io.Writer, path string, res bundle.TranslateResult) {
 	if len(res.Warnings) > 0 {
 		fmt.Fprintln(w)
 		for _, wn := range res.Warnings {
-			fmt.Fprintf(w, "warning: %s\n", wn)
+			fmt.Fprintf(w, "warning: %s\n", safeTerminal(wn))
 		}
 	}
 

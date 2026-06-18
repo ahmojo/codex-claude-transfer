@@ -4,6 +4,25 @@ All notable changes to codex-claude-transfer are documented here.
 
 ## [0.5.0] - Unreleased
 
+### Security
+A first security audit (self-review plus an independent second pass) is recorded in
+[`docs/security/audit.md`](docs/security/audit.md). The actionable findings are
+fixed in this release; **a more detailed audit will come soon.**
+- **Resource limits against malicious bundles (SEC-2/SEC-3).** Import/inspect now
+  cap per-entry, metadata, and total uncompressed sizes, the bundle entry count,
+  and full `zstd` decompression — so a crafted bundle (a zip/zstd "decompression
+  bomb") can no longer exhaust memory, CPU, or disk.
+- **Terminal-escape sanitization (SEC-10).** Bundle metadata (preview, cwd, git
+  remote, warnings) printed by `inspect`/`list`/`import` and the `ui` wizard is now
+  stripped of ANSI/OSC control sequences, so a malicious bundle cannot spoof the
+  screen or write the clipboard (OSC 52) during the review step.
+- **Hardened `import --clone` (SEC-1/SEC-4).** The git remote and commit come from
+  the (untrusted) bundle; clone now rejects git remote-helper transports
+  (`ext::`/`fd::`, the command-execution vector) and flag-like values, passes `--`,
+  validates the commit as a hex object id, and sets `protocol.ext/fd.allow=never`.
+  (Empirically, modern git already blocks `ext::` by default; this is defense in
+  depth for permissive configs.)
+
 ### Added
 - **`export --strip-images`.** Shrinks an image-heavy bundle by replacing each
   inline base64 image with a short placeholder, keeping the conversation text. It
@@ -13,6 +32,11 @@ All notable changes to codex-claude-transfer are documented here.
   reports `Images stripped: N (saved ~X)`. Compressed `.jsonl.zst` sessions are
   decompressed, stripped, and recompressed when `zstd` is available (otherwise
   copied as-is with a warning). Exposed in the desktop GUI too.
+  - **Caveat (flagged at export time and in the docs):** a stripped bundle is
+    *not* merge-friendly. Because stripping changes the session bytes, `import
+    --merge` sees it as diverged from an unstripped copy rather than appending.
+    Use `--strip-images` for a fresh, space-saving import, not for incremental
+    sync of a session you also keep unstripped elsewhere.
 
 ### Fixed
 - **Docs:** the Limitations section still claimed "no merge"; `import --merge`

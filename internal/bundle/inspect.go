@@ -4,7 +4,6 @@ import (
 	"archive/zip"
 	"encoding/json"
 	"fmt"
-	"io"
 	"strings"
 )
 
@@ -81,10 +80,13 @@ func validateManifest(m Manifest) error {
 }
 
 func readZipFile(f *zip.File) ([]byte, error) {
+	if err := checkDeclaredSize(f, MaxMetadataBytes, "bundle metadata "+f.Name); err != nil {
+		return nil, err
+	}
 	rc, err := f.Open()
 	if err != nil {
 		return nil, err
 	}
 	defer rc.Close()
-	return io.ReadAll(rc)
+	return readCapped(rc, MaxMetadataBytes, "bundle metadata "+f.Name)
 }

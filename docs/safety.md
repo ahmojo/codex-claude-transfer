@@ -54,6 +54,12 @@ avoid carrying screenshots you would rather not move — though it is a size/pri
 convenience, not a redaction guarantee: review a bundle's contents if it must be
 free of sensitive material.
 
+> **Not for incremental sync.** Stripping changes a session's bytes, so a stripped
+> bundle no longer lines up with an unstripped copy of the same session: `import
+> --merge` will treat it as *diverged* rather than appending the new messages. Use
+> `--strip-images` for a one-off, space-saving import — not to keep a session in
+> sync across machines where the other copy still has its images.
+
 ### Practical guidance
 
 - **Do not post bundles publicly** — not in GitHub issues, gists, pastebins, or chat.
