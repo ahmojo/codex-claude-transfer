@@ -1,0 +1,12 @@
+{
+  "name": "cct-webui-rec",
+  "private": true,
+  "type": "module",
+  "description": "Records a Playwright walkthrough video of the cct desktop WebUI.",
+  "scripts": {
+    "record": "node record-webui.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.48.0"
+  }
+}

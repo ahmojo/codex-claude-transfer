@@ -37,6 +37,28 @@ Machine A:  cct export --tool claude --project .
 Machine B:  cct import ./project.codexbundle      # the bundle knows it's Claude
 ```
 
+## Demo
+
+Export on one machine, then incrementally sync onto the other — only what's new
+is appended, nothing is ever re-pasted or overwritten:
+
+![Overview: doctor, grouped list, export](demo/01-overview.gif)
+
+![Incremental sync with import --merge](demo/02-sync.gif)
+
+There's also a local desktop GUI (`cct app`) with the same features:
+
+![The cct desktop WebUI](demo/10-webui.gif)
+
+More clips in [`demo/`](demo/): [cross-agent handoff](demo/03-claude-handoff.gif),
+[encryption](demo/04-encryption.gif),
+[conflict resolution & cwd remap](demo/05-conflicts-remap.gif),
+[export filters](demo/06-export-filters.gif),
+[git handoff](demo/07-git-handoff.gif), the
+[interactive `cct ui` wizard](demo/08-cli-ui.gif), and
+[reading compressed `.jsonl.zst` sessions](demo/09-compressed.gif). All
+recordings use throwaway demo sessions — never a real `~/.codex` or `~/.claude`.
+
 ## How it works
 
 Each agent stores a session as a durable JSONL file, with a rebuildable index
