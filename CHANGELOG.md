@@ -2,7 +2,7 @@
 
 All notable changes to codex-claude-transfer are documented here.
 
-## [Unreleased]
+## [0.6.0] - 2026-06-19
 
 ### Added
 - **`import --map-cwd-here`.** A shorthand for `--map-cwd` that maps a
