@@ -2,12 +2,13 @@
 
 All notable changes to codex-claude-transfer are documented here.
 
-## [0.5.0] - Unreleased
+## [0.5.1] - 2026-06-18
 
 ### Security
-A first security audit (self-review plus an independent second pass) is recorded in
+A first security audit (self-review plus two independent passes) is recorded in
 [`docs/security/audit.md`](docs/security/audit.md). The actionable findings are
-fixed in this release; **a more detailed audit will come soon.**
+fixed in this release; **a more detailed audit will come soon.** Also surfaces the
+`--strip-images` "not merge-friendly" caveat at export time and in the desktop GUI.
 - **Resource limits against malicious bundles (SEC-2/SEC-3).** Import/inspect now
   cap per-entry, metadata, and total uncompressed sizes, the bundle entry count,
   and full `zstd` decompression — so a crafted bundle (a zip/zstd "decompression
@@ -36,6 +37,8 @@ fixed in this release; **a more detailed audit will come soon.**
   embedded the source bundle's cwd/git metadata into the generated session text;
   those structured fields are now stripped of control/escape sequences (the
   conversation content itself is preserved verbatim).
+
+## [0.5.0] - 2026-06-18
 
 ### Added
 - **`export --strip-images`.** Shrinks an image-heavy bundle by replacing each
