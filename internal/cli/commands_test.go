@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ahmojo/codex-claude-transfer/internal/bundle"
+	"github.com/ahmojo/codex-claude-transfer/internal/claudehome"
 )
 
 func writeSession(t *testing.T, home, threadID, cwd string) {
@@ -580,6 +581,107 @@ func TestRunInspectShowsMissingCWD(t *testing.T) {
 	}
 	if !strings.Contains(s, "--map-cwd") {
 		t.Errorf("missing remap hint:\n%s", s)
+	}
+}
+
+// writeClaudeTranscript writes a minimal Claude Code transcript under
+// <home>/projects/<encoded-cwd>/<sessionID>.jsonl for use in CLI tests.
+func writeClaudeTranscript(t *testing.T, home, cwd, sessionID, firstUser string) {
+	t.Helper()
+	dir := filepath.Join(home, claudehome.ProjectsSubdir, claudehome.EncodeCWD(cwd))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	line, _ := json.Marshal(map[string]any{
+		"type":      "user",
+		"uuid":      sessionID,
+		"sessionId": sessionID,
+		"cwd":       cwd,
+		"timestamp": "2026-06-13T10:00:00Z",
+		"message":   map[string]any{"role": "user", "content": firstUser},
+	})
+	path := filepath.Join(dir, sessionID+claudehome.SessionExt)
+	if err := os.WriteFile(path, append(line, '\n'), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+}
+
+// TestRunImportClaudeShowsProjectGroups: importing a Claude bundle always prints
+// the "Project groups" summary (mirroring Claude Code's grouped sidebar), even on
+// a clean import where every group folder is the one the session came from.
+func TestRunImportClaudeShowsProjectGroups(t *testing.T) {
+	tmp := t.TempDir()
+	srcHome := filepath.Join(tmp, "src-claude")
+	cwd := filepath.Join(tmp, "proj") // a real, existing dir -> shows as [ok]
+	if err := os.MkdirAll(cwd, 0o755); err != nil {
+		t.Fatalf("mkdir proj: %v", err)
+	}
+	writeClaudeTranscript(t, srcHome, cwd, "abcd1111-2222-3333-4444-555566667777", "hello claude")
+
+	bundle := filepath.Join(tmp, "claude.codexbundle")
+	var out, errOut bytes.Buffer
+	if code := Run([]string{"export", "--tool", "claude", "--claude-home", srcHome, "--all",
+		"-o", bundle}, &out, &errOut); code != 0 {
+		t.Fatalf("export exit = %d, stderr=%s", code, errOut.String())
+	}
+
+	out.Reset()
+	errOut.Reset()
+	dstHome := filepath.Join(tmp, "dst-claude")
+	if code := Run([]string{"import", bundle, "--tool", "claude", "--claude-home", dstHome,
+		"--dry-run"}, &out, &errOut); code != 0 {
+		t.Fatalf("import exit = %d, stderr=%s", code, errOut.String())
+	}
+	s := out.String()
+	if !strings.Contains(s, "Project groups (recorded cwd)") {
+		t.Errorf("Claude import did not show the project-groups summary:\n%s", s)
+	}
+	if !strings.Contains(s, cwd) {
+		t.Errorf("project-groups summary missing the group path %q:\n%s", cwd, s)
+	}
+}
+
+// TestRunImportMapCWDHereConflicts: --map-cwd and --map-cwd-here cannot be combined.
+func TestRunImportMapCWDHereConflicts(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	writeSessionCWD(t, home, "aaaa1111-2222-3333-4444-555566667777", "/proj/a")
+	bundle := filepath.Join(tmp, "b.codexbundle")
+	var out, errOut bytes.Buffer
+	if code := Run([]string{"export", "--all", "--codex-home", home, "-o", bundle}, &out, &errOut); code != 0 {
+		t.Fatalf("export exit = %d, stderr=%s", code, errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	code := Run([]string{"import", bundle, "--codex-home", filepath.Join(tmp, "dst"),
+		"--map-cwd", "/proj/a=/proj/b", "--map-cwd-here", "--dry-run"}, &out, &errOut)
+	if code != 2 {
+		t.Fatalf("expected exit 2, got %d; stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "mutually exclusive") {
+		t.Errorf("missing mutual-exclusivity error: %s", errOut.String())
+	}
+}
+
+// TestRunImportMapCWDHere: --map-cwd-here remaps a single-project bundle's cwd to
+// the directory the command runs from (no need to look up the old path).
+func TestRunImportMapCWDHere(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	writeSessionCWD(t, home, "aaaa1111-2222-3333-4444-555566667777", "/source/proj")
+	bundle := filepath.Join(tmp, "b.codexbundle")
+	var out, errOut bytes.Buffer
+	if code := Run([]string{"export", "--all", "--codex-home", home, "-o", bundle}, &out, &errOut); code != 0 {
+		t.Fatalf("export exit = %d, stderr=%s", code, errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := Run([]string{"import", bundle, "--codex-home", filepath.Join(tmp, "dst"),
+		"--map-cwd-here"}, &out, &errOut); code != 0 {
+		t.Fatalf("import exit = %d, stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "Remapped cwd: 1") {
+		t.Errorf("expected a remap to the current dir:\n%s", out.String())
 	}
 }
 

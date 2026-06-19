@@ -2,6 +2,35 @@
 
 All notable changes to codex-claude-transfer are documented here.
 
+## [Unreleased]
+
+### Added
+- **`import --map-cwd-here`.** A shorthand for `--map-cwd` that maps a
+  single-project bundle's recorded cwd to the directory you run the command from,
+  so you don't have to look up the old path — the sessions appear under the current
+  folder's project (in Claude Code, its sidebar group). A bundle spanning several
+  projects is rejected as ambiguous (use explicit `--map-cwd`), and the flag can't
+  be combined with `--map-cwd`. Available in all three surfaces: the CLI flag, the
+  `cct ui` wizard ("Put these sessions under the folder I'm in now"), and the `cct
+  app` WebUI ("Put these sessions under the current folder", mapping to the folder
+  the app was launched in).
+
+### Changed
+- **Project groups are surfaced for Claude Code.** Claude's sidebar groups by
+  project folder (`projects/<encoded-cwd>/`); a Claude `import` now always prints a
+  **Project groups** summary showing exactly which groups the sessions land in (and
+  flags any whose path is missing locally, with a ready-to-paste `--map-cwd` fix).
+  `inspect` labels the same list "Project groups" for Claude. No behavior change for
+  Codex. The underlying group-preserving/remapping logic (plain import keeps the
+  folder; `--map-cwd` rewrites the cwd and moves the transcript into the new group
+  folder; cross-agent translate computes the folder from cwd) was already in place;
+  this makes it visible and documents it.
+
+### Docs
+- Clarified that **Claude Code exports also use the `.codexbundle` extension**
+  (default name `claude-sessions.codexbundle`); the extension is historical and
+  cosmetic — the manifest's `tool` field, not the file name, identifies the agent.
+
 ## [0.5.1] - 2026-06-18
 
 ### Security

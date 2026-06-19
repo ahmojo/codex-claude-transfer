@@ -95,6 +95,11 @@ func TestBuildImportArgs(t *testing.T) {
 	if want := []string{"import", "b.codexbundle", "--merge"}; !reflect.DeepEqual(mergeArgs, want) {
 		t.Errorf("merge args = %v, want %v", mergeArgs, want)
 	}
+
+	hereArgs := buildImportArgs(importChoices{bundle: "b.codexbundle", mapCWDHere: true}, false)
+	if want := []string{"import", "b.codexbundle", "--map-cwd-here"}; !reflect.DeepEqual(hereArgs, want) {
+		t.Errorf("map-cwd-here args = %v, want %v", hereArgs, want)
+	}
 }
 
 func TestBuildInspectArgs(t *testing.T) {

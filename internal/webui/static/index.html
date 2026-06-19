@@ -144,6 +144,11 @@
             <span>Project folder to check cwd against (optional, just warns)</span>
             <input id="import-project" type="text" placeholder="local project path" />
           </label>
+          <label class="check" id="import-map-here-row" style="display:none">
+            <input type="checkbox" id="import-map-here" />
+            <span id="import-map-here-label">Put these sessions under the current folder</span>
+          </label>
+          <p class="hint" id="import-map-here-hint" style="display:none">Groups the bundle's sessions under the folder <code>cct app</code> was launched in, so you don't have to look up the original path. Only for a single-project bundle.</p>
           <div id="import-maps"></div>
           <button class="ghost" id="import-add-map">+ Redirect a folder (map cwd)</button>
           <fieldset id="import-conflict" class="conflict">

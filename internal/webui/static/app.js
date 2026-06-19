@@ -220,11 +220,16 @@ el("inspect-run").addEventListener("click", async () => {
 // resolution are passed in so the same fields drive both preview and real run.
 function importBody(dryRun) {
   const conflict = (document.querySelector('input[name="conflict"]:checked') || {}).value;
+  const mapHere = el("import-map-here").checked;
   const maps = [];
-  el("import-maps").querySelectorAll(".maprow").forEach(r => {
-    const i = r.querySelectorAll("input");
-    if (i[0].value.trim() && i[1].value.trim()) maps.push({ old: i[0].value.trim(), new: i[1].value.trim() });
-  });
+  // "Map to current folder" (--map-cwd-here) is mutually exclusive with explicit
+  // mappings, so the explicit rows are ignored when it is ticked.
+  if (!mapHere) {
+    el("import-maps").querySelectorAll(".maprow").forEach(r => {
+      const i = r.querySelectorAll("input");
+      if (i[0].value.trim() && i[1].value.trim()) maps.push({ old: i[0].value.trim(), new: i[1].value.trim() });
+    });
+  }
   return {
     path: cleanPath(el("import-path").value),
     identity: cleanPath(el("import-identity").value),
@@ -237,6 +242,7 @@ function importBody(dryRun) {
     sessions: splitList(el("import-sessions").value),
     clone_dir: cleanPath(el("import-clone").value),
     map_cwd: maps,
+    map_cwd_here: mapHere,
   };
 }
 
@@ -274,8 +280,35 @@ el("import-preview").addEventListener("click", async () => {
     // Translate mode resolves nothing; conflict choices apply only to a normal
     // import that found differing local sessions.
     el("import-conflict").style.display = (!d.translated && d.conflicts > 0) ? "block" : "none";
+    configureMapHere(d);
   } catch (e) { setError(out, e); lastPreview = null; }
 });
+
+// configureMapHere shows the "put these under the current folder" shortcut
+// (--map-cwd-here) only for a single-project bundle, labelled with the actual
+// launch directory so it is unambiguous which folder "here" is.
+function configureMapHere(d) {
+  const row = el("import-map-here-row"), hint = el("import-map-here-hint");
+  const box = el("import-map-here");
+  const single = !d.translated && Array.isArray(d.projects) && d.projects.length === 1 && d.here_dir;
+  if (!single) {
+    row.style.display = "none"; hint.style.display = "none";
+    box.checked = false; setMapsDisabled(false);
+    return;
+  }
+  el("import-map-here-label").textContent = "Put these sessions under the current folder (" + d.here_dir + ")";
+  row.style.display = "flex"; hint.style.display = "block";
+  setMapsDisabled(box.checked);
+}
+
+// The "map here" shortcut and explicit folder redirects are mutually exclusive,
+// so ticking one greys out the other.
+function setMapsDisabled(disabled) {
+  el("import-maps").style.opacity = disabled ? "0.4" : "";
+  el("import-maps").querySelectorAll("input").forEach(i => { i.disabled = disabled; });
+  el("import-add-map").disabled = disabled;
+}
+el("import-map-here").addEventListener("change", e => setMapsDisabled(e.target.checked));
 
 el("import-add-map").addEventListener("click", () => {
   const r = document.createElement("div");

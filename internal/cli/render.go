@@ -243,7 +243,13 @@ func printCWDSummary(w io.Writer, kind agent.Kind, summary bundle.CWDSummary, bu
 	if len(summary.Dirs) == 0 && summary.UnknownCWD == 0 {
 		return
 	}
-	fmt.Fprintln(w, "Project folders (recorded cwd):")
+	// Claude Code groups its sidebar by the project folder (projects/<encoded-cwd>/),
+	// so for Claude this list IS the set of sidebar groups the sessions land in.
+	if kind == agent.Claude {
+		fmt.Fprintln(w, "Project groups (recorded cwd):")
+	} else {
+		fmt.Fprintln(w, "Project folders (recorded cwd):")
+	}
 	for _, d := range summary.Dirs {
 		mark := "[ok]     "
 		if !d.ExistsLocal {
@@ -256,9 +262,18 @@ func printCWDSummary(w io.Writer, kind agent.Kind, summary bundle.CWDSummary, bu
 	}
 	if summary.MissingCount > 0 {
 		fmt.Fprintln(w)
-		fmt.Fprintf(w, "Some of these folders do not exist on this machine, so those sessions\n")
-		fmt.Fprintf(w, "will be hidden in %s's project view until you create the folder (then\n", kind.Label())
-		fmt.Fprintf(w, "restart %s) or remap the cwd on import, e.g.:\n", kind.Label())
+		if kind == agent.Claude {
+			// For Claude the symptom is grouping, not invisibility: the sessions
+			// keep their original group folder, so they show under the source
+			// machine's path rather than the project's location here.
+			fmt.Fprintf(w, "Some of these paths do not exist on this machine, so those sessions will\n")
+			fmt.Fprintf(w, "stay grouped under their original project, not its location here. Remap the\n")
+			fmt.Fprintf(w, "cwd on import to move them into the right group, e.g.:\n")
+		} else {
+			fmt.Fprintf(w, "Some of these folders do not exist on this machine, so those sessions\n")
+			fmt.Fprintf(w, "will be hidden in %s's project view until you create the folder (then\n", kind.Label())
+			fmt.Fprintf(w, "restart %s) or remap the cwd on import, e.g.:\n", kind.Label())
+		}
 		fmt.Fprintf(w, "  cct import %s --map-cwd \"<old-cwd>=<new-local-path>\"\n", bundlePath)
 	}
 }
@@ -344,9 +359,14 @@ func printImport(w io.Writer, kind agent.Kind, path string, res bundle.ImportRes
 		}
 	}
 
-	if summary := bundle.SummarizeCWDs(res.Manifest.Sessions, bundle.DirExists); summary.MissingCount > 0 {
+	// For Claude, always show the project groups the sessions land in (it mirrors
+	// the grouped sidebar). For Codex, only surface the folder list when something
+	// is missing, so a clean import stays quiet.
+	summary := bundle.SummarizeCWDs(res.Manifest.Sessions, bundle.DirExists)
+	alwaysShow := kind == agent.Claude
+	if alwaysShow || summary.MissingCount > 0 {
 		fmt.Fprintln(w)
-		printCWDSummary(w, kind, summary, path, true)
+		printCWDSummary(w, kind, summary, path, !alwaysShow)
 	}
 
 	fmt.Fprintln(w)

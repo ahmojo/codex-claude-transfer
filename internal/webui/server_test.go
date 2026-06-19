@@ -197,6 +197,65 @@ func TestExportInspectImportRoundTrip(t *testing.T) {
 	}
 }
 
+// TestImportMapCWDHereViaAPI: the WebUI's "map to current folder" maps a
+// single-project bundle's cwd to the server's launch directory (os.Getwd), and
+// the inspect/import responses carry here_dir + projects so the UI can offer it.
+func TestImportMapCWDHereViaAPI(t *testing.T) {
+	src, srcTS := testServer(t)
+	writeSession(t, src.home, "abcd1234-1111-2222-3333-444455556666", "/old/laptop/proj")
+	out := exportAll(t, srcTS, "h.codexbundle")
+
+	// Inspect: the response must surface here_dir and a single project so the
+	// frontend knows it can offer the "map to current folder" shortcut.
+	res, data := do(t, srcTS, "POST", "/api/inspect", testToken, `{"path":"`+out+`"}`)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("inspect: %d %s", res.StatusCode, data)
+	}
+	var insp struct {
+		HereDir  string `json:"here_dir"`
+		Projects []struct {
+			Path string `json:"path"`
+		} `json:"projects"`
+	}
+	json.Unmarshal(data, &insp)
+	if insp.HereDir == "" {
+		t.Error("inspect response missing here_dir")
+	}
+	if len(insp.Projects) != 1 {
+		t.Fatalf("expected 1 project, got %d", len(insp.Projects))
+	}
+
+	// Import with map_cwd_here into a fresh home: the cwd is remapped to here.
+	_, dstTS := testServer(t)
+	res, data = do(t, dstTS, "POST", "/api/import", testToken, `{"path":"`+out+`","map_cwd_here":true}`)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("import: %d %s", res.StatusCode, data)
+	}
+	var ir struct {
+		Imported int    `json:"imported"`
+		Remapped int    `json:"remapped"`
+		HereDir  string `json:"here_dir"`
+	}
+	json.Unmarshal(data, &ir)
+	if ir.Imported != 1 || ir.Remapped != 1 {
+		t.Errorf("imported=%d remapped=%d, want 1/1; body=%s", ir.Imported, ir.Remapped, data)
+	}
+}
+
+// TestImportMapHereConflictsWithExplicitMapViaAPI: the two map options can't be
+// combined.
+func TestImportMapHereConflictsWithExplicitMapViaAPI(t *testing.T) {
+	src, srcTS := testServer(t)
+	writeSession(t, src.home, "abcd1234-1111-2222-3333-444455556666", "/p")
+	out := exportAll(t, srcTS, "h2.codexbundle")
+	_, dstTS := testServer(t)
+	res, _ := do(t, dstTS, "POST", "/api/import", testToken,
+		`{"path":"`+out+`","map_cwd_here":true,"map_cwd":[{"old":"/p","new":"/q"}]}`)
+	if res.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 when combining map_cwd_here with map_cwd, got %d", res.StatusCode)
+	}
+}
+
 func TestImportConflictingResolversRejected(t *testing.T) {
 	_, ts := testServer(t)
 	res, _ := do(t, ts, "POST", "/api/import", testToken,

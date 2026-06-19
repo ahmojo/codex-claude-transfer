@@ -43,6 +43,8 @@ type importChoices struct {
 	importAsCopy  bool
 	project       string
 	mapCWD        []string
+	mapCWDHere    bool
+	hereDir       string
 	clone         string
 	decryptMode   string // "" | "passphrase" | "identity"
 	identity      string
@@ -113,6 +115,9 @@ func buildImportArgs(c importChoices, dryRun bool) []string {
 	}
 	if c.project != "" {
 		args = append(args, "--project", stripQuotes(c.project))
+	}
+	if c.mapCWDHere {
+		args = append(args, "--map-cwd-here")
 	}
 	for _, m := range c.mapCWD {
 		if m != "" {
@@ -436,23 +441,42 @@ func uiImport(f commonFlags, stdout, stderr io.Writer) {
 	if summary.MissingCount == 0 && len(summary.Dirs) > 0 {
 		fmt.Fprintf(stdout, "All project folders already exist here — your sessions will\nshow up in %s automatically after import.\n", bkind.Label())
 	}
+	here, _ := os.Getwd()
+	singleProject := len(summary.Dirs) == 1
 	for _, d := range summary.Dirs {
 		if d.ExistsLocal {
 			continue
 		}
+		options := []huh.Option[string]{}
+		// Offer the one-click "put it under the folder I'm in now" shortcut. It is
+		// the --map-cwd-here flag, valid only for a single-project bundle; for a
+		// multi-project bundle we fall back to an explicit per-folder mapping.
+		if here != "" {
+			options = append(options, huh.NewOption(
+				fmt.Sprintf("Put these sessions under the folder I'm in now (%s)", here), "here"))
+		}
+		options = append(options,
+			huh.NewOption("Create that exact folder here (keep the original path)", "create"),
+			huh.NewOption("Point these sessions to a different folder on this computer", "remap"),
+			huh.NewOption("Skip for now (they stay hidden until the folder exists)", "skip"),
+		)
 		var choice string
 		if !runField(huh.NewSelect[string]().
 			Title(fmt.Sprintf("%s recorded in this folder, which is NOT on this computer:\n  %s\nWhat should I do so these sessions appear in %s?",
 				plural(d.Count, "session"), safeTerminal(d.Path), bkind.Label())).
-			Options(
-				huh.NewOption("Create that exact folder here (keep the original path)", "create"),
-				huh.NewOption("Point these sessions to a different folder on this computer", "remap"),
-				huh.NewOption("Skip for now (they stay hidden until the folder exists)", "skip"),
-			).
+			Options(options...).
 			Value(&choice), stderr) {
 			return
 		}
 		switch choice {
+		case "here":
+			if singleProject {
+				// Use the dedicated flag so the printed command teaches it.
+				c.mapCWDHere = true
+				c.hereDir = here
+			} else {
+				c.mapCWD = append(c.mapCWD, d.Path+"="+here)
+			}
 		case "create":
 			if err := os.MkdirAll(d.Path, 0o755); err != nil {
 				fmt.Fprintf(stderr, "  could not create %s: %v\n  (these sessions will stay hidden until that folder exists)\n", d.Path, err)
@@ -499,7 +523,10 @@ func uiImport(f commonFlags, stdout, stderr io.Writer) {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return
 	}
-	dry, err := bundle.Import(home, bundle.ImportOptions{BundlePath: plain, DryRun: true, MapCWD: mappings})
+	dry, err := bundle.Import(home, bundle.ImportOptions{
+		BundlePath: plain, DryRun: true,
+		MapCWD: mappings, MapCWDHere: c.mapCWDHere, HereDir: c.hereDir,
+	})
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return

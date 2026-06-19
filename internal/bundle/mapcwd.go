@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 )
 
@@ -83,6 +84,50 @@ func normalizeCWD(p string) string {
 		return strings.ToLower(c)
 	}
 	return c
+}
+
+// resolveMapHere builds the cwd mapping for --map-cwd-here: it maps the bundle's
+// single recorded project cwd to hereDir (the caller's current directory). It
+// requires exactly one distinct source cwd; a bundle spanning several projects is
+// ambiguous and rejected with guidance to use explicit --map-cwd. When the sole
+// recorded cwd already equals hereDir, it returns no mapping (a plain import
+// already lands the sessions correctly) and an explanatory note instead.
+func resolveMapHere(manifest Manifest, hereDir string) (mappings []CWDMapping, note string, err error) {
+	if hereDir == "" {
+		return nil, "", fmt.Errorf("--map-cwd-here: could not determine the current directory")
+	}
+	if !isPlausibleAbs(hereDir) {
+		return nil, "", fmt.Errorf("--map-cwd-here: current directory %q is not absolute", hereDir)
+	}
+	seen := map[string]string{} // normalized key -> original spelling, first seen
+	var order []string
+	for _, ms := range manifest.Sessions {
+		if ms.OriginalCWD == "" {
+			continue
+		}
+		k := normalizeCWD(ms.OriginalCWD)
+		if _, ok := seen[k]; !ok {
+			seen[k] = ms.OriginalCWD
+			order = append(order, k)
+		}
+	}
+	switch len(order) {
+	case 0:
+		return nil, "", fmt.Errorf("--map-cwd-here: the bundle has no recorded project cwd to map (nothing to remap)")
+	case 1:
+		old := seen[order[0]]
+		if pathEqual(old, hereDir) {
+			return nil, "--map-cwd-here: these sessions were already recorded under this folder; importing as-is", nil
+		}
+		return []CWDMapping{{Old: old, New: hereDir}}, "", nil
+	default:
+		paths := make([]string, 0, len(order))
+		for _, k := range order {
+			paths = append(paths, seen[k])
+		}
+		sort.Strings(paths)
+		return nil, "", fmt.Errorf("--map-cwd-here: the bundle spans %d projects (%s); it is ambiguous which one to map here. Use --map-cwd \"<old>=%s\" for the project you want", len(order), strings.Join(paths, ", "), hereDir)
+	}
 }
 
 // matchMapping returns the first mapping whose Old equals cwd, or nil. Because

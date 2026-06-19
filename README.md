@@ -76,6 +76,15 @@ re-discovers the files itself on its next run, so imported sessions show up the
 next time you start it. The bundle records which agent it came from, so import
 always writes to the right home.
 
+> **Note on the `.codexbundle` extension.** Every bundle uses the `.codexbundle`
+> extension — including Claude Code exports (whose default file name is
+> `claude-sessions.codexbundle`). The name is historical (the tool began as a
+> Codex-only utility) and is kept for compatibility; the extension does **not**
+> mean the bundle holds Codex sessions. What's actually inside is recorded in the
+> manifest's `tool` field (`codex` or `claude`), and `inspect`/`import` read that,
+> not the file name. If you prefer, pass `-o my-project.claudebundle` — the
+> extension is purely cosmetic and any name works.
+
 ## Install
 
 ```bash
@@ -255,6 +264,39 @@ cross over, but tool calls and command output are summarized rather than replaye
 and model/runtime state does not transfer. It's deterministic, so re-running is an
 idempotent skip rather than a duplicate.
 
+**Project groups are preserved.** Claude Code groups its sidebar by project, and
+that grouping comes entirely from the folder a transcript lives in
+(`projects/<encoded-cwd>/`) — not from anything inside the JSONL. `cct` carries
+that folder through, so groups travel with the bundle automatically:
+
+- A plain `import` writes each transcript back into the same project folder, so on
+  a machine where the project sits at the same path the sessions land in the same
+  sidebar group.
+- When the project lives at a **different** path on the target machine, remap it on
+  import — `cct` rewrites the recorded `cwd` *and* moves the transcript into the new
+  group folder, so it shows under the project's location here:
+
+  ```bash
+  cct import ./claude-sessions.codexbundle \
+    --map-cwd "/home/me/dev/app=C:\Users\me\dev\app"
+  ```
+
+  Or, if you just want them under the folder you're standing in, skip looking up
+  the old path and use the shorthand — `--map-cwd-here` maps the bundle's project
+  to the current directory (single-project bundles only):
+
+  ```bash
+  cd C:\Users\me\dev\app
+  cct import ./claude-sessions.codexbundle --map-cwd-here
+  ```
+
+- A cross-agent `import --to claude` computes the right group folder from each
+  session's recorded cwd, so translated Codex sessions are grouped too.
+
+`inspect` and a Claude `import` print a **Project groups** summary so you can see
+exactly which groups the sessions will land in, and flag any whose path doesn't
+exist locally (with a ready-to-paste `--map-cwd` line to fix the grouping).
+
 ## Command reference
 
 | Command | Description |
@@ -290,6 +332,7 @@ idempotent skip rather than a duplicate.
 | `--dry-run` | import | Validate and report only; write nothing. |
 | `--to <codex\|claude>` | import | Cross-agent handoff: translate the bundle's sessions into the *other* agent's format and write them into that agent's home (best-effort: conversation + context preamble, tool calls summarized). |
 | `--map-cwd OLD=NEW` | import | Rewrite matching sessions' recorded cwd. Plain `.jsonl` always; `.jsonl.zst` when `zstd` is installed. Repeatable. |
+| `--map-cwd-here` | import | Shorthand for `--map-cwd` that maps the bundle's project to the directory you run the command from — no need to look up the old path. Single-project bundles only; can't be combined with `--map-cwd`. |
 | `--merge` | import | Incremental sync. When a session grew on the other device (the local file is a prefix of the bundle's), append only the new messages instead of reporting a conflict. Lossless; composes with the resolution flags for genuinely diverged sessions. |
 | `--replace-with-backup` | import | On a conflict, back up the local file and overwrite it with the bundle's version. |
 | `--import-as-copy` | import | On a conflict, import the bundle's version as a new session, leaving yours untouched. Excludes `--replace-with-backup`. |

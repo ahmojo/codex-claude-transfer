@@ -71,6 +71,16 @@ type ImportOptions struct {
 	// Only plain .jsonl files are rewritten; .jsonl.zst files that match a
 	// mapping are copied byte-for-byte and reported as unmappable.
 	MapCWD []CWDMapping
+	// MapCWDHere is the convenience form of MapCWD for the common "put these
+	// sessions under the project I'm in right now" case: it maps the bundle's
+	// single recorded project cwd to HereDir without the caller having to look up
+	// the old path. It requires the bundle to contain exactly one distinct source
+	// cwd; a bundle spanning multiple projects is ambiguous and rejected (use
+	// MapCWD explicitly). Mutually exclusive with MapCWD.
+	MapCWDHere bool
+	// HereDir is the absolute destination path for MapCWDHere (the caller's
+	// current working directory). Ignored unless MapCWDHere is set.
+	HereDir string
 	// ReplaceWithBackup turns conflicts (a local file with different content
 	// for the same session) into a replace: the local file is backed up next
 	// to itself and then overwritten with the bundle's version. Without it,
@@ -187,6 +197,25 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 		cwdByBundlePath[ms.BundlePath] = ms.OriginalCWD
 	}
 
+	// Resolve the effective cwd mappings. --map-cwd-here is sugar that derives a
+	// single mapping (the bundle's one recorded project cwd -> HereDir) so the
+	// caller need not look up the old path; it is mutually exclusive with the
+	// explicit --map-cwd list and rejects a multi-project bundle as ambiguous.
+	mappings := opts.MapCWD
+	if opts.MapCWDHere {
+		if len(opts.MapCWD) > 0 {
+			return result, fmt.Errorf("use either --map-cwd or --map-cwd-here, not both")
+		}
+		m, note, err := resolveMapHere(manifest, opts.HereDir)
+		if err != nil {
+			return result, err
+		}
+		if note != "" {
+			result.Warnings = append(result.Warnings, note)
+		}
+		mappings = m
+	}
+
 	// Resolve a --session filter (if any) to the exact set of bundle paths it
 	// selects, erroring before any write if a requested id matches nothing.
 	selectedPaths, err := resolveSelectedPaths(manifest, opts.SessionIDs)
@@ -237,7 +266,7 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 		// rewritten bytes (never the stale bundle checksum after a mutation).
 		destRel := rel
 		effectiveSum := checksums[rel]
-		if m := matchMapping(item.OriginalCWD, opts.MapCWD); m != nil {
+		if m := matchMapping(item.OriginalCWD, mappings); m != nil {
 			switch {
 			case kind == agent.Claude:
 				orig, err := readEntryBytes(&zr.Reader, rel)

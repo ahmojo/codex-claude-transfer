@@ -83,6 +83,7 @@ type commonFlags struct {
 	stripImages     bool
 	cloneDir        string
 	mapCWD          []string
+	mapCWDHere      bool
 	encryptTo       []string
 	recipientsFile  string
 	passphrase      bool
@@ -160,6 +161,8 @@ func parseFlags(args []string) (commonFlags, error) {
 			f.mapCWD = append(f.mapCWD, val)
 		case hasPrefix(arg, "--map-cwd="):
 			f.mapCWD = append(f.mapCWD, arg[len("--map-cwd="):])
+		case arg == "--map-cwd-here":
+			f.mapCWDHere = true
 		case arg == "--all":
 			f.all = true
 		case arg == "--since":
@@ -685,7 +688,7 @@ func runImport(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if len(f.positional) != 1 {
-		fmt.Fprintln(stderr, "usage: cct import <file.codexbundle> [--dry-run] [--merge] [--session <id>] [--project <path>] [--map-cwd OLD=NEW] [--replace-with-backup] [--import-as-copy] [--clone <dir>]")
+		fmt.Fprintln(stderr, "usage: cct import <file.codexbundle> [--dry-run] [--merge] [--session <id>] [--project <path>] [--map-cwd OLD=NEW | --map-cwd-here] [--replace-with-backup] [--import-as-copy] [--clone <dir>]")
 		return 2
 	}
 	if f.replaceBackup && f.importAsCopy {
@@ -702,10 +705,22 @@ func runImport(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
+	if f.mapCWDHere && len(f.mapCWD) > 0 {
+		fmt.Fprintln(stderr, "error: --map-cwd and --map-cwd-here are mutually exclusive (use one or the other)")
+		return 2
+	}
 	mappings, err := bundle.ParseCWDMappings(f.mapCWD)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 2
+	}
+	var hereDir string
+	if f.mapCWDHere {
+		hereDir, err = os.Getwd()
+		if err != nil {
+			fmt.Fprintf(stderr, "error: --map-cwd-here: cannot determine the current directory: %v\n", err)
+			return 1
+		}
 	}
 
 	bundlePath, cleanup, code := resolveBundlePath(f, stderr)
@@ -733,6 +748,8 @@ func runImport(args []string, stdout, stderr io.Writer) int {
 		DryRun:            f.dryRun,
 		ProjectPath:       absProject,
 		MapCWD:            mappings,
+		MapCWDHere:        f.mapCWDHere,
+		HereDir:           hereDir,
 		ReplaceWithBackup: f.replaceBackup,
 		ImportAsCopy:      f.importAsCopy,
 		Merge:             f.merge,
@@ -938,6 +955,13 @@ Flags:
   --map-cwd OLD=NEW     import: rewrite a session's recorded cwd from OLD to NEW
                         so it lands in the right local project (repeatable;
                         plain .jsonl only — .zst sessions are not rewritten)
+  --map-cwd-here        import: shorthand for --map-cwd that maps the bundle's
+                        recorded project to the directory you run this from, so
+                        you don't have to look up the old path. The sessions then
+                        appear under the current folder's project (in Claude Code,
+                        its sidebar group). Only for a single-project bundle; a
+                        bundle spanning several projects is rejected as ambiguous
+                        (use --map-cwd for those). Cannot be combined with --map-cwd
   --replace-with-backup import: on a conflict (a local session changed since a
                         previous import), overwrite the local file with the
                         bundle's version after saving a backup next to it
@@ -986,6 +1010,7 @@ Examples:
   cct import ./my-project.codexbundle
   cct import ./my-project.codexbundle --merge   # append new messages to grown sessions
   cct import ./my-project.codexbundle --map-cwd "/old/path=/new/path"
+  cct import ./my-project.codexbundle --map-cwd-here   # group under the current folder
   cct import ./my-project.codexbundle --replace-with-backup
   cct import ./my-project.codexbundle --import-as-copy
   cct import ./my-project.codexbundle --to claude   # Codex bundle -> Claude Code

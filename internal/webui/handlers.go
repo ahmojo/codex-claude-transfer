@@ -379,12 +379,17 @@ func (s *Server) handleInspect(w http.ResponseWriter, r *http.Request) {
 	for _, d := range summary.Dirs {
 		projects = append(projects, projectDTO{Path: d.Path, Count: d.Count, ExistsLocal: d.ExistsLocal})
 	}
+	// here_dir is the folder cct app was launched in; the UI offers "map to current
+	// folder" (--map-cwd-here) labelled with it, valid for a single-project bundle.
+	hereDir, _ := os.Getwd()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"format":   res.Manifest.FormatVersion,
 		"created":  res.Manifest.CreatedAt,
 		"device":   res.Manifest.CreatedByDevice,
 		"sessions": len(res.Manifest.Sessions),
 		"projects": projects,
+		"tool":     res.Manifest.Tool,
+		"here_dir": hereDir,
 		"git":      res.Manifest.Git,
 	})
 }
@@ -403,6 +408,7 @@ type importReq struct {
 	TranslateTo       string      `json:"translate_to"`
 	CloneDir          string      `json:"clone_dir"` // after import, clone the recorded git remote here
 	MapCWD            []cwdMapDTO `json:"map_cwd"`
+	MapCWDHere        bool        `json:"map_cwd_here"` // map the bundle's single project to this app's launch dir
 }
 
 type cwdMapDTO struct {
@@ -439,6 +445,10 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.MapCWDHere && len(req.MapCWD) > 0 {
+		apiError(w, http.StatusBadRequest, "choose either map-to-current-folder or explicit cwd mappings, not both")
+		return
+	}
 	var specs []string
 	for _, m := range req.MapCWD {
 		if m.Old != "" && m.New != "" {
@@ -449,6 +459,15 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		apiError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	// "Map to current folder" resolves to the directory cct app was launched in.
+	var hereDir string
+	if req.MapCWDHere {
+		hereDir, err = os.Getwd()
+		if err != nil {
+			apiError(w, http.StatusUnprocessableEntity, "cannot determine the current directory: "+err.Error())
+			return
+		}
 	}
 
 	var absProject string
@@ -473,6 +492,8 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		DryRun:            req.DryRun,
 		Merge:             req.Merge,
 		MapCWD:            mappings,
+		MapCWDHere:        req.MapCWDHere,
+		HereDir:           hereDir,
 		ReplaceWithBackup: req.ReplaceWithBackup,
 		ImportAsCopy:      req.ImportAsCopy,
 		ProjectPath:       absProject,
@@ -501,6 +522,14 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Project summary + launch dir so the preview can offer "map to current folder"
+	// (--map-cwd-here), which is valid only for a single-project bundle.
+	summary := bundle.SummarizeCWDs(res.Manifest.Sessions, bundle.DirExists)
+	projects := make([]projectDTO, 0, len(summary.Dirs))
+	for _, d := range summary.Dirs {
+		projects = append(projects, projectDTO{Path: d.Path, Count: d.Count, ExistsLocal: d.ExistsLocal})
+	}
+	here, _ := os.Getwd()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"dry_run":            res.DryRun,
 		"imported":           res.Imported,
@@ -514,6 +543,9 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		"remapped":           res.Mapped,
 		"cwd_mismatch":       res.CWDMismatchCount,
 		"sessions_in_bundle": len(res.Manifest.Sessions),
+		"projects":           projects,
+		"here_dir":           here,
+		"tool":               res.Manifest.Tool,
 		"cloned":             cloned,
 		"clone_error":        cloneErr,
 		"warnings":           res.Warnings,
