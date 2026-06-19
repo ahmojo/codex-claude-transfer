@@ -31,6 +31,25 @@ func sourceLabel(agent string) string {
 	}
 }
 
+// sanitizeMeta strips control characters (C0/C1, including ESC, CR, and LF) from a
+// structured metadata value before it is embedded into the generated handoff
+// preamble. These fields (cwd, git branch/commit/remote, timestamp) come from an
+// untrusted bundle and must never carry terminal escape/OSC sequences into the
+// session text the destination agent later displays. The conversation messages
+// themselves are preserved verbatim (faithful translation); only cct's own
+// formatted metadata is cleaned. See Finding 5 in docs/security/audit.md.
+func sanitizeMeta(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\t' {
+			return ' '
+		}
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
 // Preamble builds the plain-language handoff message that leads a translated
 // session. It tells the destination agent that this is an imported, best-effort
 // translation (not a native replay), restates the project/git context so the code
@@ -41,7 +60,7 @@ func Preamble(s AgentSession) string {
 	b.WriteString("[Session handed off by cct — translated from ")
 	b.WriteString(sourceLabel(s.SourceAgent))
 	if s.CreatedAt != "" {
-		fmt.Fprintf(&b, " (originally %s)", s.CreatedAt)
+		fmt.Fprintf(&b, " (originally %s)", sanitizeMeta(s.CreatedAt))
 	}
 	b.WriteString("]\n\n")
 	b.WriteString("This conversation was carried over from another coding agent. It is a ")
@@ -50,19 +69,19 @@ func Preamble(s AgentSession) string {
 	b.WriteString("model/runtime state crossed over. Read it as context.\n\n")
 
 	if s.CWD != "" {
-		fmt.Fprintf(&b, "Project directory: %s\n", s.CWD)
+		fmt.Fprintf(&b, "Project directory: %s\n", sanitizeMeta(s.CWD))
 	}
 	if s.Git != nil {
 		if s.Git.Branch != "" {
-			fmt.Fprintf(&b, "Git branch: %s\n", s.Git.Branch)
+			fmt.Fprintf(&b, "Git branch: %s\n", sanitizeMeta(s.Git.Branch))
 		}
 		if s.Git.Commit != "" {
-			fmt.Fprintf(&b, "Git commit: %s\n", s.Git.Commit)
+			fmt.Fprintf(&b, "Git commit: %s\n", sanitizeMeta(s.Git.Commit))
 		}
 		if s.Git.Remote != "" {
-			fmt.Fprintf(&b, "Git remote: %s\n", s.Git.Remote)
+			fmt.Fprintf(&b, "Git remote: %s\n", sanitizeMeta(s.Git.Remote))
 			if s.Git.Commit != "" {
-				fmt.Fprintf(&b, "  (to get the code: git clone %s <dir> && cd <dir> && git checkout %s)\n", s.Git.Remote, s.Git.Commit)
+				fmt.Fprintf(&b, "  (to get the code: git clone %s <dir> && cd <dir> && git checkout %s)\n", sanitizeMeta(s.Git.Remote), sanitizeMeta(s.Git.Commit))
 			}
 		}
 	}

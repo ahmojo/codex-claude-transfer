@@ -52,8 +52,39 @@ Two structural properties frame everything below:
 | SEC-10 | Low | Malicious bundle metadata printed to the terminal without escaping control/ANSI/OSC sequences | **Fixed** |
 | SEC-8 | Info | Checksums are integrity, not authenticity | By design; document |
 | SEC-9 | Info | WebUI/CLI operate on arbitrary local paths at user privilege | By design |
+| SEC-11 | Medium | Manifest-unlisted "hidden" session entries are imported/translated though invisible in previews | **Fixed** |
+| SEC-12 | Medium | `os.Stat` on a bundle-controlled UNC cwd → outbound SMB / NetNTLM leak during inspect | **Fixed** |
 
 ¹ **Downgraded from High after empirical testing.** See the reconciliation note below.
+
+## Update 2 — second independent pass (deep scan, commit `53342c5`)
+
+A deeper independent scan was run. It **re-confirmed** the resource-exhaustion and
+git-clone findings (already fixed here as SEC-2/3 and SEC-1/4 before that scan's
+commit) and added two genuinely new issues, both now fixed:
+
+- **SEC-11 (Medium) — hidden sessions.** `inspect`/previews are driven by
+  `manifest.sessions`, but `import` and `TranslateImport` iterated the *ZIP
+  inventory* and accepted any session-shaped entry with a valid checksum. A
+  bundle could thus show zero sessions in inspect yet import an attacker-controlled
+  rollout — defeating the review boundary. Fixed with `verifyManifestBinding`
+  (`internal/bundle/import.go`): every importable entry must be declared in the
+  manifest with a checksum that agrees with `checksums.json`, enforced before any
+  write and shared by native import and translation.
+- **SEC-12 (Medium) — UNC stat probe.** The recorded cwd is attacker-controlled,
+  and `DirExists` ran `os.Stat` on it during inspect (CLI, JSON, and WebUI). On
+  Windows a `\\attacker\share` path triggers outbound SMB / name resolution and can
+  leak NetNTLM credentials — from a read-only *preview*, no import required. Fixed
+  in `internal/bundle/cwdsummary.go`: UNC/device paths (`\\…`, `//…`) are reported
+  as not-present without ever being statted.
+- It also extended SEC-10 to the **handoff preamble**: translated-session text
+  embedded attacker-controlled cwd/git metadata unescaped. Fixed by sanitizing
+  those structured fields in `internal/handoff/preamble.go` (the conversation
+  content itself is preserved verbatim — only cct's own formatted metadata is
+  cleaned).
+
+The scan also re-affirmed the sound areas (zip-slip containment, loopback WebUI
+auth, age subprocess boundary, client-side HTML escaping).
 
 ## Reconciliation with an independent audit (Codex, commit `53342c5`)
 

@@ -74,6 +74,9 @@ func TranslateImport(targetHome codexhome.Home, opts TranslateOptions) (Translat
 	if err := verifyBundle(&zr.Reader, checksums); err != nil {
 		return result, err
 	}
+	if err := verifyManifestBinding(&zr.Reader, manifest, checksums, sourceKind); err != nil {
+		return result, err
+	}
 
 	for _, f := range zr.File {
 		rel := f.Name

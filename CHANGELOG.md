@@ -22,6 +22,20 @@ fixed in this release; **a more detailed audit will come soon.**
   validates the commit as a hex object id, and sets `protocol.ext/fd.allow=never`.
   (Empirically, modern git already blocks `ext::` by default; this is defense in
   depth for permissive configs.)
+- **Manifest is now authoritative (SEC-11).** Import and cross-agent translation
+  used to trust the ZIP inventory, so a bundle could carry a valid, checksummed
+  session file that was absent from `manifest.sessions` — invisible in
+  inspect/preview yet still written. Such "hidden session" bundles are now rejected
+  before any write (every importable entry must be declared in the manifest with a
+  matching checksum).
+- **No SMB probe from inspecting a bundle (SEC-12).** The recorded cwd is
+  attacker-controlled; statting a UNC path (`\\host\share`) during a read-only
+  inspect could trigger outbound SMB and leak Windows NetNTLM credentials. UNC and
+  device paths are now reported as not-present without being statted.
+- **Handoff preamble sanitized (SEC-10, extended).** Cross-agent translation
+  embedded the source bundle's cwd/git metadata into the generated session text;
+  those structured fields are now stripped of control/escape sequences (the
+  conversation content itself is preserved verbatim).
 
 ### Added
 - **`export --strip-images`.** Shrinks an image-heavy bundle by replacing each

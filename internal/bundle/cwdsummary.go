@@ -3,6 +3,7 @@ package bundle
 import (
 	"os"
 	"sort"
+	"strings"
 )
 
 // CWDInfo describes one distinct recorded working directory across a bundle's
@@ -81,7 +82,31 @@ func SummarizeCWDs(sessions []ManifestSession, exists func(string) bool) CWDSumm
 
 // DirExists reports whether p exists on the local machine and is a directory.
 // It only reads (os.Stat); it never creates anything.
+//
+// The recorded cwd comes from an untrusted bundle, and os.Stat on a UNC path
+// (\\server\share or //server/share) or a Windows device path triggers outbound
+// SMB / name resolution — which can leak NetNTLM credentials to an attacker-chosen
+// host just from inspecting a bundle. Such remote-looking paths are therefore
+// reported as not-present without ever being statted. See SEC-11 / Finding 3 in
+// docs/security/audit.md.
 func DirExists(p string) bool {
+	if !isLocalStattablePath(p) {
+		return false
+	}
 	info, err := os.Stat(p)
 	return err == nil && info.IsDir()
+}
+
+// isLocalStattablePath reports whether p is safe to os.Stat — i.e. not a UNC or
+// device path that could reach the network.
+func isLocalStattablePath(p string) bool {
+	if p == "" {
+		return false
+	}
+	// UNC (\\host\share, //host/share) and Windows device namespaces (\\?\, \\.\)
+	// all begin with two slashes of either kind.
+	if strings.HasPrefix(p, `\\`) || strings.HasPrefix(p, "//") {
+		return false
+	}
+	return true
 }

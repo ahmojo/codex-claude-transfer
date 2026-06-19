@@ -171,8 +171,13 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 	result.Manifest = manifest
 	kind := agent.Normalize(agent.Kind(manifest.Tool))
 
-	// 1) Verify integrity of the entire bundle before writing anything.
+	// 1) Verify integrity of the entire bundle before writing anything, and make
+	//    the manifest authoritative so a bundle cannot smuggle in session files
+	//    that never appear in the inspect/preview the user reviews.
 	if err := verifyBundle(&zr.Reader, checksums); err != nil {
+		return result, err
+	}
+	if err := verifyManifestBinding(&zr.Reader, manifest, checksums, kind); err != nil {
 		return result, err
 	}
 
@@ -693,6 +698,38 @@ func verifyBundle(zr *zip.Reader, checksums Checksums) error {
 		}
 		if actual != expected {
 			return fmt.Errorf("checksum mismatch for %q: bundle is corrupt or tampered", f.Name)
+		}
+	}
+	return nil
+}
+
+// verifyManifestBinding makes the manifest authoritative: every session-shaped
+// ZIP entry must be declared in manifest.sessions with a checksum that agrees with
+// checksums.json. Without this, a malicious bundle could ship a valid, checksummed
+// rollout file that is absent from the manifest — invisible in inspect/preview yet
+// still written by import (or translated). Non-session extras are ignored here
+// (they are skipped, never written). See Finding 1 in docs/security/audit.md.
+func verifyManifestBinding(zr *zip.Reader, manifest Manifest, checksums Checksums, kind agent.Kind) error {
+	declared := make(map[string]string, len(manifest.Sessions))
+	for _, ms := range manifest.Sessions {
+		if _, dup := declared[ms.BundlePath]; dup {
+			return fmt.Errorf("manifest lists %q more than once", ms.BundlePath)
+		}
+		declared[ms.BundlePath] = ms.SHA256
+	}
+	for _, f := range zr.File {
+		if f.Name == ManifestName || f.Name == ChecksumsName {
+			continue
+		}
+		if !isImportableEntry(kind, f.Name) {
+			continue
+		}
+		sha, ok := declared[f.Name]
+		if !ok {
+			return fmt.Errorf("bundle contains a session file not listed in its manifest: %q (refusing a bundle with hidden sessions)", f.Name)
+		}
+		if sha != "" && sha != checksums[f.Name] {
+			return fmt.Errorf("manifest checksum for %q does not match the bundle", f.Name)
 		}
 	}
 	return nil
