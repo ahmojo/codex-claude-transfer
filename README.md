@@ -6,7 +6,7 @@ The command is **`cct`**.
 ![CI](https://github.com/ahmojo/codex-claude-transfer/actions/workflows/ci.yml/badge.svg)
 ![Go](https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go)
 ![License](https://img.shields.io/badge/license-MIT-blue)
-![Status](https://img.shields.io/badge/status-v0.6.0-orange)
+![Status](https://img.shields.io/badge/status-v0.6.1-orange)
 
 > ⚠️ **Unofficial.** Not affiliated with or endorsed by OpenAI or Anthropic.
 > These tools' internals can change at any time and break this tool. Use at your
@@ -308,6 +308,7 @@ exist locally (with a ready-to-paste `--map-cwd` line to fix the grouping).
 | `cct export [--project <path> \| --all \| --session <id>]` | Package matching sessions into a `.codexbundle`. |
 | `cct inspect <bundle>` | Show a bundle's manifest and contents, read-only, and flag any recorded project folder that's missing locally. |
 | `cct import <bundle>` | Import session files into the matching agent's home (or translate across agents with `--to`). Verifies checksums; never overwrites by default. |
+| `cct repair-times` | One-time fix for sessions imported by an older version with the wrong modification time (which made the agent re-parse them on every open). Resets each file's mtime to its real last-activity time. Only changes mtimes — never content or the index. Supports `--dry-run`. |
 | `cct version` | Print the version (also `--version`). |
 | `cct completion <bash\|zsh\|fish>` | Print a shell completion script. |
 | `cct help` | Show help. |

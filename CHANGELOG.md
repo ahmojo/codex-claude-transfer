@@ -2,6 +2,26 @@
 
 All notable changes to codex-claude-transfer are documented here.
 
+## [0.6.1] - 2026-06-20
+
+### Fixed
+- **Imported sessions no longer lag every time you open them.** Import used to
+  stamp each session file with today's date instead of the session's real
+  last-activity time. The agent's index (Codex's `state_db`) then saw the file as
+  "newer than indexed" and re-parsed the whole rollout on *every* open
+  (read-repair) — a multi-second "New chat → real title" delay each time. Import
+  now restores the original modification time (from the manifest's `updated_at`),
+  so the file matches what the index recorded. This also fixes imported sessions
+  wrongly sorting to the top as "modified today". Never touches the index/SQLite.
+
+### Added
+- **`cct repair-times`.** One-time fix for sessions imported by an earlier version
+  with the wrong modification time: it resets each affected file's mtime to the
+  newest timestamp recorded inside it (its real last-activity time). Supports
+  `--dry-run` and `--tool`. Only changes file modification times — never session
+  content and never the index/SQLite — so it is safe to run repeatedly and is a
+  no-op once everything is correct.
+
 ## [0.6.0] - 2026-06-19
 
 ### Added

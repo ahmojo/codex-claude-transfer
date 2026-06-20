@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"io"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -10,8 +11,44 @@ import (
 	"github.com/ahmojo/codex-claude-transfer/internal/agent"
 	"github.com/ahmojo/codex-claude-transfer/internal/bundle"
 	"github.com/ahmojo/codex-claude-transfer/internal/doctor"
+	"github.com/ahmojo/codex-claude-transfer/internal/repair"
 	"github.com/ahmojo/codex-claude-transfer/internal/sessions"
 )
+
+// printRepair renders the outcome of a `repair-times` run.
+func printRepair(w io.Writer, kind agent.Kind, res repair.Result) {
+	if res.Scanned == 0 {
+		fmt.Fprintf(w, "No %s session files found to check.\n", kind.Label())
+		return
+	}
+	fmt.Fprintf(w, "Checked %s.\n", plural(res.Scanned, kind.Label()+" session file"))
+	verb := "Fixed"
+	if res.DryRun {
+		verb = "Would fix"
+	}
+	fmt.Fprintf(w, "%s %s whose modification time ran ahead of their content (imported with the wrong mtime):\n",
+		verb, plural(res.Fixed, "session"))
+	const maxShown = 20
+	for i, fr := range res.Files {
+		if i >= maxShown {
+			fmt.Fprintf(w, "  ... and %d more\n", len(res.Files)-maxShown)
+			break
+		}
+		fmt.Fprintf(w, "  %s\n      %s  ->  %s\n", safeTerminal(filepath.Base(fr.Path)),
+			fr.OldMtime.Format("2006-01-02 15:04"), fr.ContentTime.Format("2006-01-02 15:04"))
+	}
+	if res.Fixed == 0 && !res.DryRun {
+		fmt.Fprintln(w, "Everything already looks correct — nothing to change.")
+	}
+	for _, warn := range res.Warnings {
+		fmt.Fprintf(w, "warning: %s\n", safeTerminal(warn))
+	}
+	if res.DryRun {
+		fmt.Fprintln(w, "\nNo files were changed because --dry-run was used.")
+	} else if res.Fixed > 0 {
+		fmt.Fprintf(w, "\nRestart %s so it re-reads them once; after that they'll open without the delay.\n", kind.Label())
+	}
+}
 
 func printReport(w io.Writer, report doctor.Report) {
 	for _, c := range report.Checks {

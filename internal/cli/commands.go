@@ -20,6 +20,7 @@ import (
 	"github.com/ahmojo/codex-claude-transfer/internal/crypt"
 	"github.com/ahmojo/codex-claude-transfer/internal/doctor"
 	"github.com/ahmojo/codex-claude-transfer/internal/git"
+	"github.com/ahmojo/codex-claude-transfer/internal/repair"
 	"github.com/ahmojo/codex-claude-transfer/internal/sessions"
 	"github.com/ahmojo/codex-claude-transfer/internal/webui"
 )
@@ -46,6 +47,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runInspect(rest, stdout, stderr)
 	case "import":
 		return runImport(rest, stdout, stderr)
+	case "repair-times":
+		return runRepairTimes(rest, stdout, stderr)
 	case "ui":
 		return runUI(rest, stdout, stderr)
 	case "app":
@@ -778,6 +781,45 @@ func runImport(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+// runRepairTimes resets the modification time of session files that were imported
+// with a wrong (import-time) mtime, so the agent stops re-parsing them on every
+// open. It only changes file mtimes — never content, never the index/SQLite.
+func runRepairTimes(args []string, stdout, stderr io.Writer) int {
+	f, err := parseFlags(args)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 2
+	}
+	kind, ok := resolveTool(f, stderr)
+	if !ok {
+		return 2
+	}
+	var dirs []string
+	if kind == agent.Claude {
+		home, ok := resolveClaudeHome(f, stderr)
+		if !ok {
+			return 1
+		}
+		dirs = []string{home.ProjectsDir}
+	} else {
+		home, ok := resolveHome(f, stderr)
+		if !ok {
+			return 1
+		}
+		dirs = []string{home.SessionsDir}
+		if f.includeArchived {
+			dirs = append(dirs, home.ArchivedSessionsDir)
+		}
+	}
+	res, err := repair.RepairTimes(dirs, repair.Options{DryRun: f.dryRun})
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 1
+	}
+	printRepair(stdout, kind, res)
+	return 0
+}
+
 // runTranslateImport performs a cross-agent handoff: it reads the bundle (in
 // whatever agent's format it was exported), translates each session into the
 // --to agent's format, and writes the results into that agent's home. The
@@ -896,6 +938,9 @@ Commands:
   export    Export sessions for a project into a .codexbundle
   inspect   Show a bundle's manifest and contents, read-only (no extraction)
   import    Import a .codexbundle into your Codex home (never overwrites)
+  repair-times  Reset imported session files' modification time to their real
+            last-activity time, so the agent stops re-parsing them on every open
+            (a one-time fix; only changes mtimes, never content or the index)
   ui        Interactive mode: a guided menu that builds and runs the commands
             below for you (shows the equivalent command each time)
   app       Launch the local desktop GUI in your browser (loopback-only,
@@ -1016,6 +1061,8 @@ Examples:
   cct import ./my-project.codexbundle --to claude   # Codex bundle -> Claude Code
   cct import ./claude.codexbundle      --to codex    # Claude bundle -> Codex
   cct import ./my-project.codexbundle --clone ~/dev/project
+  cct repair-times --dry-run         # preview the mtime fix for imported sessions
+  cct repair-times                   # apply it (then restart Codex)
   cct export --project . --encrypt-to age1qz...   # -> <project>.codexbundle.age
   cct export --all --passphrase                   # passphrase-encrypted
   cct import ./my-project.codexbundle.age --identity ~/.age/key.txt

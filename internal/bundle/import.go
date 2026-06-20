@@ -193,8 +193,19 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 
 	// 2) Build the per-entry plan.
 	cwdByBundlePath := map[string]string{}
+	// Original modification time per session, so an imported file keeps its source
+	// last-activity time instead of getting today's mtime. Without this the agent's
+	// index (Codex's state_db) sees the file as "newer than indexed" and re-parses
+	// it on every open (read-repair), causing a multi-second delay each time. See
+	// docs/research/milestone-0-codex-source-investigation.md.
+	mtimeByBundlePath := map[string]time.Time{}
 	for _, ms := range manifest.Sessions {
 		cwdByBundlePath[ms.BundlePath] = ms.OriginalCWD
+		if ms.UpdatedAt != "" {
+			if t, err := time.Parse(time.RFC3339, ms.UpdatedAt); err == nil {
+				mtimeByBundlePath[ms.BundlePath] = t
+			}
+		}
 	}
 
 	// Resolve the effective cwd mappings. --map-cwd-here is sugar that derives a
@@ -433,10 +444,14 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 			if err := safety.CopyAtomic(item.DestPath, bytes.NewReader(item.content)); err != nil {
 				return result, fmt.Errorf("import %s: %w", item.BundlePath, err)
 			}
-			continue
-		}
-		if err := copyEntry(&zr.Reader, item.BundlePath, item.DestPath); err != nil {
+		} else if err := copyEntry(&zr.Reader, item.BundlePath, item.DestPath); err != nil {
 			return result, fmt.Errorf("import %s: %w", item.BundlePath, err)
+		}
+		// Restore the session's original modification time (keyed by the bundle
+		// path, so an import-as-copy with a new dest still gets the source time).
+		// Best-effort: a failure here does not fail the import.
+		if mt, ok := mtimeByBundlePath[item.BundlePath]; ok {
+			_ = os.Chtimes(item.DestPath, mt, mt)
 		}
 	}
 	return result, nil
