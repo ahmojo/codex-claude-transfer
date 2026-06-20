@@ -47,6 +47,10 @@ type ExportOptions struct {
 	// thread id equals (or uniquely begins with) this value, regardless of
 	// cwd. It is mutually exclusive with project/all filtering.
 	SessionID string
+	// OnlyThreadIDs, when non-empty, selects exactly the sessions whose thread id
+	// is in this set (exact match), bypassing project/all/since/single selection.
+	// It is used by LAN sync to bundle precisely the sessions a peer is missing.
+	OnlyThreadIDs []string
 	// WithGit forces capture of the project's git metadata (remote, branch,
 	// commit, dirty/unpushed) into the manifest even when ProjectPath is empty
 	// (e.g. with --all or --session). When ProjectPath is set, git metadata is
@@ -103,7 +107,9 @@ func Export(home codexhome.Home, opts ExportOptions) (ExportResult, error) {
 	}
 
 	var selected []sessions.Session
-	if opts.SessionID != "" {
+	if len(opts.OnlyThreadIDs) > 0 {
+		selected = selectByThreadIDSet(candidates, opts.OnlyThreadIDs)
+	} else if opts.SessionID != "" {
 		selected, err = selectByThreadID(candidates, opts.SessionID)
 		if err != nil {
 			return result, err
@@ -173,6 +179,24 @@ func filterSince(all []sessions.Session, since time.Time) []sessions.Session {
 	var out []sessions.Session
 	for _, s := range all {
 		if !s.ModTime.Before(since) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// selectByThreadIDSet returns the sessions whose thread id is in the given set
+// (exact match), preserving scan order. Unknown ids are silently ignored.
+func selectByThreadIDSet(all []sessions.Session, ids []string) []sessions.Session {
+	want := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		if id != "" {
+			want[id] = true
+		}
+	}
+	var out []sessions.Session
+	for _, s := range all {
+		if s.ThreadID != "" && want[s.ThreadID] {
 			out = append(out, s)
 		}
 	}

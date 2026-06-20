@@ -1,10 +1,36 @@
-# Design proposal: LAN sync (`cct sync`)
+# Design: LAN sync (`cct sync`)
 
-> **Status: proposal / not implemented.** This is a plan to discuss, not a shipped
-> feature. It would be **experimental and opt-in**, and — unlike everything else in
-> cct today — it sends your sessions **over the local network** to another device.
-> That crosses the current "nothing ever leaves this machine" line, so it needs a
-> deliberate design and a security review before any code lands.
+> **Status: M1–M2 implemented (experimental), behind `--i-understand`.** The manual
+> `serve`/`connect` flow, TLS + pairing-code authentication, the private-address
+> guard, and bidirectional diff/preview/merge are built and tested
+> (`internal/lansync`). **Deferred:** M3 mDNS discovery + remembered peers, and the
+> M4 desktop Sync tab / suffix-only transfer. Because this is cct's first feature
+> that sends data off-machine, it stays opt-in and clearly labelled.
+>
+> **A scoped security pass has been run** (pairing MAC, transport, anti-exfil,
+> protocol DoS, and the bundle-apply boundary). No Critical/High issues; the
+> medium/low findings are fixed: per-phase network deadlines + a `serve` accept
+> loop that survives pre-auth DoS; resolve-once-then-dial-the-chosen-IP to close
+> the DNS-rebinding window (plus a pre-TLS raw-peer recheck); the pairing code is
+> entered at a prompt instead of `--code`; peer hostnames are C0/C1-sanitized; and
+> the address guard now covers CGNAT/overlay ranges and IPv4-mapped IPv6. The
+> bundle-apply path keeps all of `import`'s checksum/manifest/path-traversal/size
+> guarantees. A broader external review is still welcome before the experimental
+> label comes off.
+>
+> **Implementation choices that differ from the original proposal below:**
+> - **No PAKE / no mDNS dependency.** Instead of SPAKE2, pairing uses a freshly
+>   generated **high-entropy** code (~96 bits) plus an **HMAC confirmation bound to
+>   both TLS certificate fingerprints** (channel binding). A LAN man-in-the-middle
+>   sees different fingerprints on each leg and cannot forge the confirmation
+>   without the code, and the code's entropy makes offline guessing infeasible — so
+>   the security goal is met with **stdlib only and zero new dependencies**. (The
+>   tradeoff vs. a true PAKE is a longer code; trust-on-first-use remembered peers,
+>   which would let a short code be reused, is the deferred M3 work.)
+> - **Transfer reuses the existing bundle path verbatim:** each side exports a
+>   bundle of exactly the sessions the peer is missing and applies the received one
+>   with `import --merge`, so every checksum/manifest/conflict/mtime guarantee is
+>   inherited rather than reimplemented.
 
 ## The problem
 
@@ -176,15 +202,17 @@ protocol over TLS.
 
 ## Phasing
 
-- **M1 — manual one-way pull (spike).** `cct sync serve` / `cct sync connect host`,
-  TLS + pairing code, whole-file transfer, reuse `import --merge` to apply. No
-  discovery yet. Proves the transport + safety model end to end.
-- **M2 — bidirectional + preview.** Two-way diff, dry-run summary, conflict
-  resolution flags. This is the first genuinely useful version.
-- **M3 — mDNS discovery + remembered peers.** The zero-config `cct sync` front door
-  and `~/.config/cct/peers.json`.
-- **M4 — polish.** Suffix-only transfer optimization; the desktop **Sync tab**;
-  cwd-remap prompts.
+- **M1 — manual transport (spike). ✅ DONE.** `cct sync serve` / `cct sync connect
+  host:port`, TLS + pairing code, whole-file (bundle) transfer, reuse
+  `import --merge` to apply. No discovery. Proves the transport + safety model.
+- **M2 — bidirectional + preview. ✅ DONE.** Two-way diff, `--dry-run` summary,
+  `--pull-only`/`--push-only`, conflicts reported (never overwritten). The
+  private-address guard (`--allow-public` to override) ships here too.
+- **M3 — mDNS discovery + remembered peers. ⏳ deferred.** The zero-config
+  `cct sync` front door and `~/.config/cct/peers.json` (trust-on-first-use). This is
+  the piece that would justify a shorter pairing code.
+- **M4 — polish. ⏳ deferred.** Suffix-only transfer optimization; the desktop
+  **Sync tab**; cwd-remap prompts.
 
 Ship M1–M2 behind an **experimental** label (a visible "this sends sessions over
 your network" banner; possibly gated behind `cct sync --i-understand` or an env

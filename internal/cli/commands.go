@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"os"
@@ -20,6 +21,7 @@ import (
 	"github.com/ahmojo/codex-claude-transfer/internal/crypt"
 	"github.com/ahmojo/codex-claude-transfer/internal/doctor"
 	"github.com/ahmojo/codex-claude-transfer/internal/git"
+	"github.com/ahmojo/codex-claude-transfer/internal/lansync"
 	"github.com/ahmojo/codex-claude-transfer/internal/repair"
 	"github.com/ahmojo/codex-claude-transfer/internal/sessions"
 	"github.com/ahmojo/codex-claude-transfer/internal/webui"
@@ -49,6 +51,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runImport(rest, stdout, stderr)
 	case "repair-times":
 		return runRepairTimes(rest, stdout, stderr)
+	case "sync":
+		return runSync(rest, stdout, stderr)
 	case "ui":
 		return runUI(rest, stdout, stderr)
 	case "app":
@@ -96,6 +100,11 @@ type commonFlags struct {
 	merge           bool
 	flat            bool
 	jsonOut         bool
+	code            string
+	allowPublic     bool
+	pullOnly        bool
+	pushOnly        bool
+	iUnderstand     bool
 	port            int
 	noBrowser       bool
 	positional      []string
@@ -166,6 +175,22 @@ func parseFlags(args []string) (commonFlags, error) {
 			f.mapCWD = append(f.mapCWD, arg[len("--map-cwd="):])
 		case arg == "--map-cwd-here":
 			f.mapCWDHere = true
+		case arg == "--code":
+			val, err := takeValue(args, &i, "--code")
+			if err != nil {
+				return f, err
+			}
+			f.code = val
+		case hasPrefix(arg, "--code="):
+			f.code = arg[len("--code="):]
+		case arg == "--allow-public":
+			f.allowPublic = true
+		case arg == "--pull-only":
+			f.pullOnly = true
+		case arg == "--push-only":
+			f.pushOnly = true
+		case arg == "--i-understand":
+			f.iUnderstand = true
 		case arg == "--all":
 			f.all = true
 		case arg == "--since":
@@ -820,6 +845,101 @@ func runRepairTimes(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+const syncUsage = `usage: cct sync <serve | connect <host:port>> --i-understand [options]
+  serve              wait for a device on your LAN to connect; prints a pairing code
+  connect <host:port>  connect to a serving device; needs --code
+options: [--tool codex|claude] [--project <path>] [--code <code>] [--port <n>]
+         [--dry-run] [--pull-only | --push-only] [--allow-public]
+
+EXPERIMENTAL: sync sends your sessions over the local network to a paired device.
+It is peer-to-peer (no server/cloud), refuses non-private addresses, and requires
+--i-understand to run.`
+
+// runSync drives the experimental LAN sync (serve/connect). The actual transfer
+// reuses the bundle export + import(--merge) path, so all safety properties hold.
+func runSync(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, syncUsage)
+		return 2
+	}
+	sub := args[0]
+	if sub != "serve" && sub != "connect" {
+		fmt.Fprintf(stderr, "unknown sync subcommand %q\n\n%s\n", sub, syncUsage)
+		return 2
+	}
+	f, err := parseFlags(args[1:])
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 2
+	}
+	if f.pullOnly && f.pushOnly {
+		fmt.Fprintln(stderr, "error: --pull-only and --push-only are mutually exclusive")
+		return 2
+	}
+	kind, ok := resolveTool(f, stderr)
+	if !ok {
+		return 2
+	}
+	opts := lansync.Options{
+		Tool:        kind,
+		AllowPublic: f.allowPublic,
+		PullOnly:    f.pullOnly,
+		PushOnly:    f.pushOnly,
+		DryRun:      f.dryRun,
+		Confirmed:   f.iUnderstand,
+		Code:        f.code,
+		Port:        f.port,
+		Out:         stdout,
+	}
+	var home codexhome.Home
+	if kind == agent.Claude {
+		clh, ok := resolveClaudeHome(f, stderr)
+		if !ok {
+			return 1
+		}
+		opts.ClaudeHome = clh
+		home = codexhome.Home{Root: clh.Root}
+	} else {
+		h, ok := resolveHome(f, stderr)
+		if !ok {
+			return 1
+		}
+		home = h
+	}
+	if f.project != "" {
+		abs, aerr := filepath.Abs(f.project)
+		if aerr != nil {
+			fmt.Fprintf(stderr, "error: cannot resolve project path %q: %v\n", f.project, aerr)
+			return 1
+		}
+		opts.ProjectPath = abs
+	}
+
+	var res lansync.Result
+	if sub == "serve" {
+		res, err = lansync.Serve(home, opts)
+	} else {
+		if len(f.positional) != 1 {
+			fmt.Fprintln(stderr, "usage: cct sync connect <host:port> --i-understand")
+			return 2
+		}
+		// Prefer prompting for the code over --code so the secret never lands in
+		// the shell's process list or history. --code stays as a scripting escape.
+		if opts.Code == "" {
+			fmt.Fprint(stdout, "Enter the pairing code shown on the other device: ")
+			line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+			opts.Code = strings.TrimSpace(line)
+		}
+		res, err = lansync.Connect(home, opts, f.positional[0])
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 1
+	}
+	printSync(stdout, kind, res)
+	return 0
+}
+
 // runTranslateImport performs a cross-agent handoff: it reads the bundle (in
 // whatever agent's format it was exported), translates each session into the
 // --to agent's format, and writes the results into that agent's home. The
@@ -941,6 +1061,10 @@ Commands:
   repair-times  Reset imported session files' modification time to their real
             last-activity time, so the agent stops re-parsing them on every open
             (a one-time fix; only changes mtimes, never content or the index)
+  sync      EXPERIMENTAL device-to-device sync over your local network:
+            'sync serve' waits for a peer, 'sync connect <host:port>' joins it.
+            Peer-to-peer (no server/cloud), authenticated with a one-time code,
+            refuses non-private addresses; requires --i-understand
   ui        Interactive mode: a guided menu that builds and runs the commands
             below for you (shows the equivalent command each time)
   app       Launch the local desktop GUI in your browser (loopback-only,

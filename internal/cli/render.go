@@ -11,9 +11,35 @@ import (
 	"github.com/ahmojo/codex-claude-transfer/internal/agent"
 	"github.com/ahmojo/codex-claude-transfer/internal/bundle"
 	"github.com/ahmojo/codex-claude-transfer/internal/doctor"
+	"github.com/ahmojo/codex-claude-transfer/internal/lansync"
 	"github.com/ahmojo/codex-claude-transfer/internal/repair"
 	"github.com/ahmojo/codex-claude-transfer/internal/sessions"
 )
+
+// printSync renders the outcome of a `cct sync` run (the apply summary). Dry-run
+// previews are printed inside the sync layer, so this only reports a real sync.
+func printSync(w io.Writer, kind agent.Kind, res lansync.Result) {
+	if res.DryRun {
+		return
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "Sync complete with %s.\n", safeTerminal(res.PeerHost))
+	fmt.Fprintf(w, "  Sent to peer:       %d session(s)\n", res.Sent)
+	r := res.Received
+	fmt.Fprintf(w, "  Received & added:   %d\n", r.Imported)
+	if r.Updated > 0 {
+		fmt.Fprintf(w, "  Updated (merged):   %d (+%s)\n", r.Updated, plural(r.LinesAdded, "line"))
+	}
+	if r.AlreadyAhead > 0 {
+		fmt.Fprintf(w, "  Already up to date: %d\n", r.AlreadyAhead)
+	}
+	if r.Conflicts > 0 {
+		fmt.Fprintf(w, "  Conflicts (kept local, not overwritten): %d\n", r.Conflicts)
+	}
+	if r.Imported > 0 || r.Updated > 0 {
+		fmt.Fprintf(w, "\nRestart %s so it picks up the synced sessions.\n", kind.Label())
+	}
+}
 
 // printRepair renders the outcome of a `repair-times` run.
 func printRepair(w io.Writer, kind agent.Kind, res repair.Result) {

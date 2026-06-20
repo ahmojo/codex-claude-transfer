@@ -2,6 +2,35 @@
 
 All notable changes to codex-claude-transfer are documented here.
 
+## [0.7.0] - 2026-06-20
+
+### Added
+- **`cct sync` — experimental device-to-device sync over your local network.**
+  `cct sync serve` waits for a peer and prints a one-time pairing code;
+  `cct sync connect <host:port> --code <code>` joins it. New/grown sessions flow
+  **both ways** and are applied through the existing `import --merge` path, so all
+  checksum/conflict/mtime guarantees hold and nothing is ever silently overwritten.
+  - **Peer-to-peer, no server/cloud.** TLS with per-process self-signed certs;
+    the peer is authenticated by a high-entropy pairing code via an HMAC bound to
+    both TLS fingerprints (a LAN man-in-the-middle can't forge it). **Zero new
+    dependencies** — stdlib only; no mDNS, no PAKE library.
+  - **Anti-exfiltration guard:** refuses non-private addresses unless
+    `--allow-public` is passed. A connect target is resolved once and the chosen
+    IP is dialed directly (closing the DNS-rebinding window), the raw TCP peer is
+    re-checked before the TLS handshake, and CGNAT/overlay ranges (e.g. Tailscale's
+    `100.64.0.0/10`) count as local.
+  - **Hardened from a security pass:** per-phase network deadlines (no stalled-peer
+    DoS); `serve` ignores failed pre-auth attempts and keeps waiting for the real
+    peer; the pairing code is entered at a prompt rather than passed as `--code`
+    (so it stays out of shell history/process lists); peer-supplied hostnames are
+    stripped of C0/C1 terminal-control characters before display.
+  - **Opt-in and clearly labelled:** requires `--i-understand` because, unlike
+    everything else in cct, this sends session data off the machine. Supports
+    `--dry-run` (preview only), `--pull-only`/`--push-only`, `--project`, and
+    `--tool`.
+  - Deferred for now: mDNS discovery + remembered peers (M3) and the desktop Sync
+    tab (M4). See [docs/design/lan-sync.md](docs/design/lan-sync.md).
+
 ## [0.6.1] - 2026-06-20
 
 ### Fixed

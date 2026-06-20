@@ -6,7 +6,7 @@ The command is **`cct`**.
 ![CI](https://github.com/ahmojo/codex-claude-transfer/actions/workflows/ci.yml/badge.svg)
 ![Go](https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go)
 ![License](https://img.shields.io/badge/license-MIT-blue)
-![Status](https://img.shields.io/badge/status-v0.6.1-orange)
+![Status](https://img.shields.io/badge/status-v0.7.0-orange)
 
 > ⚠️ **Unofficial.** Not affiliated with or endorsed by OpenAI or Anthropic.
 > These tools' internals can change at any time and break this tool. Use at your
@@ -297,6 +297,45 @@ that folder through, so groups travel with the bundle automatically:
 exactly which groups the sessions will land in, and flag any whose path doesn't
 exist locally (with a ready-to-paste `--map-cwd` line to fix the grouping).
 
+## LAN sync (experimental)
+
+Skip the file entirely when both machines are on the same network. On one device:
+
+```bash
+cct sync serve --i-understand
+#   On the other device run:  cct sync connect 192.168.1.20:<port> --i-understand
+#   When it asks, enter this pairing code:  4YIX-FE35-T5OT-L2EM-C75Q
+```
+
+On the other device — you'll be prompted for the code (so it never lands in your
+shell history or process list):
+
+```bash
+cct sync connect 192.168.1.20:54321 --i-understand
+# Enter the pairing code shown on the other device: 4YIX-FE35-T5OT-L2EM-C75Q
+```
+
+New and grown sessions flow **both ways** and are applied through the same
+`import --merge` path as a file bundle — so checksums are verified, append-only
+growth is merged losslessly, and genuinely diverged sessions are reported as
+conflicts, **never overwritten**. Use `--dry-run` to preview, `--pull-only` /
+`--push-only` to go one direction, and `--project` / `--tool` to scope it.
+
+Why it's safe, and why it's `--i-understand`:
+
+- It is **peer-to-peer** — no server, no relay, no cloud, no account. The two
+  devices talk **directly**.
+- The connection is **TLS**, and the peer is **authenticated by the one-time code**
+  (an HMAC bound to both certificate fingerprints), so a device on your network
+  can't silently interpose.
+- It **refuses to talk to a non-private address** (`--allow-public` to override),
+  keeping "local network only" an enforced rule rather than a promise.
+- Still: unlike everything else in cct, this **sends session data off the machine**.
+  That's why it's opt-in, experimental, and requires `--i-understand`. There is no
+  auto-discovery yet — you type the peer's `host:port` (see
+  [docs/design/lan-sync.md](docs/design/lan-sync.md) for the roadmap and threat
+  model).
+
 ## Command reference
 
 | Command | Description |
@@ -309,6 +348,7 @@ exist locally (with a ready-to-paste `--map-cwd` line to fix the grouping).
 | `cct inspect <bundle>` | Show a bundle's manifest and contents, read-only, and flag any recorded project folder that's missing locally. |
 | `cct import <bundle>` | Import session files into the matching agent's home (or translate across agents with `--to`). Verifies checksums; never overwrites by default. |
 | `cct repair-times` | One-time fix for sessions imported by an older version with the wrong modification time (which made the agent re-parse them on every open). Resets each file's mtime to its real last-activity time. Only changes mtimes — never content or the index. Supports `--dry-run`. |
+| `cct sync serve` / `cct sync connect <host:port>` | **Experimental.** Device-to-device session sync over your local network (peer-to-peer, no server/cloud), authenticated with a one-time pairing code. Refuses non-private addresses; requires `--i-understand`. See below. |
 | `cct version` | Print the version (also `--version`). |
 | `cct completion <bash\|zsh\|fish>` | Print a shell completion script. |
 | `cct help` | Show help. |
