@@ -1,0 +1,19 @@
+version: 2
+updates:
+  # Go module dependencies (the core stays stdlib-only; this covers the CLI/TUI
+  # layer deps such as the huh wizard and its transitive graph).
+  - package-ecosystem: gomod
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: deps
+
+  # GitHub Actions used by the CI and release workflows.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci

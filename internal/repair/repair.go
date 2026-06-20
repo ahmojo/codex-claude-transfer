@@ -12,6 +12,7 @@ package repair
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -125,18 +126,45 @@ func repairFile(path string, opts Options) (*FileResult, string) {
 	return fr, ""
 }
 
+// tailWindow is how many trailing bytes maxContentTime reads first. Rollout and
+// transcript files are append-only and chronological, so the newest timestamp is
+// at the end; reading only the tail avoids scanning huge (image-heavy) files.
+const tailWindow = 256 << 10
+
 // maxContentTime returns the latest top-level timestamp recorded in a JSONL file.
+// It reads the tail first (where the newest line is) and falls back to a full scan
+// only if the tail contained no timestamp.
 func maxContentTime(path string) (time.Time, bool, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return time.Time{}, false, err
 	}
 	defer f.Close()
-	r := bufio.NewReaderSize(f, 64<<10)
+	info, err := f.Stat()
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	if info.Size() > tailWindow {
+		if _, err := f.Seek(info.Size()-tailWindow, io.SeekStart); err == nil {
+			if t, ok := scanForMaxTimestamp(f); ok {
+				return t, true, nil
+			}
+			if _, err := f.Seek(0, io.SeekStart); err != nil {
+				return time.Time{}, false, err
+			}
+		}
+	}
+	t, ok := scanForMaxTimestamp(f)
+	return t, ok, nil
+}
+
+// scanForMaxTimestamp returns the newest top-level timestamp across the lines in r.
+func scanForMaxTimestamp(r io.Reader) (time.Time, bool) {
+	br := bufio.NewReaderSize(r, 64<<10)
 	var max time.Time
 	found := false
 	for {
-		prefix, readErr := readLinePrefix(r, linePrefixCap)
+		prefix, readErr := readLinePrefix(br, linePrefixCap)
 		if len(prefix) > 0 {
 			if m := tsRe.FindSubmatch(prefix); m != nil {
 				if t, ok := parseTime(string(m[1])); ok && (!found || t.After(max)) {
@@ -148,7 +176,7 @@ func maxContentTime(path string) (time.Time, bool, error) {
 			break
 		}
 	}
-	return max, found, nil
+	return max, found
 }
 
 // readLinePrefix reads up to maxBytes of the current line, then discards the rest

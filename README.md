@@ -6,7 +6,7 @@ The command is **`cct`**.
 ![CI](https://github.com/ahmojo/codex-claude-transfer/actions/workflows/ci.yml/badge.svg)
 ![Go](https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go)
 ![License](https://img.shields.io/badge/license-MIT-blue)
-![Status](https://img.shields.io/badge/status-v0.7.0-orange)
+![Status](https://img.shields.io/badge/status-v0.7.1-orange)
 
 > ⚠️ **Unofficial.** Not affiliated with or endorsed by OpenAI or Anthropic.
 > These tools' internals can change at any time and break this tool. Use at your
@@ -319,7 +319,18 @@ New and grown sessions flow **both ways** and are applied through the same
 `import --merge` path as a file bundle — so checksums are verified, append-only
 growth is merged losslessly, and genuinely diverged sessions are reported as
 conflicts, **never overwritten**. Use `--dry-run` to preview, `--pull-only` /
-`--push-only` to go one direction, and `--project` / `--tool` to scope it.
+`--push-only` to go one direction, `--project` / `--tool` to scope it, and `--json`
+for scripting.
+
+If a synced session's project lives at a **different path** on the receiving
+machine, it can land "hidden" (same cwd gotcha as import). Sync warns you when that
+happens; re-sync with `--map-cwd-here` (place them under the folder you're in) or
+`--map-cwd "<old>=<local path>"` to fix the grouping.
+
+> **Firewall note.** Running `cct sync serve` binds a listener, so the first time,
+> Windows/macOS may pop a firewall dialog — allow it for **private networks only**.
+> If multicast/discovery is blocked on the network, the manual `connect <host:port>`
+> shown here is the way (there is no auto-discovery yet).
 
 Why it's safe, and why it's `--i-understand`:
 
@@ -372,8 +383,8 @@ Why it's safe, and why it's `--i-understand`:
 | `--json` | doctor, list, inspect, export, import | Print a machine-readable JSON summary on stdout instead of text. |
 | `--dry-run` | import | Validate and report only; write nothing. |
 | `--to <codex\|claude>` | import | Cross-agent handoff: translate the bundle's sessions into the *other* agent's format and write them into that agent's home (best-effort: conversation + context preamble, tool calls summarized). |
-| `--map-cwd OLD=NEW` | import | Rewrite matching sessions' recorded cwd. Plain `.jsonl` always; `.jsonl.zst` when `zstd` is installed. Repeatable. |
-| `--map-cwd-here` | import | Shorthand for `--map-cwd` that maps the bundle's project to the directory you run the command from — no need to look up the old path. Single-project bundles only; can't be combined with `--map-cwd`. |
+| `--map-cwd OLD=NEW` | import, sync | Rewrite matching sessions' recorded cwd. Plain `.jsonl` always; `.jsonl.zst` when `zstd` is installed. Repeatable. |
+| `--map-cwd-here` | import, sync | Shorthand for `--map-cwd` that maps the project to the directory you run the command from — no need to look up the old path. Single-project only; can't be combined with `--map-cwd`. |
 | `--merge` | import | Incremental sync. When a session grew on the other device (the local file is a prefix of the bundle's), append only the new messages instead of reporting a conflict. Lossless; composes with the resolution flags for genuinely diverged sessions. |
 | `--replace-with-backup` | import | On a conflict, back up the local file and overwrite it with the bundle's version. |
 | `--import-as-copy` | import | On a conflict, import the bundle's version as a new session, leaving yours untouched. Excludes `--replace-with-backup`. |

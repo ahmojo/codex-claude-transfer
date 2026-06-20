@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ahmojo/codex-claude-transfer/internal/agent"
@@ -153,6 +154,26 @@ func TestSyncDryRunWritesNothing(t *testing.T) {
 	}
 	if sessionExists(b, "aaaa1111-2222-3333-4444-555566667777") {
 		t.Error("dry run wrote a session to the server")
+	}
+}
+
+// TestSyncMapCWDHere: a received session whose project lives at a different path
+// is remapped to the receiving side's chosen directory as it is applied.
+func TestSyncMapCWDHere(t *testing.T) {
+	a := fakeHome(t)
+	b := fakeHome(t)
+	writeSession(t, b, "bbbb1111-2222-3333-4444-555566667777", "/gone/laptop/proj", "from B")
+
+	optsA := Options{Tool: agent.Codex, Out: io.Discard, PullOnly: true, MapCWDHere: true, HereDir: "/new/local/proj"}
+	optsB := Options{Tool: agent.Codex, Out: io.Discard}
+	cr, _ := runPair(t, a, b, optsA, optsB, testCode)
+
+	if cr.Received.Imported != 1 || cr.Received.Mapped != 1 {
+		t.Fatalf("imported=%d mapped=%d, want 1/1", cr.Received.Imported, cr.Received.Mapped)
+	}
+	got := readSession(t, a, "bbbb1111-2222-3333-4444-555566667777")
+	if !strings.Contains(got, "/new/local/proj") || strings.Contains(got, "/gone/laptop/proj") {
+		t.Errorf("received session cwd was not remapped:\n%s", got)
 	}
 }
 

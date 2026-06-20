@@ -64,3 +64,17 @@ jobs:
 
       - name: Test
         run: go test ./...
+
+  govulncheck:
+    name: govulncheck (known vulnerabilities)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v5
+      # The official action pins a govulncheck build compatible with the Go
+      # toolchain it installs (avoiding the x/tools generics panic that bleeding-
+      # edge toolchains hit with `go install govulncheck@latest`).
+      - name: Scan for known vulnerabilities
+        uses: golang/govulncheck-action@v1
+        with:
+          go-version-file: go.mod

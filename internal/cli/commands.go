@@ -876,9 +876,31 @@ func runSync(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "error: --pull-only and --push-only are mutually exclusive")
 		return 2
 	}
+	if f.mapCWDHere && len(f.mapCWD) > 0 {
+		fmt.Fprintln(stderr, "error: --map-cwd and --map-cwd-here are mutually exclusive (use one or the other)")
+		return 2
+	}
+	mappings, err := bundle.ParseCWDMappings(f.mapCWD)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 2
+	}
+	var hereDir string
+	if f.mapCWDHere {
+		hereDir, err = os.Getwd()
+		if err != nil {
+			fmt.Fprintf(stderr, "error: --map-cwd-here: cannot determine the current directory: %v\n", err)
+			return 1
+		}
+	}
 	kind, ok := resolveTool(f, stderr)
 	if !ok {
 		return 2
+	}
+	// In --json mode stdout must stay pure JSON, so progress/UX goes to stderr.
+	uxOut := stdout
+	if f.jsonOut {
+		uxOut = stderr
 	}
 	opts := lansync.Options{
 		Tool:        kind,
@@ -889,7 +911,10 @@ func runSync(args []string, stdout, stderr io.Writer) int {
 		Confirmed:   f.iUnderstand,
 		Code:        f.code,
 		Port:        f.port,
-		Out:         stdout,
+		Out:         uxOut,
+		MapCWD:      mappings,
+		MapCWDHere:  f.mapCWDHere,
+		HereDir:     hereDir,
 	}
 	var home codexhome.Home
 	if kind == agent.Claude {
@@ -926,7 +951,7 @@ func runSync(args []string, stdout, stderr io.Writer) int {
 		// Prefer prompting for the code over --code so the secret never lands in
 		// the shell's process list or history. --code stays as a scripting escape.
 		if opts.Code == "" {
-			fmt.Fprint(stdout, "Enter the pairing code shown on the other device: ")
+			fmt.Fprint(uxOut, "Enter the pairing code shown on the other device: ")
 			line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
 			opts.Code = strings.TrimSpace(line)
 		}
@@ -936,7 +961,11 @@ func runSync(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
 	}
-	printSync(stdout, kind, res)
+	if f.jsonOut {
+		printSyncJSON(stdout, res)
+	} else {
+		printSync(stdout, kind, res)
+	}
 	return 0
 }
 

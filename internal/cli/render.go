@@ -36,6 +36,17 @@ func printSync(w io.Writer, kind agent.Kind, res lansync.Result) {
 	if r.Conflicts > 0 {
 		fmt.Fprintf(w, "  Conflicts (kept local, not overwritten): %d\n", r.Conflicts)
 	}
+	if r.Mapped > 0 {
+		fmt.Fprintf(w, "  Remapped to a local folder: %d\n", r.Mapped)
+	}
+	// Warn when a received session's project folder doesn't exist here — the same
+	// "hidden session" gotcha import flags, with a ready-to-paste fix.
+	if summary := bundle.SummarizeCWDs(r.Manifest.Sessions, bundle.DirExists); summary.MissingCount > 0 {
+		fmt.Fprintln(w)
+		fmt.Fprintf(w, "Heads up: %s landed under a project folder that doesn't exist on this\n", plural(summary.MissingCount, "received session"))
+		fmt.Fprintf(w, "machine, so they may be hidden in %s's view. Re-sync with --map-cwd-here to\n", kind.Label())
+		fmt.Fprintln(w, "place them under the folder you're in, or --map-cwd \"<old>=<local path>\".")
+	}
 	if r.Imported > 0 || r.Updated > 0 {
 		fmt.Fprintf(w, "\nRestart %s so it picks up the synced sessions.\n", kind.Label())
 	}

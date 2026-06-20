@@ -2,6 +2,32 @@
 
 All notable changes to codex-claude-transfer are documented here.
 
+## [0.7.1] - 2026-06-20
+
+### Added
+- **`cct sync` cwd remapping + missing-folder warning.** A synced session whose
+  project lives at a different path on the receiving machine could land "hidden"
+  (same gotcha as import). Sync now warns when that happens and accepts
+  `--map-cwd-here` / `--map-cwd OLD=NEW` to place received sessions under the right
+  local project.
+- **`cct sync --json`** for scripting (peer, counts, remapped), matching the other
+  commands.
+- **`cct doctor` flags stale modification times.** It detects sessions imported by
+  an older cct whose file mtime runs ahead of their content (the cause of the
+  open-lag) and suggests `cct repair-times`.
+
+### Changed
+- **`repair-times` is much faster** on large/image-heavy sessions: it reads each
+  file's tail first (where the newest timestamp is) instead of scanning the whole
+  file.
+
+### Security / CI
+- Added a **fuzz harness for the bundle parser** (`FuzzImport`) — a malicious or
+  corrupt bundle (now also a network-delivered input via `sync`) must be rejected
+  with an error, never a panic or an out-of-home write. Seeds run in normal CI.
+- CI now runs **`govulncheck`** (known-vulnerability scan) and **Dependabot** keeps
+  the CLI-layer dependencies and GitHub Actions up to date.
+
 ## [0.7.0] - 2026-06-20
 
 ### Added

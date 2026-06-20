@@ -12,6 +12,7 @@ import (
 	"github.com/ahmojo/codex-claude-transfer/internal/codexhome"
 	"github.com/ahmojo/codex-claude-transfer/internal/crypt"
 	"github.com/ahmojo/codex-claude-transfer/internal/git"
+	"github.com/ahmojo/codex-claude-transfer/internal/repair"
 	"github.com/ahmojo/codex-claude-transfer/internal/sessions"
 	"github.com/ahmojo/codex-claude-transfer/internal/zstdcli"
 )
@@ -75,6 +76,10 @@ func Run(home codexhome.Home) Report {
 		r.warn(fmt.Sprintf("%d session(s) have cwd paths that do not exist on this device", missing))
 	}
 
+	if stale := countStaleMtimes([]string{home.SessionsDir}); stale > 0 {
+		r.warn(fmt.Sprintf("%d session file(s) have a modification time ahead of their content (imported by an older cct); run `cct repair-times` so Codex stops re-parsing them on every open", stale))
+	}
+
 	r.checkOptionalTools()
 
 	r.ok("SQLite will not be modified")
@@ -115,6 +120,10 @@ func RunClaude(home claudehome.Home) Report {
 
 	if missing := countMissingCwd(scan.Sessions); missing > 0 {
 		r.warn(fmt.Sprintf("%d session(s) have cwd paths that do not exist on this device", missing))
+	}
+
+	if stale := countStaleMtimes([]string{home.ProjectsDir}); stale > 0 {
+		r.warn(fmt.Sprintf("%d transcript file(s) have a modification time ahead of their content (imported by an older cct); run `cct repair-times --tool claude` to fix the open-lag", stale))
 	}
 
 	// Claude-relevant optional tools (git for handoff, age for encryption; zstd
@@ -159,6 +168,16 @@ func (r *Report) checkOptionalTools() {
 			r.info(fmt.Sprintf("Optional tool '%s' not found — %s unavailable until installed", t.name, t.enables))
 		}
 	}
+}
+
+// countStaleMtimes reports how many session files would be fixed by repair-times
+// (mtime ahead of their content). It is a read-only dry run.
+func countStaleMtimes(dirs []string) int {
+	res, err := repair.RepairTimes(dirs, repair.Options{DryRun: true})
+	if err != nil {
+		return 0
+	}
+	return res.Fixed
 }
 
 func countMissingCwd(list []sessions.Session) int {

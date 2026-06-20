@@ -7,6 +7,7 @@ import (
 
 	"github.com/ahmojo/codex-claude-transfer/internal/bundle"
 	"github.com/ahmojo/codex-claude-transfer/internal/doctor"
+	"github.com/ahmojo/codex-claude-transfer/internal/lansync"
 	"github.com/ahmojo/codex-claude-transfer/internal/sessions"
 )
 
@@ -205,5 +206,36 @@ func printImportJSON(w io.Writer, path string, res bundle.ImportResult) {
 		CWDMismatchCount:        res.CWDMismatchCount,
 		DryRun:                  res.DryRun,
 		Warnings:                res.Warnings,
+	})
+}
+
+type syncJSON struct {
+	PeerHost     string `json:"peer_host"`
+	DryRun       bool   `json:"dry_run"`
+	Sent         int    `json:"sent"`
+	PreviewSend  int    `json:"preview_send,omitempty"`
+	PreviewRecv  int    `json:"preview_receive,omitempty"`
+	Received     int    `json:"received"`
+	Updated      int    `json:"updated"`
+	LinesAdded   int    `json:"lines_added"`
+	AlreadyAhead int    `json:"already_ahead"`
+	Conflicts    int    `json:"conflicts"`
+	Remapped     int    `json:"remapped"`
+}
+
+func printSyncJSON(w io.Writer, res lansync.Result) {
+	r := res.Received
+	writeJSON(w, syncJSON{
+		PeerHost:     res.PeerHost,
+		DryRun:       res.DryRun,
+		Sent:         res.Sent,
+		PreviewSend:  res.PreviewSend,
+		PreviewRecv:  res.PreviewRecv,
+		Received:     r.Imported,
+		Updated:      r.Updated,
+		LinesAdded:   r.LinesAdded,
+		AlreadyAhead: r.AlreadyAhead,
+		Conflicts:    r.Conflicts,
+		Remapped:     r.Mapped,
 	})
 }

@@ -35,6 +35,13 @@ type Options struct {
 	DryRun      bool            // exchange manifests and preview only; write nothing
 	Confirmed   bool            // the experimental --i-understand gate
 	Out         io.Writer       // progress/UX output
+	// MapCWD / MapCWDHere / HereDir remap a received session's recorded cwd as it
+	// is applied, so a peer's project that lives at a different path here still
+	// lands under the right local project (and, for Claude, the right sidebar
+	// group). Same semantics as on import.
+	MapCWD     []bundle.CWDMapping
+	MapCWDHere bool
+	HereDir    string
 }
 
 // Result summarizes a sync from the local side's perspective.
@@ -414,7 +421,13 @@ func recvOffer(conn *tls.Conn, home codexhome.Home, opts Options) (bundle.Import
 	if n == 0 || opts.PushOnly {
 		return bundle.ImportResult{}, nil
 	}
-	res, err := bundle.Import(home, bundle.ImportOptions{BundlePath: tmpName, Merge: true})
+	res, err := bundle.Import(home, bundle.ImportOptions{
+		BundlePath: tmpName,
+		Merge:      true,
+		MapCWD:     opts.MapCWD,
+		MapCWDHere: opts.MapCWDHere,
+		HereDir:    opts.HereDir,
+	})
 	if err != nil {
 		return bundle.ImportResult{}, fmt.Errorf("apply received sessions: %w", err)
 	}

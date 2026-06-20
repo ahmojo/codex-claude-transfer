@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ahmojo/codex-claude-transfer/internal/codexhome"
 )
@@ -36,6 +37,27 @@ func sessionBody(threadID, cwd string) string {
 	return `{"timestamp":"x","type":"session_meta","payload":{"id":"` + threadID + `","cwd":` + string(cwdJSON) + `,"source":"cli"}}
 {"timestamp":"y","type":"event_msg","payload":{"type":"user_message","message":"hi"}}
 `
+}
+
+// TestDoctorWarnsOnStaleMtime: a session whose file mtime runs ahead of its
+// content (the old-import signature) is flagged with a repair-times suggestion.
+func TestDoctorWarnsOnStaleMtime(t *testing.T) {
+	home := fakeHome(t)
+	dir := filepath.Join(home.SessionsDir, "2026", "06", "14")
+	body := `{"timestamp":"2026-06-14T15:00:00Z","type":"session_meta","payload":{"id":"aaaa","cwd":"/p"}}
+{"timestamp":"2026-06-14T15:48:00Z","type":"event_msg","payload":{"type":"user_message","message":"hi"}}
+`
+	name := "rollout-2026-06-14T15-00-00-aaaa1111-2222-3333-4444-555566667777.jsonl"
+	writeRollout(t, dir, name, body)
+	// Simulate an old import: mtime days after the content's last timestamp.
+	ahead := time.Date(2026, 6, 17, 23, 51, 0, 0, time.UTC)
+	if err := os.Chtimes(filepath.Join(dir, name), ahead, ahead); err != nil {
+		t.Fatal(err)
+	}
+	report := Run(home)
+	if !hasMessage(report, StatusWarn, "repair-times") {
+		t.Errorf("expected a repair-times warning; checks=%+v", report.Checks)
+	}
 }
 
 func hasMessage(report Report, status Status, substr string) bool {
