@@ -50,7 +50,12 @@ There's also a local desktop GUI (`cct app`) with the same features:
 
 ![The cct desktop WebUI](demo/clips/10-webui.gif)
 
-More clips in [`demo/`](demo/): [cross-agent handoff](demo/clips/03-claude-handoff.gif),
+More clips in [`demo/`](demo/): [LAN sync](demo/clips/15-sync.gif),
+[full-text search](demo/clips/11-search.gif),
+[secret scan & redact](demo/clips/12-secrets.gif),
+[Markdown export](demo/clips/13-markdown.gif),
+[repair-times](demo/clips/14-repair-times.gif),
+[cross-agent handoff](demo/clips/03-claude-handoff.gif),
 [encryption](demo/clips/04-encryption.gif),
 [conflict resolution & cwd remap](demo/clips/05-conflicts-remap.gif),
 [export filters](demo/clips/06-export-filters.gif),
