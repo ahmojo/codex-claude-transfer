@@ -19,6 +19,8 @@ import (
 	"github.com/ahmojo/codex-claude-transfer/internal/claudesessions"
 	"github.com/ahmojo/codex-claude-transfer/internal/codexhome"
 	"github.com/ahmojo/codex-claude-transfer/internal/git"
+	"github.com/ahmojo/codex-claude-transfer/internal/search"
+	"github.com/ahmojo/codex-claude-transfer/internal/secrets"
 	"github.com/ahmojo/codex-claude-transfer/internal/sessions"
 	"github.com/ahmojo/codex-claude-transfer/internal/zstdcli"
 )
@@ -51,6 +53,12 @@ type ExportOptions struct {
 	// is in this set (exact match), bypassing project/all/since/single selection.
 	// It is used by LAN sync to bundle precisely the sessions a peer is missing.
 	OnlyThreadIDs []string
+	// Match, when non-empty, additionally keeps only sessions whose conversation
+	// text matches this query (composes with the project/all/since filters). Regex
+	// and case-sensitivity follow the two flags below.
+	Match              string
+	MatchRegex         bool
+	MatchCaseSensitive bool
 	// WithGit forces capture of the project's git metadata (remote, branch,
 	// commit, dirty/unpushed) into the manifest even when ProjectPath is empty
 	// (e.g. with --all or --session). When ProjectPath is set, git metadata is
@@ -62,6 +70,10 @@ type ExportOptions struct {
 	// conversation text is preserved; compressed .jsonl.zst sessions are stripped
 	// too when the zstd tool is available (otherwise copied as-is with a warning).
 	StripImages bool
+	// Redact replaces likely secrets (API keys, tokens, private keys) in each
+	// session with typed placeholders before bundling. Lossy and opt-in, for
+	// sharing/syncing a session without leaking credentials.
+	Redact bool
 }
 
 // ExportResult summarizes what was exported.
@@ -73,6 +85,7 @@ type ExportResult struct {
 	CompressedSkipped int   // compressed sessions skipped by cwd filter (cwd unknown)
 	ImagesStripped    int   // images replaced when StripImages is set
 	BytesSaved        int64 // bundle bytes saved by stripping (original minus stored)
+	SecretsRedacted   int   // secrets replaced when Redact is set
 	Warnings          []string
 }
 
@@ -121,7 +134,16 @@ func Export(home codexhome.Home, opts ExportOptions) (ExportResult, error) {
 		result.CompressedSkipped = compressedSkipped
 		result.Warnings = append(result.Warnings, warns...)
 	}
+	if opts.Match != "" {
+		selected, err = filterByMatch(selected, opts)
+		if err != nil {
+			return result, err
+		}
+	}
 	if len(selected) == 0 {
+		if opts.Match != "" {
+			return result, fmt.Errorf("no sessions matched %q", opts.Match)
+		}
 		return result, fmt.Errorf("no sessions selected for export")
 	}
 
@@ -183,6 +205,26 @@ func filterSince(all []sessions.Session, since time.Time) []sessions.Session {
 		}
 	}
 	return out
+}
+
+// filterByMatch keeps only sessions whose conversation text matches opts.Match.
+// Compressed sessions are skipped (their content is not read here).
+func filterByMatch(list []sessions.Session, opts ExportOptions) ([]sessions.Session, error) {
+	q := search.Query{Text: opts.Match, Regex: opts.MatchRegex, CaseSensitive: opts.MatchCaseSensitive}
+	var out []sessions.Session
+	for _, s := range list {
+		if s.Compressed {
+			continue
+		}
+		ok, err := search.SessionMatches(s.Path, q)
+		if err != nil {
+			continue
+		}
+		if ok {
+			out = append(out, s)
+		}
+	}
+	return out, nil
 }
 
 // selectByThreadIDSet returns the sessions whose thread id is in the given set
@@ -328,10 +370,10 @@ func writeBundle(opts ExportOptions, selected []sessions.Session, manifest *Mani
 		bundlePath := bundlePathFor(s, kind)
 		sum := ""
 		size := s.SizeBytes
-		if opts.StripImages {
-			var nImg int
+		if opts.StripImages || opts.Redact {
+			var nImg, nRedact int
 			var warn string
-			sum, size, nImg, warn, err = addStrippedSessionToZip(zw, bundlePath, s)
+			sum, size, nImg, nRedact, warn, err = addTransformedSessionToZip(zw, bundlePath, s, opts)
 			if err != nil {
 				return fmt.Errorf("add %s: %w", s.Path, err)
 			}
@@ -339,6 +381,7 @@ func writeBundle(opts ExportOptions, selected []sessions.Session, manifest *Mani
 				result.Warnings = append(result.Warnings, warn)
 			}
 			result.ImagesStripped += nImg
+			result.SecretsRedacted += nRedact
 			if saved := s.SizeBytes - size; saved > 0 {
 				result.BytesSaved += saved
 			}
@@ -453,16 +496,17 @@ func addBytesToZip(zw *zip.Writer, bundlePath string, data []byte) error {
 	return err
 }
 
-// addStrippedSessionToZip reads a session, removes inline base64 images, and adds
-// the rewritten bytes to the ZIP. It returns the stored content's SHA-256, its
-// stored size, the number of images stripped, and (for a compressed session that
-// cannot be stripped because zstd is unavailable) a warning; in that case the file
-// is copied as-is. A .jsonl.zst session is decompressed, stripped, and recompressed
-// so it stays in the same on-disk format.
-func addStrippedSessionToZip(zw *zip.Writer, bundlePath string, s sessions.Session) (sum string, sizeOut int64, imagesStripped int, warn string, err error) {
+// addTransformedSessionToZip reads a session, applies the requested lossy
+// transforms (strip inline images and/or redact secrets), and adds the rewritten
+// bytes to the ZIP. It returns the stored content's SHA-256, its stored size, the
+// number of images stripped, the number of secrets redacted, and (for a compressed
+// session that cannot be transformed because zstd is unavailable) a warning; in
+// that case the file is copied as-is. A .jsonl.zst session is decompressed,
+// transformed, and recompressed so it stays in the same on-disk format.
+func addTransformedSessionToZip(zw *zip.Writer, bundlePath string, s sessions.Session, opts ExportOptions) (sum string, sizeOut int64, imagesStripped, secretsRedacted int, warn string, err error) {
 	raw, err := os.ReadFile(s.Path)
 	if err != nil {
-		return "", 0, 0, "", err
+		return "", 0, 0, 0, "", err
 	}
 	compressed := s.Compressed || strings.HasSuffix(s.Path, compressedSessionSuffix)
 
@@ -470,28 +514,35 @@ func addStrippedSessionToZip(zw *zip.Writer, bundlePath string, s sessions.Sessi
 	if compressed {
 		if !zstdcli.Available() {
 			if err := addBytesToZip(zw, bundlePath, raw); err != nil {
-				return "", 0, 0, "", err
+				return "", 0, 0, 0, "", err
 			}
-			return sha256Hex(raw), int64(len(raw)), 0,
-				fmt.Sprintf("%s: compressed session not image-stripped (zstd not installed); copied as-is", bundlePath), nil
+			return sha256Hex(raw), int64(len(raw)), 0, 0,
+				fmt.Sprintf("%s: compressed session not transformed (zstd not installed); copied as-is", bundlePath), nil
 		}
 		if plain, err = zstdcli.Decompress(raw); err != nil {
-			return "", 0, 0, "", fmt.Errorf("decompress: %w", err)
+			return "", 0, 0, 0, "", fmt.Errorf("decompress: %w", err)
 		}
 	}
 
-	stripped, n := StripImagesJSONL(plain)
+	transformed := plain
+	var nImg, nRedact int
+	if opts.StripImages {
+		transformed, nImg = StripImagesJSONL(transformed)
+	}
+	if opts.Redact {
+		transformed, nRedact = secrets.Redact(transformed)
+	}
 
-	outBytes := stripped
+	outBytes := transformed
 	if compressed {
-		if outBytes, err = zstdcli.Compress(stripped); err != nil {
-			return "", 0, 0, "", fmt.Errorf("recompress: %w", err)
+		if outBytes, err = zstdcli.Compress(transformed); err != nil {
+			return "", 0, 0, 0, "", fmt.Errorf("recompress: %w", err)
 		}
 	}
 	if err := addBytesToZip(zw, bundlePath, outBytes); err != nil {
-		return "", 0, 0, "", err
+		return "", 0, 0, 0, "", err
 	}
-	return sha256Hex(outBytes), int64(len(outBytes)), n, "", nil
+	return sha256Hex(outBytes), int64(len(outBytes)), nImg, nRedact, "", nil
 }
 
 // pathEqual compares two filesystem paths after cleaning, case-insensitively on

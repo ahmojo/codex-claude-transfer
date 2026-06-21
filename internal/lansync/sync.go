@@ -42,6 +42,12 @@ type Options struct {
 	MapCWD     []bundle.CWDMapping
 	MapCWDHere bool
 	HereDir    string
+	// Remember stores the peer's fingerprint after a successful code pairing
+	// (trust-on-first-use), so future syncs between remembered devices skip the
+	// code. ConfigDir overrides the location of the identity/peers store (default:
+	// the OS config dir); used in tests.
+	Remember  bool
+	ConfigDir string
 }
 
 // Result summarizes a sync from the local side's perspective.
@@ -82,9 +88,9 @@ func Serve(home codexhome.Home, opts Options) (Result, error) {
 	if !opts.Confirmed {
 		return Result{}, fmt.Errorf("%s", ExperimentalNotice)
 	}
-	cert, err := generateCert()
+	cert, err := loadOrCreateIdentity(opts.ConfigDir)
 	if err != nil {
-		return Result{}, err
+		return Result{}, fmt.Errorf("load device identity: %w", err)
 	}
 	code, err := generatePairingCode()
 	if err != nil {
@@ -133,9 +139,6 @@ func Connect(home codexhome.Home, opts Options, hostport string) (Result, error)
 	if !opts.Confirmed {
 		return Result{}, fmt.Errorf("%s", ExperimentalNotice)
 	}
-	if strings.TrimSpace(opts.Code) == "" {
-		return Result{}, fmt.Errorf("a pairing code is required (shown by `cct sync serve` on the other device); pass --code")
-	}
 	host, portStr, err := net.SplitHostPort(hostport)
 	if err != nil {
 		return Result{}, fmt.Errorf("address must be host:port: %w", err)
@@ -150,9 +153,9 @@ func Connect(home codexhome.Home, opts Options, hostport string) (Result, error)
 	if err != nil {
 		return Result{}, err
 	}
-	cert, err := generateCert()
+	cert, err := loadOrCreateIdentity(opts.ConfigDir)
 	if err != nil {
-		return Result{}, err
+		return Result{}, fmt.Errorf("load device identity: %w", err)
 	}
 	d := net.Dialer{Timeout: dialTimeout}
 	raw, err := d.Dial("tcp", (&net.TCPAddr{IP: ip, Port: port}).String())
@@ -252,18 +255,24 @@ func authenticate(conn *tls.Conn, opts Options, role, code string, myCert tls.Ce
 	} else {
 		serverFP, clientFP = peerFP, myFP
 	}
-	key := deriveKey(code)
-	myMAC := confirmMAC(key, role, serverFP, clientFP)
 	peerRole := roleClient
 	if role == roleClient {
 		peerRole = roleServer
 	}
-	wantPeerMAC := confirmMAC(key, peerRole, serverFP, clientFP)
+	// A code is needed only when the peer is not already remembered. When we have a
+	// code, send our confirmation MAC; otherwise rely on the pinned fingerprint.
+	iKnowPeer := isKnownPeer(opts.ConfigDir, peerFP)
+	var myMAC, wantPeerMAC []byte
+	if code != "" {
+		key := deriveKey(code)
+		myMAC = confirmMAC(key, role, serverFP, clientFP)
+		wantPeerMAC = confirmMAC(key, peerRole, serverFP, clientFP)
+	}
 
 	host, _ := os.Hostname()
 	// DryRun travels in the auth message so a dry-run on either side keeps both
 	// peers in lockstep (they agree on whether the bundle phase runs).
-	mine := authMsg{Version: protocolVersion, Hostname: host, Tool: string(agent.Normalize(opts.Tool)), DryRun: opts.DryRun, MAC: myMAC}
+	mine := authMsg{Version: protocolVersion, Hostname: host, Tool: string(agent.Normalize(opts.Tool)), DryRun: opts.DryRun, Known: iKnowPeer, MAC: myMAC}
 
 	send := func() error { return writeJSON(conn, mine) }
 	recv := func() (authMsg, error) {
@@ -291,8 +300,22 @@ func authenticate(conn *tls.Conn, opts Options, role, code string, myCert tls.Ce
 	if their.Version != protocolVersion {
 		return "", false, fmt.Errorf("peer speaks protocol v%d, this is v%d; upgrade the older cct", their.Version, protocolVersion)
 	}
+	// Trusted path: both sides already remember each other's pinned fingerprint, so
+	// the TLS mutual auth alone authenticates — no code needed.
+	if iKnowPeer && their.Known {
+		return their.Hostname, their.DryRun, nil
+	}
+	// Otherwise a code is required and its confirmation MAC must verify.
+	if code == "" {
+		return "", false, fmt.Errorf("this device isn't paired yet: run `cct sync serve` on the other device and enter its pairing code (add --remember to skip the code next time)")
+	}
 	if !verifyMAC(their.MAC, wantPeerMAC) {
 		return "", false, fmt.Errorf("pairing failed: the code did not match, or the connection is being intercepted")
+	}
+	if opts.Remember {
+		if err := rememberPeer(opts.ConfigDir, their.Hostname, peerFP); err != nil {
+			return their.Hostname, their.DryRun, nil // remembering is best-effort
+		}
 	}
 	return their.Hostname, their.DryRun, nil
 }

@@ -13,8 +13,41 @@ import (
 	"github.com/ahmojo/codex-claude-transfer/internal/doctor"
 	"github.com/ahmojo/codex-claude-transfer/internal/lansync"
 	"github.com/ahmojo/codex-claude-transfer/internal/repair"
+	"github.com/ahmojo/codex-claude-transfer/internal/search"
+	"github.com/ahmojo/codex-claude-transfer/internal/secrets"
 	"github.com/ahmojo/codex-claude-transfer/internal/sessions"
 )
+
+// secretHit pairs a session with the secrets found inside it.
+type secretHit struct {
+	Session  sessions.Session
+	Findings []secrets.Finding
+}
+
+// printScan renders the secret-scan results.
+func printScan(w io.Writer, kind agent.Kind, hits []secretHit) {
+	if len(hits) == 0 {
+		fmt.Fprintf(w, "No likely secrets found in your %s sessions.\n", kind.Label())
+		return
+	}
+	total := 0
+	for _, h := range hits {
+		total += len(h.Findings)
+	}
+	fmt.Fprintf(w, "Found %s across %s:\n\n", plural(total, "possible secret"), plural(len(hits), "session"))
+	for _, h := range hits {
+		fmt.Fprintf(w, "• %s\n", safeTerminal(title(h.Session)))
+		if h.Session.ThreadID != "" {
+			fmt.Fprintf(w, "  Thread: %s\n", h.Session.ThreadID)
+		}
+		for _, fnd := range h.Findings {
+			fmt.Fprintf(w, "    %s: %s\n", fnd.Type, safeTerminal(fnd.Masked))
+		}
+		fmt.Fprintln(w)
+	}
+	fmt.Fprintln(w, "These are heuristic matches — review before trusting them. To share/sync without")
+	fmt.Fprintln(w, "the secrets, export with --redact (replaces detected values with placeholders).")
+}
 
 // printSync renders the outcome of a `cct sync` run (the apply summary). Dry-run
 // previews are printed inside the sync layer, so this only reports a real sync.
@@ -50,6 +83,31 @@ func printSync(w io.Writer, kind agent.Kind, res lansync.Result) {
 	if r.Imported > 0 || r.Updated > 0 {
 		fmt.Fprintf(w, "\nRestart %s so it picks up the synced sessions.\n", kind.Label())
 	}
+}
+
+// printSearch renders full-text search results, most relevant first.
+func printSearch(w io.Writer, kind agent.Kind, query string, matches []search.Match) {
+	if len(matches) == 0 {
+		fmt.Fprintf(w, "No %s sessions matched %q.\n", kind.Label(), query)
+		return
+	}
+	fmt.Fprintf(w, "%s matched %q:\n\n", plural(len(matches), kind.Label()+" session"), query)
+	for i, m := range matches {
+		s := m.Session
+		fmt.Fprintf(w, "%d. %s\n", i+1, safeTerminal(title(s)))
+		if s.ThreadID != "" {
+			fmt.Fprintf(w, "   Thread: %s\n", s.ThreadID)
+		}
+		if s.CWD != "" {
+			fmt.Fprintf(w, "   Project: %s\n", safeTerminal(s.CWD))
+		}
+		fmt.Fprintf(w, "   Updated: %s   Hits: %d\n", s.UpdatedAt().Format("2006-01-02 15:04"), m.Hits)
+		if m.Snippet != "" {
+			fmt.Fprintf(w, "   … %s\n", safeTerminal(m.Snippet))
+		}
+		fmt.Fprintln(w)
+	}
+	fmt.Fprintf(w, "Tip: export one with  cct export --session <thread-id>\n")
 }
 
 // printRepair renders the outcome of a `repair-times` run.
@@ -244,6 +302,10 @@ func printExport(w io.Writer, kind agent.Kind, project, session string, result b
 		fmt.Fprintf(w, "Images stripped: %d (saved ~%s)\n", result.ImagesStripped, humanBytes(result.BytesSaved))
 		fmt.Fprintln(w, "Note: a stripped bundle isn't merge-friendly — import --merge sees it as diverged")
 		fmt.Fprintln(w, "  from an unstripped copy. Import it fresh; don't use it for incremental sync.")
+	}
+	if result.SecretsRedacted > 0 {
+		fmt.Fprintf(w, "Secrets redacted: %d (replaced with placeholders)\n", result.SecretsRedacted)
+		fmt.Fprintln(w, "Note: redacted content differs from the original, so this bundle isn't merge-friendly.")
 	}
 	fmt.Fprintf(w, "Bundle written:\n%s\n", result.BundlePath)
 }

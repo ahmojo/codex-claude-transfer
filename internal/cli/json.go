@@ -8,6 +8,7 @@ import (
 	"github.com/ahmojo/codex-claude-transfer/internal/bundle"
 	"github.com/ahmojo/codex-claude-transfer/internal/doctor"
 	"github.com/ahmojo/codex-claude-transfer/internal/lansync"
+	"github.com/ahmojo/codex-claude-transfer/internal/search"
 	"github.com/ahmojo/codex-claude-transfer/internal/sessions"
 )
 
@@ -221,6 +222,57 @@ type syncJSON struct {
 	AlreadyAhead int    `json:"already_ahead"`
 	Conflicts    int    `json:"conflicts"`
 	Remapped     int    `json:"remapped"`
+}
+
+type searchMatchJSON struct {
+	ThreadID string `json:"thread_id"`
+	CWD      string `json:"cwd,omitempty"`
+	Preview  string `json:"preview,omitempty"`
+	Updated  string `json:"updated_at"`
+	Hits     int    `json:"hits"`
+	Snippet  string `json:"snippet,omitempty"`
+	Path     string `json:"path"`
+}
+
+func printSearchJSON(w io.Writer, matches []search.Match) {
+	out := make([]searchMatchJSON, 0, len(matches))
+	for _, m := range matches {
+		s := m.Session
+		out = append(out, searchMatchJSON{
+			ThreadID: s.ThreadID,
+			CWD:      s.CWD,
+			Preview:  s.Preview,
+			Updated:  s.UpdatedAt().Format("2006-01-02T15:04:05Z07:00"),
+			Hits:     m.Hits,
+			Snippet:  m.Snippet,
+			Path:     s.Path,
+		})
+	}
+	writeJSON(w, map[string]any{"matches": out, "count": len(out)})
+}
+
+func printScanJSON(w io.Writer, hits []secretHit) {
+	type findingJSON struct {
+		Type   string `json:"type"`
+		Masked string `json:"masked"`
+	}
+	type hitJSON struct {
+		ThreadID string        `json:"thread_id"`
+		CWD      string        `json:"cwd,omitempty"`
+		Path     string        `json:"path"`
+		Findings []findingJSON `json:"findings"`
+	}
+	out := make([]hitJSON, 0, len(hits))
+	total := 0
+	for _, h := range hits {
+		fs := make([]findingJSON, 0, len(h.Findings))
+		for _, f := range h.Findings {
+			fs = append(fs, findingJSON{Type: f.Type, Masked: f.Masked})
+		}
+		total += len(fs)
+		out = append(out, hitJSON{ThreadID: h.Session.ThreadID, CWD: h.Session.CWD, Path: h.Session.Path, Findings: fs})
+	}
+	writeJSON(w, map[string]any{"sessions": out, "session_count": len(out), "secret_count": total})
 }
 
 func printSyncJSON(w io.Writer, res lansync.Result) {

@@ -685,6 +685,67 @@ func TestRunImportMapCWDHere(t *testing.T) {
 	}
 }
 
+func writeSessionMsg(t *testing.T, home, id, cwd, msg string) {
+	t.Helper()
+	dir := filepath.Join(home, "sessions", "2026", "06", "13")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cwdJSON, _ := json.Marshal(cwd)
+	body := `{"type":"session_meta","payload":{"id":"` + id + `","cwd":` + string(cwdJSON) + `,"source":"cli"}}` + "\n" +
+		`{"type":"event_msg","payload":{"type":"user_message","message":"` + msg + `"}}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "rollout-2026-06-13T18-22-01-"+id+".jsonl"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunSearch(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	writeSessionMsg(t, home, "aaaa1111-2222-3333-4444-555566667777", "/p", "how do I build a rate limiter")
+	writeSessionMsg(t, home, "bbbb1111-2222-3333-4444-555566667777", "/p", "explain minecraft redstone")
+	var out, errOut bytes.Buffer
+	if code := Run([]string{"search", "rate limiter", "--codex-home", home}, &out, &errOut); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, errOut.String())
+	}
+	s := out.String()
+	if !strings.Contains(s, "aaaa1111") || strings.Contains(s, "bbbb1111") {
+		t.Errorf("search returned wrong sessions:\n%s", s)
+	}
+}
+
+func TestRunScanFindsSecret(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	writeSessionMsg(t, home, "aaaa1111-2222-3333-4444-555566667777", "/p", "deploy with AKIAIOSFODNN7EXAMPLE")
+	var out, errOut bytes.Buffer
+	if code := Run([]string{"scan", "--codex-home", home}, &out, &errOut); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "AWS access key") {
+		t.Errorf("scan did not report the AWS key:\n%s", out.String())
+	}
+}
+
+func TestRunExportFormatMarkdown(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	id := "aaaa1111-2222-3333-4444-555566667777"
+	writeSessionMsg(t, home, id, "/p", "hello markdown")
+	out := filepath.Join(tmp, "chat.md")
+	var o, e bytes.Buffer
+	if code := Run([]string{"export", "--session", id, "--codex-home", home, "--format", "md", "-o", out}, &o, &e); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, e.String())
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read md: %v", err)
+	}
+	if !strings.Contains(string(data), "# hello markdown") || !strings.Contains(string(data), "## 🧑 User") {
+		t.Errorf("markdown missing expected sections:\n%s", data)
+	}
+}
+
 func TestSanitizeForFilename(t *testing.T) {
 	cases := map[string]string{
 		"abcd1111-2222": "abcd1111-2222",

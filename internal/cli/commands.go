@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -21,8 +22,11 @@ import (
 	"github.com/ahmojo/codex-claude-transfer/internal/crypt"
 	"github.com/ahmojo/codex-claude-transfer/internal/doctor"
 	"github.com/ahmojo/codex-claude-transfer/internal/git"
+	"github.com/ahmojo/codex-claude-transfer/internal/handoff"
 	"github.com/ahmojo/codex-claude-transfer/internal/lansync"
 	"github.com/ahmojo/codex-claude-transfer/internal/repair"
+	"github.com/ahmojo/codex-claude-transfer/internal/search"
+	"github.com/ahmojo/codex-claude-transfer/internal/secrets"
 	"github.com/ahmojo/codex-claude-transfer/internal/sessions"
 	"github.com/ahmojo/codex-claude-transfer/internal/webui"
 )
@@ -43,6 +47,10 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runDoctor(rest, stdout, stderr)
 	case "list":
 		return runList(rest, stdout, stderr)
+	case "search":
+		return runSearch(rest, stdout, stderr)
+	case "scan":
+		return runScan(rest, stdout, stderr)
 	case "export":
 		return runExport(rest, stdout, stderr)
 	case "inspect":
@@ -105,6 +113,12 @@ type commonFlags struct {
 	pullOnly        bool
 	pushOnly        bool
 	iUnderstand     bool
+	regex           bool
+	caseSensitive   bool
+	match           string
+	format          string
+	redact          bool
+	remember        bool
 	port            int
 	noBrowser       bool
 	positional      []string
@@ -191,6 +205,30 @@ func parseFlags(args []string) (commonFlags, error) {
 			f.pushOnly = true
 		case arg == "--i-understand":
 			f.iUnderstand = true
+		case arg == "--regex":
+			f.regex = true
+		case arg == "--case-sensitive":
+			f.caseSensitive = true
+		case arg == "--match":
+			val, err := takeValue(args, &i, "--match")
+			if err != nil {
+				return f, err
+			}
+			f.match = val
+		case hasPrefix(arg, "--match="):
+			f.match = arg[len("--match="):]
+		case arg == "--format":
+			val, err := takeValue(args, &i, "--format")
+			if err != nil {
+				return f, err
+			}
+			f.format = val
+		case hasPrefix(arg, "--format="):
+			f.format = arg[len("--format="):]
+		case arg == "--redact":
+			f.redact = true
+		case arg == "--remember":
+			f.remember = true
 		case arg == "--all":
 			f.all = true
 		case arg == "--since":
@@ -456,6 +494,130 @@ func runList(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+// runSearch performs full-text search across local sessions.
+func runSearch(args []string, stdout, stderr io.Writer) int {
+	f, err := parseFlags(args)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 2
+	}
+	if len(f.positional) != 1 || strings.TrimSpace(f.positional[0]) == "" {
+		fmt.Fprintln(stderr, "usage: cct search <query> [--regex] [--case-sensitive] [--tool codex|claude] [--project <path>] [--since <when>] [--json]")
+		return 2
+	}
+	kind, ok := resolveTool(f, stderr)
+	if !ok {
+		return 2
+	}
+	scan, code := scanForSearch(f, kind, stderr)
+	if code != 0 {
+		return code
+	}
+	candidates := filterForSearch(f, scan.Sessions, stderr)
+	matches, err := search.Search(candidates, search.Query{
+		Text:          f.positional[0],
+		Regex:         f.regex,
+		CaseSensitive: f.caseSensitive,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 2
+	}
+	if f.jsonOut {
+		printSearchJSON(stdout, matches)
+	} else {
+		printSearch(stdout, kind, f.positional[0], matches)
+	}
+	return 0
+}
+
+// scanForSearch scans the right home for search/match.
+func scanForSearch(f commonFlags, kind agent.Kind, stderr io.Writer) (sessions.ScanResult, int) {
+	var scan sessions.ScanResult
+	var err error
+	if kind == agent.Claude {
+		home, ok := resolveClaudeHome(f, stderr)
+		if !ok {
+			return scan, 1
+		}
+		scan, err = claudesessions.Scan(home, claudesessions.ScanOptions{IncludeArchived: f.includeArchived})
+	} else {
+		home, ok := resolveHome(f, stderr)
+		if !ok {
+			return scan, 1
+		}
+		scan, err = sessions.Scan(home, sessions.ScanOptions{IncludeArchived: f.includeArchived, DecompressCompressed: true})
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "error: scan failed: %v\n", err)
+		return scan, 1
+	}
+	return scan, 0
+}
+
+// filterForSearch applies the --project and --since filters before searching.
+func filterForSearch(f commonFlags, list []sessions.Session, stderr io.Writer) []sessions.Session {
+	var since time.Time
+	if f.since != "" {
+		if t, err := parseSince(f.since); err == nil {
+			since = t
+		}
+	}
+	var absProject string
+	if f.project != "" {
+		absProject, _ = filepath.Abs(f.project)
+	}
+	out := make([]sessions.Session, 0, len(list))
+	for _, s := range list {
+		if !since.IsZero() && s.ModTime.Before(since) {
+			continue
+		}
+		if absProject != "" && (s.CWD == "" || !pathEqualCLI(s.CWD, absProject)) {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// runScan checks local sessions for likely secrets (API keys, tokens, private
+// keys) so you can review them before sharing or syncing. Read-only.
+func runScan(args []string, stdout, stderr io.Writer) int {
+	f, err := parseFlags(args)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 2
+	}
+	kind, ok := resolveTool(f, stderr)
+	if !ok {
+		return 2
+	}
+	scan, code := scanForSearch(f, kind, stderr)
+	if code != 0 {
+		return code
+	}
+	candidates := filterForSearch(f, scan.Sessions, stderr)
+	var hits []secretHit
+	for _, s := range candidates {
+		if s.Compressed {
+			continue
+		}
+		data, rerr := os.ReadFile(s.Path)
+		if rerr != nil {
+			continue
+		}
+		if found := secrets.Scan(data); len(found) > 0 {
+			hits = append(hits, secretHit{Session: s, Findings: found})
+		}
+	}
+	if f.jsonOut {
+		printScanJSON(stdout, hits)
+	} else {
+		printScan(stdout, kind, hits)
+	}
+	return 0
+}
+
 func runExport(args []string, stdout, stderr io.Writer) int {
 	f, err := parseFlags(args)
 	if err != nil {
@@ -522,13 +684,17 @@ func runExport(args []string, stdout, stderr io.Writer) int {
 	var absProject string
 	if !f.all && session == "" {
 		project := f.project
-		if project == "" {
+		// Default to the current project — unless --match is given, which searches
+		// across all projects by content.
+		if project == "" && f.match == "" {
 			project = "."
 		}
-		absProject, err = filepath.Abs(project)
-		if err != nil {
-			fmt.Fprintf(stderr, "error: cannot resolve project path %q: %v\n", project, err)
-			return 1
+		if project != "" {
+			absProject, err = filepath.Abs(project)
+			if err != nil {
+				fmt.Fprintf(stderr, "error: cannot resolve project path %q: %v\n", project, err)
+				return 1
+			}
 		}
 	}
 
@@ -554,21 +720,32 @@ func runExport(args []string, stdout, stderr io.Writer) int {
 			} else {
 				output = "codex-sessions.codexbundle"
 			}
+		case absProject == "" && f.match != "":
+			output = "matched-sessions.codexbundle"
 		default:
 			output = defaultBundleName(absProject)
 		}
 	}
 
+	// --format md renders readable Markdown instead of a bundle (not re-importable).
+	if f.format != "" {
+		return runExportMarkdown(f, kind, home, claudeHome, absProject, session, since, stdout, stderr)
+	}
+
 	result, err := bundle.Export(home, bundle.ExportOptions{
-		Tool:            kind,
-		ClaudeHome:      claudeHome,
-		ProjectPath:     absProject,
-		OutputPath:      output,
-		IncludeArchived: f.includeArchived,
-		Since:           since,
-		SessionID:       session,
-		WithGit:         f.withGit,
-		StripImages:     f.stripImages,
+		Tool:               kind,
+		ClaudeHome:         claudeHome,
+		ProjectPath:        absProject,
+		OutputPath:         output,
+		IncludeArchived:    f.includeArchived,
+		Since:              since,
+		SessionID:          session,
+		WithGit:            f.withGit,
+		StripImages:        f.stripImages,
+		Redact:             f.redact,
+		Match:              f.match,
+		MatchRegex:         f.regex,
+		MatchCaseSensitive: f.caseSensitive,
 	})
 	if err != nil {
 		for _, w := range result.Warnings {
@@ -610,6 +787,142 @@ const ageMissingMessage = "age is not installed or not on PATH; install age (htt
 
 // parseSince delegates to bundle.ParseSince so the CLI and the desktop UI share
 // one definition of the --since grammar (a date or a d/h/m duration).
+// runExportMarkdown renders selected sessions as Markdown (for reading/sharing,
+// not re-import). One session writes a single .md; several write a directory.
+func runExportMarkdown(f commonFlags, kind agent.Kind, home codexhome.Home, claudeHome claudehome.Home, absProject, session string, since time.Time, stdout, stderr io.Writer) int {
+	if f.format != "md" && f.format != "markdown" {
+		fmt.Fprintf(stderr, "error: unknown --format %q (only 'md' is supported)\n", f.format)
+		return 2
+	}
+	scan, code := scanForSearch(f, kind, stderr)
+	if code != 0 {
+		return code
+	}
+	var selected []sessions.Session
+	if session != "" {
+		sel, err := selectByThreadIDCLI(scan.Sessions, session)
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 1
+		}
+		selected = sel
+	} else {
+		q := search.Query{Text: f.match, Regex: f.regex, CaseSensitive: f.caseSensitive}
+		for _, s := range scan.Sessions {
+			if s.Compressed || s.ThreadID == "" {
+				continue
+			}
+			if !since.IsZero() && s.ModTime.Before(since) {
+				continue
+			}
+			if absProject != "" && (s.CWD == "" || !pathEqualCLI(s.CWD, absProject)) {
+				continue
+			}
+			if f.match != "" {
+				ok, err := search.SessionMatches(s.Path, q)
+				if err != nil || !ok {
+					continue
+				}
+			}
+			selected = append(selected, s)
+		}
+	}
+	if len(selected) == 0 {
+		fmt.Fprintln(stderr, "error: no sessions selected for Markdown export")
+		return 1
+	}
+
+	render := func(s sessions.Session) ([]byte, error) {
+		if kind == agent.Claude {
+			as, err := handoff.FromClaudeTranscript(s.Path)
+			if err != nil {
+				return nil, err
+			}
+			return handoff.ToMarkdown(as), nil
+		}
+		as, err := handoff.FromCodexRollout(s.Path)
+		if err != nil {
+			return nil, err
+		}
+		return handoff.ToMarkdown(as), nil
+	}
+
+	if len(selected) == 1 {
+		out := f.output
+		if out == "" {
+			out = sanitizeForFilename(selected[0].ThreadID) + ".md"
+		}
+		md, err := render(selected[0])
+		if err != nil {
+			fmt.Fprintf(stderr, "error: render: %v\n", err)
+			return 1
+		}
+		if err := os.WriteFile(out, md, 0o644); err != nil {
+			fmt.Fprintf(stderr, "error: write %s: %v\n", out, err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "Wrote %s\n", out)
+		return 0
+	}
+
+	dir := f.output
+	if dir == "" {
+		dir = "sessions-md"
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		fmt.Fprintf(stderr, "error: create %s: %v\n", dir, err)
+		return 1
+	}
+	written := 0
+	for _, s := range selected {
+		md, err := render(s)
+		if err != nil {
+			fmt.Fprintf(stderr, "warning: skipping %s: %v\n", s.ThreadID, err)
+			continue
+		}
+		p := filepath.Join(dir, sanitizeForFilename(s.ThreadID)+".md")
+		if err := os.WriteFile(p, md, 0o644); err != nil {
+			fmt.Fprintf(stderr, "warning: write %s: %v\n", p, err)
+			continue
+		}
+		written++
+	}
+	fmt.Fprintf(stdout, "Wrote %d Markdown file(s) to %s/\n", written, dir)
+	return 0
+}
+
+// selectByThreadIDCLI returns the single session matching an exact thread id or a
+// unique prefix.
+func selectByThreadIDCLI(list []sessions.Session, idPrefix string) ([]sessions.Session, error) {
+	var prefix []sessions.Session
+	for _, s := range list {
+		if s.ThreadID == idPrefix {
+			return []sessions.Session{s}, nil
+		}
+		if s.ThreadID != "" && strings.HasPrefix(s.ThreadID, idPrefix) {
+			prefix = append(prefix, s)
+		}
+	}
+	switch len(prefix) {
+	case 0:
+		return nil, fmt.Errorf("no session matches %q", idPrefix)
+	case 1:
+		return prefix, nil
+	default:
+		return nil, fmt.Errorf("%q is ambiguous (%d matches); use a longer id", idPrefix, len(prefix))
+	}
+}
+
+// pathEqualCLI compares two filesystem paths after cleaning, case-insensitively on
+// Windows.
+func pathEqualCLI(a, b string) bool {
+	ca, cb := filepath.Clean(a), filepath.Clean(b)
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(ca, cb)
+	}
+	return ca == cb
+}
+
 func parseSince(s string) (time.Time, error) {
 	return bundle.ParseSince(s)
 }
@@ -915,6 +1228,7 @@ func runSync(args []string, stdout, stderr io.Writer) int {
 		MapCWD:      mappings,
 		MapCWDHere:  f.mapCWDHere,
 		HereDir:     hereDir,
+		Remember:    f.remember,
 	}
 	var home codexhome.Home
 	if kind == agent.Claude {
@@ -950,8 +1264,9 @@ func runSync(args []string, stdout, stderr io.Writer) int {
 		}
 		// Prefer prompting for the code over --code so the secret never lands in
 		// the shell's process list or history. --code stays as a scripting escape.
+		// A blank entry is allowed for an already-remembered device.
 		if opts.Code == "" {
-			fmt.Fprint(uxOut, "Enter the pairing code shown on the other device: ")
+			fmt.Fprint(uxOut, "Enter the pairing code shown on the other device\n(or leave blank if this device is already remembered): ")
 			line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
 			opts.Code = strings.TrimSpace(line)
 		}
@@ -1084,7 +1399,12 @@ Commands:
   doctor    Read-only health check: find your Codex home, count sessions,
             and confirm SQLite will not be modified
   list      List discovered Codex sessions (preview, thread id, cwd, time)
+  search    Full-text search across your sessions' conversation text
+  scan      Check sessions for likely secrets (API keys, tokens) before sharing
   export    Export sessions for a project into a .codexbundle
+            (--format md writes readable Markdown instead of a bundle;
+             --match <q> bundles only sessions whose text matches;
+             --redact replaces detected secrets with placeholders)
   inspect   Show a bundle's manifest and contents, read-only (no extraction)
   import    Import a .codexbundle into your Codex home (never overwrites)
   repair-times  Reset imported session files' modification time to their real
@@ -1195,6 +1515,12 @@ Examples:
   cct doctor --tool claude          # check Claude Code instead of Codex
   cct list
   cct list --tool claude            # list Claude Code sessions
+  cct search "rate limiter"         # find sessions mentioning a topic
+  cct search "TODO|FIXME" --regex --since 30d
+  cct scan                          # check sessions for likely secrets
+  cct export --match "rate limiter" # bundle only sessions about a topic
+  cct export --session 9f3c --format md -o chat.md   # readable Markdown
+  cct export --all --redact         # bundle with secrets replaced by placeholders
   cct export --project .            # -> <project>.codexbundle
   cct export --tool claude --project .   # export this project's Claude sessions
   cct export --project . --with-git # also record git remote/commit

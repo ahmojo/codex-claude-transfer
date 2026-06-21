@@ -23,6 +23,7 @@ type authMsg struct {
 	Hostname string `json:"hostname"`
 	Tool     string `json:"tool"`
 	DryRun   bool   `json:"dry_run"`
+	Known    bool   `json:"known"` // "I already remember your fingerprint"
 	MAC      []byte `json:"mac"`
 }
 

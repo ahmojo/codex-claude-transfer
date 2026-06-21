@@ -240,8 +240,10 @@ func runUI(args []string, stdout, stderr io.Writer) int {
 			Options(
 				huh.NewOption("Export sessions to a bundle", "export"),
 				huh.NewOption("Import a bundle", "import"),
+				huh.NewOption("Search sessions", "search"),
 				huh.NewOption("Inspect a bundle", "inspect"),
 				huh.NewOption("List local sessions", "list"),
+				huh.NewOption("Scan for secrets", "scan"),
 				huh.NewOption("Doctor (health check)", "doctor"),
 				huh.NewOption("Quit", "quit"),
 			).
@@ -265,8 +267,12 @@ func runUI(args []string, stdout, stderr io.Writer) int {
 			uiImport(f, stdout, stderr)
 		case "inspect":
 			uiInspect(f, stdout, stderr)
+		case "search":
+			uiSearch(f, kind, stdout, stderr)
 		case "list":
 			runBuilt(withToolHome([]string{"list"}, kind, f), stdout, stderr)
+		case "scan":
+			runBuilt(withToolHome([]string{"scan"}, kind, f), stdout, stderr)
 		case "doctor":
 			runBuilt(withToolHome([]string{"doctor"}, kind, f), stdout, stderr)
 		}
@@ -294,6 +300,33 @@ func runBuilt(argv []string, stdout, stderr io.Writer) {
 	fmt.Fprintf(stdout, "\n$ cct %s\n\n", formatArgv(argv))
 	Run(argv, stdout, stderr)
 	fmt.Fprintln(stdout)
+}
+
+// uiSearch prompts for a query and runs `cct search`, echoing the command.
+func uiSearch(f commonFlags, kind agent.Kind, stdout, stderr io.Writer) {
+	var query string
+	if !runField(huh.NewInput().
+		Title("Search your sessions for…\n(matches the conversation text)").
+		Value(&query), stderr) {
+		return
+	}
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return
+	}
+	var asRegex bool
+	if !runField(huh.NewConfirm().
+		Title("Treat the query as a regular expression?").
+		Affirmative("Yes").
+		Negative("No, plain text").
+		Value(&asRegex), stderr) {
+		return
+	}
+	argv := []string{"search", query}
+	if asRegex {
+		argv = append(argv, "--regex")
+	}
+	runBuilt(withToolHome(argv, kind, f), stdout, stderr)
 }
 
 func uiExport(f commonFlags, kind agent.Kind, stdout, stderr io.Writer) {

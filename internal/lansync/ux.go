@@ -28,6 +28,7 @@ func printServeBanner(out io.Writer, port, code string) {
 	fmt.Fprintln(out)
 	fmt.Fprintf(out, "  When it asks, enter this pairing code:  %s\n", code)
 	fmt.Fprintln(out, "  (it authenticates the peer; share it only with your own device.)")
+	fmt.Fprintln(out, "  Tip: add --remember on both devices the first time to skip the code later.")
 	fmt.Fprintln(out)
 }
 

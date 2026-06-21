@@ -6,7 +6,7 @@ The command is **`cct`**.
 ![CI](https://github.com/ahmojo/codex-claude-transfer/actions/workflows/ci.yml/badge.svg)
 ![Go](https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go)
 ![License](https://img.shields.io/badge/license-MIT-blue)
-![Status](https://img.shields.io/badge/status-v0.7.1-orange)
+![Status](https://img.shields.io/badge/status-v0.8.0-orange)
 
 > ⚠️ **Unofficial.** Not affiliated with or endorsed by OpenAI or Anthropic.
 > These tools' internals can change at any time and break this tool. Use at your
@@ -355,6 +355,8 @@ Why it's safe, and why it's `--i-understand`:
 | `cct ui` | Interactive guided menu; builds and runs the commands below (and prints each one). Requires a terminal. |
 | `cct doctor` | Read-only health check: the agent's home, session counts, missing-cwd and optional-tool (`git`/`age`/`zstd`) status. Use `--tool` to pick Codex or Claude Code. |
 | `cct list` | List discovered sessions (preview, thread id, cwd, source, updated time). |
+| `cct search <query>` | Full-text search across your sessions' conversation text (`--regex`, `--case-sensitive`, `--project`, `--since`, `--json`). Find which session discussed something, then export it. |
+| `cct scan` | Check sessions for likely secrets (API keys, tokens, private keys) before sharing or syncing. Read-only; values are masked. |
 | `cct export [--project <path> \| --all \| --session <id>]` | Package matching sessions into a `.codexbundle`. |
 | `cct inspect <bundle>` | Show a bundle's manifest and contents, read-only, and flag any recorded project folder that's missing locally. |
 | `cct import <bundle>` | Import session files into the matching agent's home (or translate across agents with `--to`). Verifies checksums; never overwrites by default. |
@@ -383,6 +385,11 @@ Why it's safe, and why it's `--i-understand`:
 | `--json` | doctor, list, inspect, export, import | Print a machine-readable JSON summary on stdout instead of text. |
 | `--dry-run` | import | Validate and report only; write nothing. |
 | `--to <codex\|claude>` | import | Cross-agent handoff: translate the bundle's sessions into the *other* agent's format and write them into that agent's home (best-effort: conversation + context preamble, tool calls summarized). |
+| `--regex` / `--case-sensitive` | search, export | Treat the query (`search` or `export --match`) as a regular expression / match case-sensitively. |
+| `--match <query>` | export | Bundle only sessions whose conversation text matches the query. |
+| `--format md` | export | Render the selected session(s) as readable Markdown (`-o file.md`, or a directory for several) instead of a bundle. Not re-importable. |
+| `--redact` | export | Replace likely secrets in the exported sessions with placeholders (lossy, opt-in). |
+| `--remember` | sync | After a code pairing, remember the peer so later syncs between trusted devices skip the code. |
 | `--map-cwd OLD=NEW` | import, sync | Rewrite matching sessions' recorded cwd. Plain `.jsonl` always; `.jsonl.zst` when `zstd` is installed. Repeatable. |
 | `--map-cwd-here` | import, sync | Shorthand for `--map-cwd` that maps the project to the directory you run the command from — no need to look up the old path. Single-project only; can't be combined with `--map-cwd`. |
 | `--merge` | import | Incremental sync. When a session grew on the other device (the local file is a prefix of the bundle's), append only the new messages instead of reporting a conflict. Lossless; composes with the resolution flags for genuinely diverged sessions. |

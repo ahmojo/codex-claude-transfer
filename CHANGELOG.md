@@ -2,6 +2,27 @@
 
 All notable changes to codex-claude-transfer are documented here.
 
+## [0.8.0] - 2026-06-21
+
+### Added
+- **`cct search <query>` — full-text search across your sessions.** Searches the
+  conversation text (not metadata) for a literal or `--regex` query, ranks by hit
+  count, and shows a snippet per match, so you can find which session discussed
+  something and then export it. Supports `--project`, `--since`, `--case-sensitive`,
+  and `--json`, and is available in the `cct ui` menu.
+- **`export --match <query>`** bundles only the sessions whose text matches —
+  "export everything I discussed about X".
+- **`export --format md`** renders the selected session(s) as readable Markdown
+  (one file, or a directory for several) for reading or sharing — not re-importable.
+- **`cct scan` + `export --redact` — secret awareness.** `cct scan` checks sessions
+  for likely credentials (API keys, tokens, private keys; values masked) before you
+  share or sync; `export --redact` replaces detected secrets with placeholders in
+  the bundle (lossy, opt-in). Also in the `cct ui` menu.
+- **`sync --remember` — trust-on-first-use peers.** After a one-time code pairing
+  with `--remember` on both devices, each stores the other's pinned certificate
+  fingerprint (in the OS config dir, never an agent home) and later syncs between
+  trusted devices skip the code. A persistent per-device identity backs this.
+
 ## [0.7.1] - 2026-06-20
 
 ### Added

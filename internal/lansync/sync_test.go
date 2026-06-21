@@ -54,6 +54,18 @@ func runPair(t *testing.T, homeA, homeB codexhome.Home, optsA, optsB Options, co
 	if err != nil {
 		t.Fatal(err)
 	}
+	return runPairCerts(t, homeA, homeB, optsA, optsB, code, serverCert, clientCert)
+}
+
+func runPairCerts(t *testing.T, homeA, homeB codexhome.Home, optsA, optsB Options, code string, serverCert, clientCert tls.Certificate) (Result, Result) {
+	t.Helper()
+	// Isolate the identity/peers store so tests never touch the real config dir.
+	if optsA.ConfigDir == "" {
+		optsA.ConfigDir = t.TempDir()
+	}
+	if optsB.ConfigDir == "" {
+		optsB.ConfigDir = t.TempDir()
+	}
 	ln, err := tls.Listen("tcp", "127.0.0.1:0", tlsConfigServer(serverCert))
 	if err != nil {
 		t.Fatal(err)
@@ -174,6 +186,55 @@ func TestSyncMapCWDHere(t *testing.T) {
 	got := readSession(t, a, "bbbb1111-2222-3333-4444-555566667777")
 	if !strings.Contains(got, "/new/local/proj") || strings.Contains(got, "/gone/laptop/proj") {
 		t.Errorf("received session cwd was not remapped:\n%s", got)
+	}
+}
+
+// TestSyncRememberStoresPeer: pairing with --remember records the peer's
+// fingerprint on both sides.
+func TestSyncRememberStoresPeer(t *testing.T) {
+	a := fakeHome(t)
+	b := fakeHome(t)
+	writeSession(t, a, "aaaa1111-2222-3333-4444-555566667777", "/p", "x")
+	cfgA, cfgB := t.TempDir(), t.TempDir()
+	optsA := Options{Tool: agent.Codex, Out: io.Discard, ConfigDir: cfgA, Remember: true}
+	optsB := Options{Tool: agent.Codex, Out: io.Discard, ConfigDir: cfgB, Remember: true}
+	runPair(t, a, b, optsA, optsB, testCode)
+
+	if got := len(loadPeers(cfgA)); got != 1 {
+		t.Errorf("client remembered %d peers, want 1", got)
+	}
+	if got := len(loadPeers(cfgB)); got != 1 {
+		t.Errorf("server remembered %d peers, want 1", got)
+	}
+}
+
+// TestSyncTrustedSkipsCode: two devices that already remember each other's
+// fingerprint sync with NO pairing code.
+func TestSyncTrustedSkipsCode(t *testing.T) {
+	a := fakeHome(t)
+	b := fakeHome(t)
+	writeSession(t, b, "bbbb1111-2222-3333-4444-555566667777", "/p", "from B")
+
+	serverCert, _ := generateCert()
+	clientCert, _ := generateCert()
+	cfgA, cfgB := t.TempDir(), t.TempDir()
+	// A (client) trusts B's server cert; B (server) trusts A's client cert.
+	if err := rememberPeer(cfgA, "B", fingerprint(serverCert.Certificate[0])); err != nil {
+		t.Fatal(err)
+	}
+	if err := rememberPeer(cfgB, "A", fingerprint(clientCert.Certificate[0])); err != nil {
+		t.Fatal(err)
+	}
+	optsA := Options{Tool: agent.Codex, Out: io.Discard, ConfigDir: cfgA, PullOnly: true}
+	optsB := Options{Tool: agent.Codex, Out: io.Discard, ConfigDir: cfgB}
+
+	// Empty code on both sides — trust comes from the pinned fingerprints.
+	cr, _ := runPairCerts(t, a, b, optsA, optsB, "", serverCert, clientCert)
+	if cr.PeerHost == "" {
+		t.Fatal("trusted pairing did not complete")
+	}
+	if !sessionExists(a, "bbbb1111-2222-3333-4444-555566667777") {
+		t.Error("client did not receive the session over a code-less trusted sync")
 	}
 }
 
