@@ -92,6 +92,36 @@ with open(p, "w") as fh:
 os.utime(p, (1718524800, 1718524800))
 PY
     ;;
+  secrets)
+    gen_base
+    # Inject a session that contains fake credentials so `cct scan` has something
+    # to find. These are well-known EXAMPLE/dummy values, not real secrets.
+    python3 - "$REC/laptop/codex-home" "$HOME/projects/todo-api" <<'PY'
+import json, os, sys
+home, cwd = sys.argv[1], sys.argv[2]
+d = os.path.join(home, "sessions", "2026", "06", "16"); os.makedirs(d, exist_ok=True)
+p = os.path.join(d, "rollout-2026-06-16T12-00-00-cafe1234.jsonl")
+ts = "2026-06-16T12:00:00Z"
+msg = ("My deploy script has AKIAIOSFODNN7EXAMPLE and "
+       "ANTHROPIC_API_KEY=sk-ant-api03-EXAMPLEKEY1234567890abcd -- can you refactor it?")
+with open(p, "w") as fh:
+    fh.write("\n".join([
+        json.dumps({"timestamp": ts, "type": "session_meta", "payload": {
+            "id": "cafe1234", "timestamp": ts, "cwd": cwd, "source": "cli",
+            "model_provider": "openai"}}),
+        json.dumps({"timestamp": ts, "type": "event_msg", "payload": {
+            "type": "user_message", "message": msg}}),
+    ]) + "\n")
+os.utime(p, (1718539200, 1718539200))
+PY
+    ;;
+  stale)
+    gen_base
+    # Make one session look imported-with-the-wrong-mtime: its file modification
+    # time runs days ahead of its newest content timestamp.
+    f=$(find "$REC/laptop/codex-home/sessions" -name '*b2c3d4e5*.jsonl' | head -1)
+    touch -d "2026-06-20T23:00:00" "$f"
+    ;;
   *)
     echo "unknown scenario: $scenario" >&2; exit 2;;
 esac

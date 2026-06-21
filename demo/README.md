@@ -11,6 +11,39 @@ nothing is re-pasted or overwritten.
 ![Overview: doctor, grouped list, export](clips/01-overview.gif)
 ![Incremental sync with import --merge](clips/02-sync.gif)
 
+### Sync over your local network
+
+Same Wi-Fi? Skip the file — `cct sync` pairs the two devices with a one-time code
+and moves new/grown sessions both ways. Peer-to-peer, no server, opt-in.
+
+![LAN sync front door](clips/15-sync.gif)
+
+### Find a past conversation
+
+Full-text search across your sessions, then export just what matches.
+
+![cct search](clips/11-search.gif)
+
+### Check for secrets before sharing
+
+`cct scan` flags likely API keys/tokens; `export --redact` replaces them with
+placeholders.
+
+![cct scan and export --redact](clips/12-secrets.gif)
+
+### Save a session as readable Markdown
+
+`export --format md` turns a conversation into a shareable document.
+
+![export --format md](clips/13-markdown.gif)
+
+### Fix slow-opening imported sessions
+
+`doctor` spots imported files whose timestamps confuse the agent; `repair-times`
+fixes them (timestamps only, never content).
+
+![doctor + repair-times](clips/14-repair-times.gif)
+
 ### Desktop app
 
 The same features in a local browser GUI (`cct app`).
@@ -74,7 +107,8 @@ clips point `CODEX_HOME`/`CLAUDE_HOME` at them.
   demo sessions. `CCT_DEMO_BASE` overrides the project-path prefix (Windows paths
   for the WebUI clip).
 - `recording/prep.sh <scenario>` — per-tape setup: `base`, `claude`, `enc`,
-  `conflict`, `mapcwd`, `git`, `zstd`.
+  `conflict`, `mapcwd`, `git`, `zstd`, `secrets` (injects fake EXAMPLE keys), and
+  `stale` (a session whose mtime runs ahead of its content).
 - `recording/*.tape` — VHS scripts (typed commands + timing).
 - `recording/record.sh` — renders all terminal GIFs into `clips/` in one shot.
 - `webui-rec/` — the Playwright project that records `clips/10-webui.gif`.

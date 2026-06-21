@@ -41,10 +41,11 @@ echo "Building cct…"
 # --- 4. Copy tapes + prep in with unix line endings ------------------------
 for f in prep.sh \
          01-overview.tape 02-sync.tape 03-claude-handoff.tape 04-encryption.tape \
-         05-conflicts-remap.tape 06-export-filters.tape 07-git-handoff.tape 08-cli-ui.tape; do
+         05-conflicts-remap.tape 06-export-filters.tape 07-git-handoff.tape 08-cli-ui.tape \
+         09-compressed.tape 11-search.tape 12-secrets.tape 13-markdown.tape \
+         14-repair-times.tape 15-sync.tape; do
   tr -d '\r' < "$REPO/demo/recording/$f" > "$REC/$f"
 done
-tr -d '\r' < "$REPO/demo/recording/09-compressed.tape" > "$REC/09-compressed.tape"
 
 cd "$REC"
 
@@ -66,6 +67,11 @@ render 06-export-filters.tape  base
 render 07-git-handoff.tape     git
 render 08-cli-ui.tape          base
 render 09-compressed.tape      zstd
+render 11-search.tape          base
+render 12-secrets.tape         secrets
+render 13-markdown.tape        base
+render 14-repair-times.tape    stale
+render 15-sync.tape            base
 
 # --- 6. Copy the GIFs back into the repo -----------------------------------
 cp "$REC"/*.gif "$REPO/demo/clips/"
