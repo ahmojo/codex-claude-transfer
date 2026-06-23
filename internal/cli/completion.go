@@ -17,9 +17,19 @@ type completionCommand struct {
 var completionCommands = []completionCommand{
 	{"doctor", "Read-only health check"},
 	{"list", "List discovered sessions (Codex or Claude Code)"},
+	{"search", "Full-text search across session text"},
+	{"scan", "Check sessions for likely secrets"},
+	{"stats", "Summarize sessions (totals, projects, activity)"},
+	{"resume", "Print/launch the command to continue a session"},
+	{"browse", "Interactive session browser"},
+	{"tag", "Add/remove/list cct-only tags on a session"},
+	{"name", "Give a session a friendly cct-only name"},
+	{"config", "Save user defaults (tool, homes, port)"},
 	{"export", "Export sessions into a .codexbundle"},
 	{"inspect", "Show a bundle's contents (read-only)"},
 	{"import", "Import a bundle into the agent's home"},
+	{"repair-times", "Fix imported sessions' modification times"},
+	{"sync", "Experimental device-to-device LAN sync"},
 	{"ui", "Interactive guided menu"},
 	{"app", "Launch the local desktop GUI in your browser"},
 	{"version", "Print the cct version"},
@@ -30,9 +40,13 @@ var completionCommands = []completionCommand{
 var completionFlags = []string{
 	"--tool", "--codex-home", "--claude-home", "--project", "--all", "--session",
 	"--since", "--with-git", "--git-push", "--output", "-o", "--include-archived",
-	"--json", "--dry-run", "--to", "--map-cwd", "--replace-with-backup",
-	"--import-as-copy", "--clone", "--encrypt-to", "--recipients-file",
-	"--passphrase", "--identity", "--port", "--no-browser", "--version", "--help",
+	"--json", "--dry-run", "--to", "--map-cwd", "--map-cwd-here", "--merge",
+	"--replace-with-backup", "--import-as-copy", "--clone", "--encrypt-to",
+	"--recipients-file", "--passphrase", "--identity", "--port", "--no-browser",
+	"--match", "--format", "--redact", "--allow-secrets", "--regex",
+	"--case-sensitive", "--run", "--remember", "--i-understand", "--allow-public",
+	"--pull-only", "--push-only", "--code", "--once", "--interval",
+	"--version", "--help",
 }
 
 // runCompletion prints a completion script for the requested shell.

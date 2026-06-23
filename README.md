@@ -6,7 +6,7 @@ The command is **`cct`**.
 ![CI](https://github.com/ahmojo/codex-claude-transfer/actions/workflows/ci.yml/badge.svg)
 ![Go](https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go)
 ![License](https://img.shields.io/badge/license-MIT-blue)
-![Status](https://img.shields.io/badge/status-v0.8.0-orange)
+![Status](https://img.shields.io/badge/status-v0.9.0-orange)
 
 > ⚠️ **Unofficial.** Not affiliated with or endorsed by OpenAI or Anthropic.
 > These tools' internals can change at any time and break this tool. Use at your
@@ -362,11 +362,16 @@ Why it's safe, and why it's `--i-understand`:
 | `cct list` | List discovered sessions (preview, thread id, cwd, source, updated time). |
 | `cct search <query>` | Full-text search across your sessions' conversation text (`--regex`, `--case-sensitive`, `--project`, `--since`, `--json`). Find which session discussed something, then export it. |
 | `cct scan` | Check sessions for likely secrets (API keys, tokens, private keys) before sharing or syncing. Read-only; values are masked. |
-| `cct export [--project <path> \| --all \| --session <id>]` | Package matching sessions into a `.codexbundle`. |
+| `cct stats` | Summarize your sessions: totals, busiest projects, and a recent-activity sparkline (`--json`). |
+| `cct resume [query]` | Find the best-matching session (by thread-id prefix or conversation text) and print the agent command that continues it; `--run` launches it now. |
+| `cct browse` | Interactive session browser: search, pick one, then resume / export / tag / name it. Requires a terminal. |
+| `cct tag add\|rm\|ls` / `cct name` | Annotate sessions with cct-only tags and friendly names, stored in cct's own config dir — never written into the agent's session files. |
+| `cct config list\|get\|set\|path` | Save defaults (tool, homes, port) so you stop retyping flags. An explicit flag always wins. |
+| `cct export [--project <path> \| --all \| --session <id>]` | Package matching sessions into a `.codexbundle`. `--format md\|html` writes a readable document instead. By default export **refuses to write a bundle that contains a likely secret** — use `--redact` to mask them or `--allow-secrets` to override. |
 | `cct inspect <bundle>` | Show a bundle's manifest and contents, read-only, and flag any recorded project folder that's missing locally. |
 | `cct import <bundle>` | Import session files into the matching agent's home (or translate across agents with `--to`). Verifies checksums; never overwrites by default. |
 | `cct repair-times` | One-time fix for sessions imported by an older version with the wrong modification time (which made the agent re-parse them on every open). Resets each file's mtime to its real last-activity time. Only changes mtimes — never content or the index. Supports `--dry-run`. |
-| `cct sync serve` / `cct sync connect <host:port>` | **Experimental.** Device-to-device session sync over your local network (peer-to-peer, no server/cloud), authenticated with a one-time pairing code. Refuses non-private addresses; requires `--i-understand`. See below. |
+| `cct sync serve` / `cct sync connect [host:port]` / `cct sync daemon` | **Experimental.** Device-to-device session sync over your local network (peer-to-peer, no server/cloud), authenticated with a one-time pairing code. `connect` with no address auto-discovers a peer on the LAN; `daemon` watches your sessions and keeps remembered peers in sync automatically (no code). Refuses non-private addresses; requires `--i-understand`. See below. |
 | `cct version` | Print the version (also `--version`). |
 | `cct completion <bash\|zsh\|fish>` | Print a shell completion script. |
 | `cct help` | Show help. |
@@ -392,9 +397,12 @@ Why it's safe, and why it's `--i-understand`:
 | `--to <codex\|claude>` | import | Cross-agent handoff: translate the bundle's sessions into the *other* agent's format and write them into that agent's home (best-effort: conversation + context preamble, tool calls summarized). |
 | `--regex` / `--case-sensitive` | search, export | Treat the query (`search` or `export --match`) as a regular expression / match case-sensitively. |
 | `--match <query>` | export | Bundle only sessions whose conversation text matches the query. |
-| `--format md` | export | Render the selected session(s) as readable Markdown (`-o file.md`, or a directory for several) instead of a bundle. Not re-importable. |
-| `--redact` | export | Replace likely secrets in the exported sessions with placeholders (lossy, opt-in). |
+| `--format md\|html` | export | Render the selected session(s) as a readable document — Markdown or self-contained HTML (`-o file`, or a directory for several) — instead of a bundle. Not re-importable. |
+| `--redact` | export, sync | Replace likely secrets in the exported/sent sessions with placeholders (lossy, opt-in). |
+| `--allow-secrets` | export, sync | Proceed even though a likely secret was detected (the default refuses; `--redact` masks instead). |
+| `--run` | resume | Launch the agent on the chosen session now, instead of just printing the command. |
 | `--remember` | sync | After a code pairing, remember the peer so later syncs between trusted devices skip the code. |
+| `--interval <n>` / `--once` | sync daemon | Poll for changes every `<n>` seconds (default 5); `--once` runs a single discover-and-sync sweep then exits. |
 | `--map-cwd OLD=NEW` | import, sync | Rewrite matching sessions' recorded cwd. Plain `.jsonl` always; `.jsonl.zst` when `zstd` is installed. Repeatable. |
 | `--map-cwd-here` | import, sync | Shorthand for `--map-cwd` that maps the project to the directory you run the command from — no need to look up the old path. Single-project only; can't be combined with `--map-cwd`. |
 | `--merge` | import | Incremental sync. When a session grew on the other device (the local file is a prefix of the bundle's), append only the new messages instead of reporting a conflict. Lossless; composes with the resolution flags for genuinely diverged sessions. |
@@ -491,11 +499,22 @@ sync** (`import --merge`) that appends only the new messages to a session that
 grew on another device, and **`export --strip-images`** to shrink image-heavy
 bundles by dropping inline picture data.
 
-**Never** planned: cloud sync, accounts, hosting, background sync, direct
-index/SQLite writes, global path rewriting, automatic (silent or default) merging
-of sessions that diverged on both sides, or uploading your sessions anywhere.
-`--merge` is opt-in and only ever *appends* to an append-only log; it never
-combines conflicting edits.
+Shipped in v0.9.0: **full-text `search`**, **`stats`**, **`resume`** (find a
+session and continue it in the agent), an interactive **`browse`**r, cct-only
+**`tag`/`name`** annotations, saved-default **`config`**, **`export --format
+html`**, a **pre-egress secret gate** (export/sync refuse to write/send a likely
+secret unless `--redact` or `--allow-secrets`), and **ambient LAN sync**: peer
+**discovery** (`sync connect` with no address), and a **`sync daemon`** that keeps
+already-remembered devices in step automatically. The desktop GUI (`cct app`) gained
+Search, Stats, and Scan to match.
+
+**Never** planned: cloud sync, accounts, hosting, **any sync to a server or off
+your LAN**, direct index/SQLite writes, global path rewriting, automatic (silent
+or default) merging of sessions that diverged on both sides, or uploading your
+sessions anywhere. The `sync daemon` is the one background process, and it is
+strictly opt-in (`--i-understand`), local-network-only, and talks solely to devices
+you have already paired and remembered — never the internet. `--merge` is opt-in
+and only ever *appends* to an append-only log; it never combines conflicting edits.
 
 ## Built with AI assistance
 

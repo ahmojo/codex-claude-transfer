@@ -1,6 +1,7 @@
 package lansync
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
@@ -48,6 +49,12 @@ type Options struct {
 	// the OS config dir); used in tests.
 	Remember  bool
 	ConfigDir string
+	// Redact replaces likely secrets in the sessions this device sends with
+	// placeholders before they leave the machine. AllowSecrets disables the
+	// pre-egress secret gate (which otherwise refuses to send a session containing
+	// a likely secret). Redact and the gate apply to outbound data only.
+	Redact       bool
+	AllowSecrets bool
 }
 
 // Result summarizes a sync from the local side's perspective.
@@ -106,6 +113,19 @@ func Serve(home codexhome.Home, opts Options) (Result, error) {
 
 	_, port, _ := net.SplitHostPort(ln.Addr().String())
 	printServeBanner(opts.Out, port, code)
+
+	// Advertise a discovery beacon while waiting, so a peer can run `cct sync
+	// connect` with no address (and the daemon can find us). The beacon carries
+	// only non-secret coordinates; pairing still requires the code shown above.
+	advCtx, stopAdv := context.WithCancel(context.Background())
+	defer stopAdv()
+	host, _ := os.Hostname()
+	go Advertise(advCtx, Beacon{
+		Hostname:    host,
+		Tool:        string(agent.Normalize(opts.Tool)),
+		Port:        atoiSafe(port),
+		Fingerprint: fpHex(fingerprint(cert.Certificate[0])),
+	})
 
 	// Keep waiting for the right peer: a failed/stalled pre-auth attempt (a hostile
 	// LAN host) is ignored rather than consuming the single sync, so it cannot DoS
@@ -408,9 +428,20 @@ func sendOffer(conn *tls.Conn, home codexhome.Home, opts Options, offer []string
 		ClaudeHome:    opts.ClaudeHome,
 		OnlyThreadIDs: offer,
 		OutputPath:    tmpName,
+		Redact:        opts.Redact,
 	})
 	if err != nil {
 		return 0, fmt.Errorf("bundle offered sessions: %w", err)
+	}
+	// Pre-egress secret gate: refuse to send sessions that still contain likely
+	// secrets unless the user redacted them or explicitly allowed it. This is the
+	// moment data leaves the machine, so it is the right place to stop a leak.
+	if !opts.Redact && !opts.AllowSecrets {
+		sres, serr := bundle.ScanBundleSecrets(tmpName)
+		if serr == nil && sres.Any() {
+			return 0, fmt.Errorf("refusing to send: %d session(s) contain %d likely secret(s); re-run with --redact to replace them with placeholders, or --allow-secrets to send anyway",
+				sres.SessionsWithSecrets, sres.TotalFindings)
+		}
 	}
 	f, err := os.Open(tmpName)
 	if err != nil {

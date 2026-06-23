@@ -238,9 +238,11 @@ func runUI(args []string, stdout, stderr io.Writer) int {
 		err := huh.NewSelect[string]().
 			Title("cct — what would you like to do?").
 			Options(
+				huh.NewOption("Browse sessions (search, resume, export, tag)", "browse"),
 				huh.NewOption("Export sessions to a bundle", "export"),
 				huh.NewOption("Import a bundle", "import"),
 				huh.NewOption("Search sessions", "search"),
+				huh.NewOption("Stats (totals, projects, activity)", "stats"),
 				huh.NewOption("Inspect a bundle", "inspect"),
 				huh.NewOption("List local sessions", "list"),
 				huh.NewOption("Scan for secrets", "scan"),
@@ -261,6 +263,10 @@ func runUI(args []string, stdout, stderr io.Writer) int {
 		switch action {
 		case "quit":
 			return 0
+		case "browse":
+			runBuilt(withToolHome([]string{"browse"}, kind, f), stdout, stderr)
+		case "stats":
+			runBuilt(withToolHome([]string{"stats"}, kind, f), stdout, stderr)
 		case "export":
 			uiExport(f, kind, stdout, stderr)
 		case "import":

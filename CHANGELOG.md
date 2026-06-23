@@ -2,6 +2,46 @@
 
 All notable changes to codex-claude-transfer are documented here.
 
+## [0.9.0] - 2026-06-23
+
+### Added
+- **Ambient LAN sync.** `cct sync daemon` watches your sessions and automatically
+  keeps already-remembered devices in step over the local network — no pairing code
+  each time (it only ever talks to peers you previously paired with `--remember`).
+  Peer **discovery** means `cct sync connect` with no address finds a serving/daemon
+  peer on the LAN, and `sync serve` now advertises itself. Stdlib-only multicast
+  beacon (no mDNS/DNS-SD dependency). `--interval`/`--once` tune the daemon. Each
+  sync reuses the existing checksum-verified bundle + `import --merge` path, so every
+  safety property is inherited. Still experimental and `--i-understand`-gated.
+- **`cct resume [query]`** — find the best-matching session (by thread-id prefix or
+  conversation text) and print the agent command that continues it; `--run` launches
+  the agent on it directly.
+- **`cct browse`** — an interactive session browser: search, pick one, then resume,
+  export, or annotate it.
+- **`cct stats`** — totals, busiest projects, and a recent-activity sparkline
+  (`--json` supported).
+- **`cct tag` / `cct name`** — annotate sessions with cct-only tags and friendly
+  names. Stored in cct's own config dir (`meta.json`), never written into the agent's
+  session files or index.
+- **`cct config`** — save defaults (tool, codex/claude home, port) so you stop
+  retyping flags; an explicit flag always wins.
+- **`export --format html`** renders a session as a self-contained, escaped HTML
+  document (alongside the existing `--format md`).
+- **Pre-egress secret gate.** `export` and `sync` now refuse to write/send a bundle
+  that contains a likely secret unless you pass `--redact` (mask them) or
+  `--allow-secrets` (override). Turns the existing `scan` heuristics into an actual
+  safety net at the moment data would leave the machine.
+- **Desktop GUI parity.** `cct app` gained **Search**, **Stats**, and **Scan** views;
+  Search results offer inline **resume**, **tag**, and **name**; the export form
+  enforces the same secret gate (with a "replace secrets / export anyway" prompt).
+- New core packages: `config`, `meta`, `stats`, `cctpaths`; `handoff.ToHTML`;
+  `bundle.ScanBundleSecrets`; an append-only suffix-delta core (`lansync.PlanDelta`/
+  `ApplyDelta`, SHA-verified) as the foundation for future wire-level optimization.
+
+### Notes
+- The reusable `internal/` core stays standard-library-only; third-party deps remain
+  confined to the CLI/TUI layer.
+
 ## [0.8.0] - 2026-06-21
 
 ### Added

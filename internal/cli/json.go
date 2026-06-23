@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/ahmojo/codex-claude-transfer/internal/agent"
 	"github.com/ahmojo/codex-claude-transfer/internal/bundle"
 	"github.com/ahmojo/codex-claude-transfer/internal/doctor"
 	"github.com/ahmojo/codex-claude-transfer/internal/lansync"
 	"github.com/ahmojo/codex-claude-transfer/internal/search"
 	"github.com/ahmojo/codex-claude-transfer/internal/sessions"
+	"github.com/ahmojo/codex-claude-transfer/internal/stats"
 )
 
 // This file holds the --json renderers. They emit a single, stable JSON object
@@ -273,6 +275,43 @@ func printScanJSON(w io.Writer, hits []secretHit) {
 		out = append(out, hitJSON{ThreadID: h.Session.ThreadID, CWD: h.Session.CWD, Path: h.Session.Path, Findings: fs})
 	}
 	writeJSON(w, map[string]any{"sessions": out, "session_count": len(out), "secret_count": total})
+}
+
+func printStatsJSON(w io.Writer, kind agent.Kind, s stats.Stats) {
+	type projJSON struct {
+		Path  string `json:"path"`
+		Count int    `json:"count"`
+	}
+	type dayJSON struct {
+		Day   string `json:"day"`
+		Count int    `json:"count"`
+	}
+	projects := make([]projJSON, 0, len(s.Projects))
+	for _, p := range s.Projects {
+		projects = append(projects, projJSON{Path: p.Path, Count: p.Count})
+	}
+	days := make([]dayJSON, 0, len(s.Days))
+	for _, d := range s.Days {
+		days = append(days, dayJSON{Day: d.Day, Count: d.Count})
+	}
+	first, last := "", ""
+	if !s.First.IsZero() {
+		first = s.First.Format("2006-01-02")
+		last = s.Last.Format("2006-01-02")
+	}
+	writeJSON(w, map[string]any{
+		"tool":        kind.String(),
+		"total":       s.Total,
+		"parsed":      s.Parsed,
+		"compressed":  s.Compressed,
+		"archived":    s.Archived,
+		"no_cwd":      s.NoCWD,
+		"total_bytes": s.TotalBytes,
+		"first_day":   first,
+		"last_day":    last,
+		"projects":    projects,
+		"days":        days,
+	})
 }
 
 func printSyncJSON(w io.Writer, res lansync.Result) {

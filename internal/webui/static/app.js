@@ -16,7 +16,11 @@ async function api(path, body) {
   const res = await fetch(path, opts);
   let data = {};
   try { data = await res.json(); } catch (e) { /* non-JSON */ }
-  if (!res.ok) throw new Error(data.error || ("request failed (" + res.status + ")"));
+  if (!res.ok) {
+    const err = new Error(data.error || ("request failed (" + res.status + ")"));
+    err.data = data; // structured fields (e.g. the secret-gate flags) for callers
+    throw err;
+  }
   return data;
 }
 
@@ -147,27 +151,36 @@ function splitList(s) {
   return (s || "").split(/[\n,]+/).map(x => x.trim()).filter(Boolean);
 }
 
-el("export-run").addEventListener("click", async () => {
+function exportBody(allowSecrets) {
+  return {
+    mode: el("export-mode").value,
+    tool: currentTool(),
+    project: cleanPath(el("export-project").value),
+    session: el("export-session").value.trim(),
+    since: el("export-since").value.trim(),
+    output: cleanPath(el("export-output").value),
+    include_archived: el("export-archived").checked,
+    with_git: el("export-withgit").checked,
+    git_push: el("export-gitpush").checked,
+    strip_images: el("export-stripimages").checked,
+    redact: el("export-redact").checked,
+    allow_secrets: !!allowSecrets,
+    encrypt_to: splitList(el("export-encrypt-to").value),
+    recipients_file: cleanPath(el("export-recipients-file").value),
+  };
+}
+
+async function runExport(allowSecrets) {
   const out = el("export-out");
   setBusy(out, "Exporting…");
   try {
-    const d = await api("/api/export", {
-      mode: el("export-mode").value,
-      tool: currentTool(),
-      project: cleanPath(el("export-project").value),
-      session: el("export-session").value.trim(),
-      since: el("export-since").value.trim(),
-      output: cleanPath(el("export-output").value),
-      include_archived: el("export-archived").checked,
-      with_git: el("export-withgit").checked,
-      git_push: el("export-gitpush").checked,
-      strip_images: el("export-stripimages").checked,
-      encrypt_to: splitList(el("export-encrypt-to").value),
-      recipients_file: cleanPath(el("export-recipients-file").value),
-    });
+    const d = await api("/api/export", exportBody(allowSecrets));
     let h = '<div class="card"><div class="success">Exported ' + d.included + " session(s)." +
       (d.encrypted ? " Encrypted." : "") + "</div>" +
       '<div class="row"><strong>Bundle</strong><span class="grow mono">' + esc(d.bundle) + "</span></div>";
+    if (d.secrets_redacted) {
+      h += '<div class="row">Secrets redacted<span class="grow"></span><strong>' + d.secrets_redacted + "</strong></div>";
+    }
     if (d.images_stripped) {
       h += '<div class="row">Images stripped<span class="grow"></span><strong>' + d.images_stripped +
         " (saved ~" + humanBytes(d.bytes_saved) + ")</strong></div>";
@@ -183,8 +196,23 @@ el("export-run").addEventListener("click", async () => {
       h += '<div class="card">' + d.warnings.map(w => '<div class="row warn">' + esc(w) + "</div>").join("") + "</div>";
     }
     out.innerHTML = h;
-  } catch (e) { setError(out, e); }
-});
+  } catch (e) {
+    // The pre-egress secret gate returns a structured 422; offer redact/allow.
+    const data = e.data || {};
+    if (data.secrets_blocked) {
+      out.innerHTML = '<div class="card"><div class="error">' + esc(e.message) + "</div>" +
+        '<div class="row warn">Found ' + (data.secret_count || 0) + " likely secret(s) in " +
+        (data.sessions_with_secrets || 0) + " session(s).</div>" +
+        '<div class="row"><button class="primary" id="export-redact-go">Replace secrets &amp; export</button>' +
+        '<button class="ghost danger" id="export-anyway">Export anyway</button></div></div>';
+      el("export-redact-go").addEventListener("click", () => { el("export-redact").checked = true; runExport(false); });
+      el("export-anyway").addEventListener("click", () => runExport(true));
+      return;
+    }
+    setError(out, e);
+  }
+}
+el("export-run").addEventListener("click", () => runExport(false));
 
 // ---- inspect ----
 function projectsCard(projects) {
@@ -343,10 +371,136 @@ el("import-run").addEventListener("click", async () => {
   } catch (e) { setError(out, e); }
 });
 
+// ---- search (+ resume / tag / name on each result) ----
+async function runSearch() {
+  const out = el("search-out");
+  const q = el("search-query").value.trim();
+  if (!q) { out.innerHTML = '<div class="card muted">Type something to search for.</div>'; return; }
+  setBusy(out, "Searching…");
+  try {
+    const d = await api(withTool("/api/search"), {
+      query: q, regex: el("search-regex").checked, case_sensitive: el("search-case").checked,
+    });
+    if (!d.count) { out.innerHTML = '<div class="card muted">No ' + esc(toolLabel()) + " sessions matched " + esc(q) + ".</div>"; return; }
+    out.innerHTML = '<p class="muted">' + d.count + " match(es)</p>" + d.matches.map(searchCard).join("");
+    d.matches.forEach(wireSearchCard);
+  } catch (e) { setError(out, e); }
+}
+
+function searchCard(m) {
+  const id = esc(m.thread_id);
+  const tags = (m.tags || []).map(t => '<span class="pill info">' + esc(t) + "</span>").join("");
+  return '<div class="card" data-id="' + id + '">' +
+    '<div class="row"><strong class="grow">' + esc(m.name || m.preview || "(no preview)") + "</strong>" +
+    '<span class="muted">' + esc(m.updated_at) + " · " + (m.hits || 0) + " hit(s)</span></div>" +
+    (m.cwd ? '<div class="row mono muted">' + esc(m.cwd) + "</div>" : "") +
+    (m.snippet ? '<div class="row snippet">… ' + esc(m.snippet) + "</div>" : "") +
+    '<div class="row"><span class="muted mono">' + id + "</span></div>" +
+    '<div class="row tagrow">' + tags + "</div>" +
+    '<div class="row actions">' +
+    '<button class="ghost act-resume">Resume…</button>' +
+    '<input class="act-tag" type="text" placeholder="add a tag" />' +
+    '<button class="ghost act-tag-add">Tag</button>' +
+    '<input class="act-name" type="text" placeholder="set a name" />' +
+    '<button class="ghost act-name-set">Name</button>' +
+    '</div><div class="act-out"></div></div>';
+}
+
+function wireSearchCard(m) {
+  const card = document.querySelector('.card[data-id="' + cssEsc(m.thread_id) + '"]');
+  if (!card) return;
+  const actOut = card.querySelector(".act-out");
+  card.querySelector(".act-resume").addEventListener("click", async () => {
+    try {
+      const d = await api(withTool("/api/resume"), { session: m.thread_id });
+      actOut.innerHTML = '<div class="row">To continue this session, run:</div>' +
+        '<div class="row mono cmd">' + esc(d.command) + "</div>";
+    } catch (e) { setError(actOut, e); }
+  });
+  card.querySelector(".act-tag-add").addEventListener("click", async () => {
+    const inp = card.querySelector(".act-tag"); const t = inp.value.trim();
+    if (!t) return;
+    try {
+      const d = await api("/api/tags", { session: m.thread_id, add_tags: [t] });
+      inp.value = ""; card.querySelector(".tagrow").innerHTML = (d.tags || []).map(x => '<span class="pill info">' + esc(x) + "</span>").join("");
+    } catch (e) { setError(actOut, e); }
+  });
+  card.querySelector(".act-name-set").addEventListener("click", async () => {
+    const inp = card.querySelector(".act-name"); const n = inp.value.trim();
+    try {
+      await api("/api/tags", { session: m.thread_id, set_name: n });
+      actOut.innerHTML = '<div class="row success">Saved name.</div>';
+    } catch (e) { setError(actOut, e); }
+  });
+}
+// Escape a value for use inside a CSS attribute selector.
+function cssEsc(s) { return String(s || "").replace(/["\\]/g, "\\$&"); }
+el("search-run").addEventListener("click", runSearch);
+el("search-query").addEventListener("keydown", e => { if (e.key === "Enter") runSearch(); });
+
+// ---- stats ----
+async function runStats() {
+  const out = el("stats-out");
+  setBusy(out, "Computing…");
+  try {
+    const d = await api(withTool("/api/stats"));
+    if (!d.total) { out.innerHTML = '<div class="card muted">No ' + esc(toolLabel()) + " sessions found.</div>"; return; }
+    let h = '<div class="card"><div class="row"><strong class="grow">Sessions</strong><strong>' + d.total + "</strong></div>";
+    if (d.compressed) h += row("Compressed", d.compressed);
+    if (d.archived) h += row("Archived", d.archived);
+    h += row("On disk", humanBytes(d.total_bytes));
+    if (d.first_day) h += row("Activity", d.first_day + " → " + d.last_day);
+    h += "</div>";
+    if (d.projects && d.projects.length) {
+      h += '<div class="card"><strong>Busiest projects</strong>';
+      d.projects.slice(0, 10).forEach(p => {
+        h += '<div class="row"><span class="grow mono">' + esc(p.path) + '</span><strong>' + p.count + "</strong></div>";
+      });
+      if (d.no_cwd) h += '<div class="row"><span class="grow muted">(no recorded project)</span><strong>' + d.no_cwd + "</strong></div>";
+      h += "</div>";
+    }
+    if (d.days && d.days.length) {
+      const recent = d.days.slice(-14);
+      const peak = Math.max.apply(null, recent.map(x => x.count));
+      h += '<div class="card"><strong>Recent activity</strong><div class="spark">';
+      recent.forEach(x => {
+        const pct = peak ? Math.max(8, Math.round((x.count / peak) * 100)) : 8;
+        h += '<span class="bar" style="height:' + pct + '%" title="' + esc(x.day) + ": " + x.count + '"></span>';
+      });
+      h += "</div><div class='row muted'>" + esc(recent[0].day) + " … " + esc(recent[recent.length - 1].day) + " (peak " + peak + "/day)</div></div>";
+    }
+    out.innerHTML = h;
+  } catch (e) { setError(out, e); }
+}
+el("stats-refresh").addEventListener("click", runStats);
+
+// ---- scan (secrets) ----
+async function runScan() {
+  const out = el("scan-out");
+  setBusy(out, "Scanning…");
+  try {
+    const d = await api(withTool("/api/scan"));
+    if (!d.secret_count) { out.innerHTML = '<div class="card success">No likely secrets found in your ' + esc(toolLabel()) + " sessions.</div>"; return; }
+    let h = '<div class="card warn">Found ' + d.secret_count + " possible secret(s) across " + d.session_count + " session(s). Heuristic — review before trusting.</div>";
+    d.sessions.forEach(s => {
+      h += '<div class="card"><div class="row"><strong class="grow">' + esc(s.preview || "(no preview)") + "</strong></div>" +
+        (s.cwd ? '<div class="row mono muted">' + esc(s.cwd) + "</div>" : "") +
+        s.findings.map(f => '<div class="row"><span class="pill missing">' + esc(f.type) + '</span><span class="grow mono">' + esc(f.masked) + "</span></div>").join("") +
+        "</div>";
+    });
+    h += '<div class="card muted">To share without these, export with "Replace detected secrets with placeholders".</div>';
+    out.innerHTML = h;
+  } catch (e) { setError(out, e); }
+}
+el("scan-run").addEventListener("click", runScan);
+
 // Switching the tool re-checks health and clears any stale session/project list.
 el("tool-select").addEventListener("change", () => {
   cachedProjects = [];
   el("sessions-out").innerHTML = "";
+  el("search-out").innerHTML = "";
+  el("stats-out").innerHTML = "";
+  el("scan-out").innerHTML = "";
   refreshExportProjects();
   runDoctor();
 });

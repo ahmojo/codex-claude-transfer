@@ -22,6 +22,9 @@
     <nav class="sidebar">
       <button class="nav active" data-view="doctor">Doctor</button>
       <button class="nav" data-view="sessions">Sessions</button>
+      <button class="nav" data-view="search">Search</button>
+      <button class="nav" data-view="stats">Stats</button>
+      <button class="nav" data-view="scan">Scan</button>
       <button class="nav" data-view="export">Export</button>
       <button class="nav" data-view="inspect">Inspect</button>
       <button class="nav" data-view="import">Import</button>
@@ -42,6 +45,36 @@
         <p class="muted">Sessions discovered on this machine for the selected tool.</p>
         <button class="primary" id="sessions-refresh">Refresh</button>
         <div id="sessions-out" class="out"></div>
+      </section>
+
+      <!-- Search -->
+      <section id="view-search" class="view hidden">
+        <h1>Search sessions</h1>
+        <p class="muted">Full-text search across your conversation text. Find a past session, then resume, tag, or export it.</p>
+        <label class="field">
+          <span>Search for</span>
+          <input id="search-query" type="text" placeholder="e.g. rate limiter" />
+        </label>
+        <label class="check"><input type="checkbox" id="search-regex" /> Treat as a regular expression</label>
+        <label class="check"><input type="checkbox" id="search-case" /> Case sensitive</label>
+        <button class="primary" id="search-run">Search</button>
+        <div id="search-out" class="out"></div>
+      </section>
+
+      <!-- Stats -->
+      <section id="view-stats" class="view hidden">
+        <h1>Stats</h1>
+        <p class="muted">A summary of your sessions for the selected tool: totals, busiest projects, recent activity.</p>
+        <button class="primary" id="stats-refresh">Refresh</button>
+        <div id="stats-out" class="out"></div>
+      </section>
+
+      <!-- Scan -->
+      <section id="view-scan" class="view hidden">
+        <h1>Scan for secrets</h1>
+        <p class="muted">Heuristically flags likely API keys and tokens in your sessions, so you can review before sharing. Read-only &mdash; nothing is changed.</p>
+        <button class="primary" id="scan-run">Scan</button>
+        <div id="scan-out" class="out"></div>
       </section>
 
       <!-- Export -->
@@ -79,6 +112,8 @@
         <p class="hint"><strong>Network upload.</strong> Runs <code>git push</code> of the current branch to <strong>your own</strong> git remote, so the commit recorded in the bundle is actually fetchable on the other machine. Pushes <strong>code only</strong> &mdash; never your sessions, and never to any cct server. Needs a single project with a remote.</p>
         <label class="check"><input type="checkbox" id="export-stripimages" /> Strip embedded images to shrink the bundle (--strip-images)</label>
         <p class="hint">Replaces inline screenshots/photos (stored as base64) with a small placeholder. <strong>Lossy</strong> &mdash; the pictures are dropped &mdash; but the conversation text is kept. Handy for image-heavy sessions.</p>
+        <label class="check"><input type="checkbox" id="export-redact" /> Replace detected secrets with placeholders (--redact)</label>
+        <p class="hint">By default, export refuses to write a bundle that contains a likely API key or token. Tick this to mask them, or you'll be offered "Export anyway" if any are found.</p>
         <details class="adv">
           <summary>Encrypt the bundle (optional, needs <code>age</code>)</summary>
           <label class="field">

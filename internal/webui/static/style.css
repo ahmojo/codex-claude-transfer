@@ -127,3 +127,14 @@ fieldset.conflict {
   margin: 14px 0; border: 1px solid var(--border); border-radius: 8px; padding: 6px 14px 12px;
 }
 fieldset.conflict legend { font-weight: 600; font-size: 13px; padding: 0 6px; color: var(--muted); }
+
+/* search results, resume command, tags, stats sparkline (v0.9 parity) */
+.row.snippet { color: var(--muted); font-size: 13px; display: block; }
+.row.tagrow { flex-wrap: wrap; gap: 6px; }
+.row.actions { flex-wrap: wrap; gap: 6px; align-items: center; }
+.row.actions input { flex: 1; min-width: 120px; }
+.row.actions button { display: inline-block; padding: 4px 10px; }
+.act-out { font-size: 13px; }
+.cmd { background: var(--code); padding: 8px 10px; border-radius: 6px; display: block; user-select: all; }
+.spark { display: flex; align-items: flex-end; gap: 3px; height: 60px; margin: 10px 0 6px; }
+.spark .bar { flex: 1; background: var(--accent); border-radius: 2px 2px 0 0; min-height: 4px; opacity: 0.85; }

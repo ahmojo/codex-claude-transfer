@@ -268,6 +268,88 @@ func TestSyncWrongCodeFails(t *testing.T) {
 	}
 }
 
+// TestSyncSecretGateBlocksSend: a session containing a likely secret is refused by
+// the pre-egress gate, so it never leaves the machine, unless --allow-secrets.
+func TestSyncSecretGateBlocksSend(t *testing.T) {
+	a := fakeHome(t)
+	b := fakeHome(t)
+	id := "aaaa1111-2222-3333-4444-555566667777"
+	// A's session embeds an AWS-style key.
+	writeSession(t, a, id, "/p", "deploy with AKIAIOSFODNN7EXAMPLE now")
+
+	// Default: the gate blocks A's send, failing the sync.
+	optsA := Options{Tool: agent.Codex, Out: io.Discard, PushOnly: true}
+	optsB := Options{Tool: agent.Codex, Out: io.Discard, PullOnly: true}
+	_, _, err := tryPair(t, a, b, optsA, optsB, testCode)
+	if err == nil {
+		t.Fatal("expected the secret gate to block the send")
+	}
+	if !strings.Contains(err.Error(), "secret") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if sessionExists(b, id) {
+		t.Fatal("a secret-bearing session was sent despite the gate")
+	}
+
+	// With --allow-secrets the send proceeds and B receives it.
+	optsA.AllowSecrets = true
+	_, _, err = tryPair(t, a, b, optsA, optsB, testCode)
+	if err != nil {
+		t.Fatalf("--allow-secrets should let the sync proceed: %v", err)
+	}
+	if !sessionExists(b, id) {
+		t.Fatal("session not received even with --allow-secrets")
+	}
+}
+
+// tryPair is like runPair but returns the error instead of failing, so a test can
+// assert that a sync is rejected.
+func tryPair(t *testing.T, homeA, homeB codexhome.Home, optsA, optsB Options, code string) (Result, Result, error) {
+	t.Helper()
+	serverCert, _ := generateCert()
+	clientCert, _ := generateCert()
+	if optsA.ConfigDir == "" {
+		optsA.ConfigDir = t.TempDir()
+	}
+	if optsB.ConfigDir == "" {
+		optsB.ConfigDir = t.TempDir()
+	}
+	ln, err := tls.Listen("tcp", "127.0.0.1:0", tlsConfigServer(serverCert))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	type out struct {
+		r   Result
+		err error
+	}
+	sch := make(chan out, 1)
+	go func() {
+		conn, aerr := ln.Accept()
+		if aerr != nil {
+			sch <- out{err: aerr}
+			return
+		}
+		defer conn.Close()
+		r, herr := handleConn(conn.(*tls.Conn), homeB, optsB, roleServer, code, serverCert)
+		sch <- out{r, herr}
+	}()
+	conn, derr := tls.Dial("tcp", ln.Addr().String(), tlsConfigClient(clientCert))
+	if derr != nil {
+		t.Fatal(derr)
+	}
+	cr, cerr := handleConn(conn, homeA, optsA, roleClient, code, clientCert)
+	// Close immediately so that if the client aborted mid-protocol (e.g. the secret
+	// gate refused to send), the server's pending read unblocks at once instead of
+	// waiting out its transfer deadline.
+	conn.Close()
+	s := <-sch
+	if cerr != nil {
+		return cr, s.r, cerr
+	}
+	return cr, s.r, s.err
+}
+
 func sessionExists(home codexhome.Home, id string) bool {
 	p := filepath.Join(home.SessionsDir, "2026", "06", "13", "rollout-2026-06-13T18-22-01-"+id+".jsonl")
 	_, err := os.Stat(p)

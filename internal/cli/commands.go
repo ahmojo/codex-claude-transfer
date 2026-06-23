@@ -51,6 +51,18 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runSearch(rest, stdout, stderr)
 	case "scan":
 		return runScan(rest, stdout, stderr)
+	case "stats":
+		return runStats(rest, stdout, stderr)
+	case "resume":
+		return runResume(rest, stdout, stderr)
+	case "browse":
+		return runBrowse(rest, stdout, stderr)
+	case "tag":
+		return runTag(rest, stdout, stderr)
+	case "name":
+		return runName(rest, stdout, stderr)
+	case "config":
+		return runConfig(rest, stdout, stderr)
 	case "export":
 		return runExport(rest, stdout, stderr)
 	case "inspect":
@@ -119,6 +131,10 @@ type commonFlags struct {
 	format          string
 	redact          bool
 	remember        bool
+	allowSecrets    bool
+	run             bool
+	once            bool
+	interval        int
 	port            int
 	noBrowser       bool
 	positional      []string
@@ -229,6 +245,29 @@ func parseFlags(args []string) (commonFlags, error) {
 			f.redact = true
 		case arg == "--remember":
 			f.remember = true
+		case arg == "--allow-secrets":
+			f.allowSecrets = true
+		case arg == "--run":
+			f.run = true
+		case arg == "--once":
+			f.once = true
+		case arg == "--interval":
+			val, err := takeValue(args, &i, "--interval")
+			if err != nil {
+				return f, err
+			}
+			n, perr := strconv.Atoi(val)
+			if perr != nil || n < 1 {
+				return f, fmt.Errorf("invalid --interval %q (want a positive number of seconds)", val)
+			}
+			f.interval = n
+		case hasPrefix(arg, "--interval="):
+			val := arg[len("--interval="):]
+			n, perr := strconv.Atoi(val)
+			if perr != nil || n < 1 {
+				return f, fmt.Errorf("invalid --interval %q (want a positive number of seconds)", val)
+			}
+			f.interval = n
 		case arg == "--all":
 			f.all = true
 		case arg == "--since":
@@ -339,7 +378,7 @@ func takeValue(args []string, i *int, flagName string) (string, error) {
 }
 
 func resolveHome(f commonFlags, stderr io.Writer) (codexhome.Home, bool) {
-	home, err := codexhome.Detect(f.codexHome)
+	home, err := codexhome.Detect(defaultCodexHome(f.codexHome))
 	if err != nil {
 		fmt.Fprintf(stderr, "error: cannot determine Codex home: %v\n", err)
 		return codexhome.Home{}, false
@@ -348,7 +387,7 @@ func resolveHome(f commonFlags, stderr io.Writer) (codexhome.Home, bool) {
 }
 
 func resolveClaudeHome(f commonFlags, stderr io.Writer) (claudehome.Home, bool) {
-	home, err := claudehome.Detect(f.claudeHome)
+	home, err := claudehome.Detect(defaultClaudeHome(f.claudeHome))
 	if err != nil {
 		fmt.Fprintf(stderr, "error: cannot determine Claude Code home: %v\n", err)
 		return claudehome.Home{}, false
@@ -369,8 +408,14 @@ func resolveTool(f commonFlags, stderr io.Writer) (agent.Kind, bool) {
 		}
 		return kind, true
 	}
-	ch, _ := codexhome.Detect(f.codexHome)
-	clh, _ := claudehome.Detect(f.claudeHome)
+	// A saved default tool sits between an explicit --tool and auto-detection.
+	if dt := loadDefaults().Tool; dt != "" {
+		if kind, err := agent.Parse(dt); err == nil {
+			return kind, true
+		}
+	}
+	ch, _ := codexhome.Detect(defaultCodexHome(f.codexHome))
+	clh, _ := claudehome.Detect(defaultClaudeHome(f.claudeHome))
 	if clh.RootExists() && !ch.RootExists() {
 		return agent.Claude, true
 	}
@@ -415,10 +460,14 @@ func runApp(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 2
 	}
+	port := f.port
+	if port == 0 {
+		port = loadDefaults().Port
+	}
 	return webui.Run(webui.Options{
 		CodexHome:  f.codexHome,
 		ClaudeHome: f.claudeHome,
-		Port:       f.port,
+		Port:       port,
 		NoBrowser:  f.noBrowser,
 	}, stdout, stderr)
 }
@@ -727,9 +776,10 @@ func runExport(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
-	// --format md renders readable Markdown instead of a bundle (not re-importable).
+	// --format md|html renders a readable document instead of a bundle (not
+	// re-importable).
 	if f.format != "" {
-		return runExportMarkdown(f, kind, home, claudeHome, absProject, session, since, stdout, stderr)
+		return runExportRendered(f, kind, home, claudeHome, absProject, session, since, stdout, stderr)
 	}
 
 	result, err := bundle.Export(home, bundle.ExportOptions{
@@ -753,6 +803,21 @@ func runExport(args []string, stdout, stderr io.Writer) int {
 		}
 		fmt.Fprintf(stderr, "error: export failed: %v\n", err)
 		return 1
+	}
+
+	// Pre-egress secret gate: a bundle is made to be moved/shared, so refuse to
+	// leave one full of credentials on disk unless the user redacts them or opts
+	// in. Scans the exact bytes that were written (after any --strip-images).
+	if !f.redact && !f.allowSecrets {
+		sres, serr := bundle.ScanBundleSecrets(output)
+		if serr == nil && sres.Any() {
+			os.Remove(output)
+			fmt.Fprintf(stderr, "error: this bundle would contain %s (in %s).\n",
+				plural(sres.TotalFindings, "likely secret"), plural(sres.SessionsWithSecrets, "session"))
+			fmt.Fprintln(stderr, "Refusing to write it so credentials don't leak. Re-run with --redact to replace")
+			fmt.Fprintln(stderr, "them with placeholders, --allow-secrets to export anyway, or `cct scan` to review.")
+			return 1
+		}
 	}
 
 	if encryptRequested {
@@ -787,11 +852,19 @@ const ageMissingMessage = "age is not installed or not on PATH; install age (htt
 
 // parseSince delegates to bundle.ParseSince so the CLI and the desktop UI share
 // one definition of the --since grammar (a date or a d/h/m duration).
-// runExportMarkdown renders selected sessions as Markdown (for reading/sharing,
-// not re-import). One session writes a single .md; several write a directory.
-func runExportMarkdown(f commonFlags, kind agent.Kind, home codexhome.Home, claudeHome claudehome.Home, absProject, session string, since time.Time, stdout, stderr io.Writer) int {
-	if f.format != "md" && f.format != "markdown" {
-		fmt.Fprintf(stderr, "error: unknown --format %q (only 'md' is supported)\n", f.format)
+// runExportRendered renders selected sessions as a readable document — Markdown
+// or self-contained HTML — for reading/sharing (not re-import). One session writes
+// a single file; several write a directory of files.
+func runExportRendered(f commonFlags, kind agent.Kind, home codexhome.Home, claudeHome claudehome.Home, absProject, session string, since time.Time, stdout, stderr io.Writer) int {
+	var ext string
+	var toDoc func(handoff.AgentSession) []byte
+	switch f.format {
+	case "md", "markdown":
+		ext, toDoc = ".md", handoff.ToMarkdown
+	case "html", "htm":
+		ext, toDoc = ".html", handoff.ToHTML
+	default:
+		fmt.Fprintf(stderr, "error: unknown --format %q (supported: md, html)\n", f.format)
 		return 2
 	}
 	scan, code := scanForSearch(f, kind, stderr)
@@ -833,31 +906,30 @@ func runExportMarkdown(f commonFlags, kind agent.Kind, home codexhome.Home, clau
 	}
 
 	render := func(s sessions.Session) ([]byte, error) {
+		var as handoff.AgentSession
+		var err error
 		if kind == agent.Claude {
-			as, err := handoff.FromClaudeTranscript(s.Path)
-			if err != nil {
-				return nil, err
-			}
-			return handoff.ToMarkdown(as), nil
+			as, err = handoff.FromClaudeTranscript(s.Path)
+		} else {
+			as, err = handoff.FromCodexRollout(s.Path)
 		}
-		as, err := handoff.FromCodexRollout(s.Path)
 		if err != nil {
 			return nil, err
 		}
-		return handoff.ToMarkdown(as), nil
+		return toDoc(as), nil
 	}
 
 	if len(selected) == 1 {
 		out := f.output
 		if out == "" {
-			out = sanitizeForFilename(selected[0].ThreadID) + ".md"
+			out = sanitizeForFilename(selected[0].ThreadID) + ext
 		}
-		md, err := render(selected[0])
+		doc, err := render(selected[0])
 		if err != nil {
 			fmt.Fprintf(stderr, "error: render: %v\n", err)
 			return 1
 		}
-		if err := os.WriteFile(out, md, 0o644); err != nil {
+		if err := os.WriteFile(out, doc, 0o644); err != nil {
 			fmt.Fprintf(stderr, "error: write %s: %v\n", out, err)
 			return 1
 		}
@@ -867,7 +939,7 @@ func runExportMarkdown(f commonFlags, kind agent.Kind, home codexhome.Home, clau
 
 	dir := f.output
 	if dir == "" {
-		dir = "sessions-md"
+		dir = "sessions-" + strings.TrimPrefix(ext, ".")
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		fmt.Fprintf(stderr, "error: create %s: %v\n", dir, err)
@@ -875,19 +947,19 @@ func runExportMarkdown(f commonFlags, kind agent.Kind, home codexhome.Home, clau
 	}
 	written := 0
 	for _, s := range selected {
-		md, err := render(s)
+		doc, err := render(s)
 		if err != nil {
 			fmt.Fprintf(stderr, "warning: skipping %s: %v\n", s.ThreadID, err)
 			continue
 		}
-		p := filepath.Join(dir, sanitizeForFilename(s.ThreadID)+".md")
-		if err := os.WriteFile(p, md, 0o644); err != nil {
+		p := filepath.Join(dir, sanitizeForFilename(s.ThreadID)+ext)
+		if err := os.WriteFile(p, doc, 0o644); err != nil {
 			fmt.Fprintf(stderr, "warning: write %s: %v\n", p, err)
 			continue
 		}
 		written++
 	}
-	fmt.Fprintf(stdout, "Wrote %d Markdown file(s) to %s/\n", written, dir)
+	fmt.Fprintf(stdout, "Wrote %d file(s) to %s/\n", written, dir)
 	return 0
 }
 
@@ -1158,15 +1230,19 @@ func runRepairTimes(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-const syncUsage = `usage: cct sync <serve | connect <host:port>> --i-understand [options]
-  serve              wait for a device on your LAN to connect; prints a pairing code
-  connect <host:port>  connect to a serving device; needs --code
+const syncUsage = `usage: cct sync <serve | connect [host:port] | daemon> --i-understand [options]
+  serve                wait for a device on your LAN to connect; prints a pairing code
+  connect [host:port]  connect to a serving device; needs --code. Omit host:port to
+                       auto-discover a serving/daemon peer on your LAN
+  daemon               ambient mode: watch your sessions and keep them in sync with
+                       remembered peers on your LAN automatically (no code needed)
 options: [--tool codex|claude] [--project <path>] [--code <code>] [--port <n>]
-         [--dry-run] [--pull-only | --push-only] [--allow-public]
+         [--dry-run] [--pull-only | --push-only] [--allow-public] [--remember]
+         [--redact | --allow-secrets] [--interval <n>] [--once]
 
 EXPERIMENTAL: sync sends your sessions over the local network to a paired device.
 It is peer-to-peer (no server/cloud), refuses non-private addresses, and requires
---i-understand to run.`
+--i-understand to run. The daemon only ever talks to peers you have remembered.`
 
 // runSync drives the experimental LAN sync (serve/connect). The actual transfer
 // reuses the bundle export + import(--merge) path, so all safety properties hold.
@@ -1176,7 +1252,7 @@ func runSync(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	sub := args[0]
-	if sub != "serve" && sub != "connect" {
+	if sub != "serve" && sub != "connect" && sub != "daemon" {
 		fmt.Fprintf(stderr, "unknown sync subcommand %q\n\n%s\n", sub, syncUsage)
 		return 2
 	}
@@ -1216,19 +1292,21 @@ func runSync(args []string, stdout, stderr io.Writer) int {
 		uxOut = stderr
 	}
 	opts := lansync.Options{
-		Tool:        kind,
-		AllowPublic: f.allowPublic,
-		PullOnly:    f.pullOnly,
-		PushOnly:    f.pushOnly,
-		DryRun:      f.dryRun,
-		Confirmed:   f.iUnderstand,
-		Code:        f.code,
-		Port:        f.port,
-		Out:         uxOut,
-		MapCWD:      mappings,
-		MapCWDHere:  f.mapCWDHere,
-		HereDir:     hereDir,
-		Remember:    f.remember,
+		Tool:         kind,
+		AllowPublic:  f.allowPublic,
+		PullOnly:     f.pullOnly,
+		PushOnly:     f.pushOnly,
+		DryRun:       f.dryRun,
+		Confirmed:    f.iUnderstand,
+		Code:         f.code,
+		Port:         f.port,
+		Out:          uxOut,
+		MapCWD:       mappings,
+		MapCWDHere:   f.mapCWDHere,
+		HereDir:      hereDir,
+		Remember:     f.remember,
+		Redact:       f.redact,
+		AllowSecrets: f.allowSecrets,
 	}
 	var home codexhome.Home
 	if kind == agent.Claude {
@@ -1254,13 +1332,17 @@ func runSync(args []string, stdout, stderr io.Writer) int {
 		opts.ProjectPath = abs
 	}
 
+	if sub == "daemon" {
+		return runSyncDaemon(home, opts, f, uxOut, stderr)
+	}
+
 	var res lansync.Result
 	if sub == "serve" {
 		res, err = lansync.Serve(home, opts)
 	} else {
-		if len(f.positional) != 1 {
-			fmt.Fprintln(stderr, "usage: cct sync connect <host:port> --i-understand")
-			return 2
+		hostport, hcode := resolveConnectTarget(f, opts, uxOut, stderr)
+		if hcode != 0 {
+			return hcode
 		}
 		// Prefer prompting for the code over --code so the secret never lands in
 		// the shell's process list or history. --code stays as a scripting escape.
@@ -1270,7 +1352,7 @@ func runSync(args []string, stdout, stderr io.Writer) int {
 			line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
 			opts.Code = strings.TrimSpace(line)
 		}
-		res, err = lansync.Connect(home, opts, f.positional[0])
+		res, err = lansync.Connect(home, opts, hostport)
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
@@ -1401,17 +1483,28 @@ Commands:
   list      List discovered Codex sessions (preview, thread id, cwd, time)
   search    Full-text search across your sessions' conversation text
   scan      Check sessions for likely secrets (API keys, tokens) before sharing
+  stats     Summarize your sessions: totals, busiest projects, recent activity
+  resume    Find the best-matching session and print (or --run) the agent
+            command that continues it
+  browse    Interactive session browser: search, pick one, then resume/export/tag
+  tag       Add/remove/list cct-only tags on a session (tag add|rm|ls)
+  name      Give a session a friendly cct-only name
+  config    Save user defaults (tool, homes, port) so you stop retyping flags
   export    Export sessions for a project into a .codexbundle
-            (--format md writes readable Markdown instead of a bundle;
+            (--format md|html writes a readable document instead of a bundle;
              --match <q> bundles only sessions whose text matches;
-             --redact replaces detected secrets with placeholders)
+             --redact replaces detected secrets with placeholders. By default
+             export refuses to write a bundle that contains a likely secret;
+             use --redact or --allow-secrets)
   inspect   Show a bundle's manifest and contents, read-only (no extraction)
   import    Import a .codexbundle into your Codex home (never overwrites)
   repair-times  Reset imported session files' modification time to their real
             last-activity time, so the agent stops re-parsing them on every open
             (a one-time fix; only changes mtimes, never content or the index)
   sync      EXPERIMENTAL device-to-device sync over your local network:
-            'sync serve' waits for a peer, 'sync connect <host:port>' joins it.
+            'sync serve' waits for a peer, 'sync connect [host:port]' joins it
+            (omit the address to auto-discover a peer on your LAN), and
+            'sync daemon' keeps remembered peers in sync automatically.
             Peer-to-peer (no server/cloud), authenticated with a one-time code,
             refuses non-private addresses; requires --i-understand
   ui        Interactive mode: a guided menu that builds and runs the commands
@@ -1498,6 +1591,12 @@ Flags:
                         import/inspect: decrypt a passphrase-encrypted bundle
   --identity <file>     import/inspect: age identity (private key) file used to
                         decrypt a .age bundle
+  --allow-secrets       export/sync: proceed even if a likely secret is detected
+                        in a session (the default refuses; --redact masks instead)
+  --run                 resume: launch the agent on the chosen session now,
+                        instead of just printing the command
+  --interval <n>        sync daemon: seconds between change checks (default 5)
+  --once                sync daemon: run a single discover-and-sync sweep, then exit
 
 Optional external tools (only needed for the matching feature; the core commands
 need none):
@@ -1517,9 +1616,17 @@ Examples:
   cct list --tool claude            # list Claude Code sessions
   cct search "rate limiter"         # find sessions mentioning a topic
   cct search "TODO|FIXME" --regex --since 30d
+  cct stats                         # totals, busiest projects, recent activity
+  cct resume "rate limiter"         # print the command to continue that session
+  cct resume "rate limiter" --run   # …or launch the agent on it now
+  cct browse                        # interactive: search → pick → resume/export
+  cct tag add 9f3c wip              # annotate a session (cct-only, never the agent)
+  cct name 9f3c "auth refactor"
+  cct config set tool claude        # save a default so you can drop --tool
   cct scan                          # check sessions for likely secrets
   cct export --match "rate limiter" # bundle only sessions about a topic
   cct export --session 9f3c --format md -o chat.md   # readable Markdown
+  cct export --session 9f3c --format html -o chat.html  # shareable HTML
   cct export --all --redact         # bundle with secrets replaced by placeholders
   cct export --project .            # -> <project>.codexbundle
   cct export --tool claude --project .   # export this project's Claude sessions
