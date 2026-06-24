@@ -6,7 +6,7 @@ The command is **`cct`**.
 ![CI](https://github.com/ahmojo/codex-claude-transfer/actions/workflows/ci.yml/badge.svg)
 ![Go](https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go)
 ![License](https://img.shields.io/badge/license-MIT-blue)
-![Status](https://img.shields.io/badge/status-v0.9.0-orange)
+![Status](https://img.shields.io/badge/status-v1.0.0-blue)
 
 > ⚠️ **Unofficial.** Not affiliated with or endorsed by OpenAI or Anthropic.
 > These tools' internals can change at any time and break this tool. Use at your
@@ -24,8 +24,11 @@ The command is **`cct`**.
 [Claude Code](https://github.com/anthropics/claude-code) sessions between machines
 by hand. You export a project's sessions into one `.codexbundle` file, copy it
 across however you like (USB stick, `scp`, Syncthing, an encrypted drive), and
-import it on the other machine. **No cloud, no account, no server, no daemon** —
-and the agent's index/state is never touched.
+import it on the other machine. **No cloud, no account, no server, and no background
+process by default** — and the agent's index/state is never touched. (The one
+exception is the opt-in, experimental [LAN sync](#lan-sync-experimental), which can
+run a local-network-only daemon between devices you have explicitly paired — never
+the internet.)
 
 ```text
 Machine A:  cct export --project .      →  project.codexbundle
@@ -515,6 +518,23 @@ sessions anywhere. The `sync daemon` is the one background process, and it is
 strictly opt-in (`--i-understand`), local-network-only, and talks solely to devices
 you have already paired and remembered — never the internet. `--merge` is opt-in
 and only ever *appends* to an append-only log; it never combines conflicting edits.
+
+## Stability & versioning
+
+As of **v1.0.0**, `cct` follows [semantic versioning](https://semver.org/):
+
+- **The bundle format (`codex-sync-bundle-v1`) is stable.** A bundle exported by
+  any 1.x version imports into any other 1.x version. A breaking format change
+  would mean a new format version and a major release.
+- **The command-line interface is stable.** Existing commands, flags, and their
+  meanings won't change incompatibly within 1.x; new ones may be added.
+- **`cct sync` remains explicitly experimental** and `--i-understand`-gated. It is
+  the one area whose wire protocol may still change between minor releases; it is
+  off the stability guarantee by design until it graduates.
+- What `cct` reads is **the coding agents' own on-disk formats**, which are outside
+  its control and can change at any time (see the Disclaimer). Parsing is defensive,
+  but a format change on their side can still break things regardless of `cct`'s
+  own version.
 
 ## Built with AI assistance
 

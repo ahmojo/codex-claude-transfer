@@ -2,6 +2,23 @@
 
 All notable changes to codex-claude-transfer are documented here.
 
+## [1.0.0] - 2026-06-24
+
+First stable release. No functional changes from 0.9.0 — this release marks an API
+and bundle-format stability commitment.
+
+### Changed
+- **Adopt semantic versioning guarantees (see README → Stability & versioning).**
+  The bundle format (`codex-sync-bundle-v1`) and the command-line interface are
+  stable across the 1.x line: a bundle from any 1.x imports into any other 1.x, and
+  existing commands/flags won't change incompatibly. `cct sync` remains explicitly
+  experimental and is intentionally outside the stability guarantee until it graduates.
+- Bumped `github.com/mattn/go-isatty` 0.0.20 → 0.0.22 (the sole third-party runtime
+  dependency, used only by the interactive CLI for terminal detection).
+
+### Notes
+- The reusable `internal/` core remains standard-library-only.
+
 ## [0.9.0] - 2026-06-23
 
 ### Added
