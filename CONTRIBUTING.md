@@ -43,5 +43,6 @@ These are non-negotiable for this project:
 ## Scope
 
 If you want to add a larger feature (encryption, path mapping, a GUI, etc.),
-please open an issue to discuss it before implementing. See the Roadmap in the
-[README](README.md) for what is planned and what is explicitly out of scope.
+please open an issue to discuss it before implementing. See
+[`docs/roadmap.md`](docs/roadmap.md) for what is planned and what is explicitly
+out of scope.
