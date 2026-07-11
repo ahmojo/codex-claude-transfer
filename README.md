@@ -6,7 +6,7 @@ The command is **`cct`**.
 ![CI](https://github.com/ahmojo/codex-claude-transfer/actions/workflows/ci.yml/badge.svg)
 ![Go](https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go)
 ![License](https://img.shields.io/badge/license-MIT-blue)
-![Status](https://img.shields.io/badge/status-v1.0.0-blue)
+![Status](https://img.shields.io/badge/status-v1.1.0-blue)
 
 > **Unofficial.** Not affiliated with or endorsed by OpenAI or Anthropic.
 > These tools' internals can change at any time and break this tool. Use at your

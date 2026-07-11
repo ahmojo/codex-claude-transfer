@@ -2,6 +2,14 @@
 
 All notable changes to codex-claude-transfer are documented here.
 
+## [1.1.0] - 2026-07-11
+
+### Security / CI
+- Linux CI now requires `age` and `age-keygen` and runs the recipients-file
+  encryption round-trip as a mandatory test. Installation remains best-effort on
+  macOS and Windows so platform package-manager availability does not mask the
+  required Linux encryption gate.
+
 ## [1.0.0] - 2026-06-24
 
 First stable release. No functional changes from 0.9.0 — this release marks an API

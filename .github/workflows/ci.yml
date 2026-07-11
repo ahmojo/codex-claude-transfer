@@ -43,14 +43,17 @@ jobs:
       - name: Vet
         run: go vet ./...
 
-      # Install age so the encryption round-trip tests actually run (they skip
-      # when age/age-keygen are absent). Best-effort: a package mirror hiccup
-      # must not fail CI, so these steps are allowed to fail and the tests then
-      # simply skip the round-trip.
+      # Linux is the required encryption gate. macOS and Windows remain
+      # best-effort coverage because their package-manager mirrors are less
+      # predictable on hosted runners.
       - name: Install age (Linux)
         if: runner.os == 'Linux'
-        continue-on-error: true
-        run: sudo apt-get update && sudo apt-get install -y age
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y age
+          command -v age
+          command -v age-keygen
 
       - name: Install age (macOS)
         if: runner.os == 'macOS'
@@ -61,6 +64,10 @@ jobs:
         if: runner.os == 'Windows'
         continue-on-error: true
         run: choco install age.portable -y
+
+      - name: Verify encryption round trip (Linux)
+        if: runner.os == 'Linux'
+        run: go test ./internal/crypt -run '^TestRoundTripWithRecipientsFile$' -count=1 -v
 
       - name: Test
         run: go test ./...
