@@ -3,7 +3,9 @@ package bundle
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -77,8 +79,122 @@ func planMerge(zr *zip.Reader, item *ImportItem, rel string, result *ImportResul
 	case growthLocalAhead, growthEqual:
 		return ActionSkipAhead, nil
 	default:
-		return ActionConflict, nil
+		// Byte-diverged. Before declaring a conflict, retry the comparison in a
+		// serialization-tolerant (canonical) form: after a cross-platform transfer
+		// the SAME records can differ only in JSON key order or escaping, which a
+		// byte prefix check misreads as divergence (issue #6).
+		return planCanonicalMerge(item, rel, bundlePlain, localPlain)
 	}
+}
+
+// planCanonicalMerge re-runs the append-only analysis comparing records
+// canonically (each JSONL line parsed and re-marshaled with sorted keys) instead
+// of byte-for-byte. This recognizes sessions that are semantically identical, or
+// semantically grown, across machines whose agents serialize the same records
+// differently (key order, string escaping, line endings).
+//
+// It is deliberately conservative: number literals are preserved exactly (so
+// values beyond float64 precision — e.g. nanosecond timestamps — can never
+// collapse into false equality), a line that is not valid JSON falls back to its
+// raw bytes, and any real value difference remains a conflict.
+//
+// On a canonical fast-forward the LOCAL file's existing bytes are preserved
+// verbatim and only the bundle's raw new lines are appended — the local
+// serialization is never rewritten into the bundle's.
+func planCanonicalMerge(item *ImportItem, rel string, bundlePlain, localPlain []byte) (Action, error) {
+	bundleLines, bundleOffsets := splitJSONLLines(bundlePlain)
+	localLines, _ := splitJSONLLines(localPlain)
+
+	common := len(localLines)
+	if len(bundleLines) < common {
+		common = len(bundleLines)
+	}
+	for i := 0; i < common; i++ {
+		if !bytes.Equal(canonicalJSONLLine(localLines[i]), canonicalJSONLLine(bundleLines[i])) {
+			return ActionConflict, nil
+		}
+	}
+	switch {
+	case len(bundleLines) <= len(localLines):
+		// Canonically identical, or the local file is canonically ahead: the
+		// local copy already holds everything the bundle does.
+		return ActionSkipAhead, nil
+	default:
+		// Canonical fast-forward: keep the local bytes, append the bundle's raw
+		// suffix (its lines beyond the shared canonical prefix) verbatim.
+		suffix := bundlePlain[bundleOffsets[len(localLines)]:]
+		merged := make([]byte, 0, len(localPlain)+1+len(suffix))
+		merged = append(merged, localPlain...)
+		if len(merged) > 0 && merged[len(merged)-1] != '\n' {
+			merged = append(merged, '\n')
+		}
+		merged = append(merged, suffix...)
+
+		out := merged
+		if strings.HasSuffix(rel, compressedSessionSuffix) {
+			// mergePlaintext only reports .zst content as comparable when the
+			// zstd tool is available, so recompression here can only fail on a
+			// real tool error — which aborts the import before any write.
+			z, err := zstdcli.Compress(merged)
+			if err != nil {
+				return "", fmt.Errorf("recompress merged %s: %w", rel, err)
+			}
+			out = z
+		}
+		item.content = out
+		item.LinesAdded = len(bundleLines) - len(localLines)
+		return ActionUpdate, nil
+	}
+}
+
+// splitJSONLLines splits b into lines (without their terminators) and records
+// the byte offset at which each line starts, so a caller can slice the original
+// bytes from any line boundary. A trailing line without a final newline counts.
+func splitJSONLLines(b []byte) (lines [][]byte, offsets []int) {
+	start := 0
+	for i := 0; i < len(b); i++ {
+		if b[i] == '\n' {
+			offsets = append(offsets, start)
+			lines = append(lines, b[start:i])
+			start = i + 1
+		}
+	}
+	if start < len(b) {
+		offsets = append(offsets, start)
+		lines = append(lines, b[start:])
+	}
+	return lines, offsets
+}
+
+// canonicalJSONLLine returns a canonical byte form of one JSONL line for
+// comparison: the line parsed as a single JSON value and re-marshaled, which
+// sorts object keys (at every nesting level) and normalizes string escaping and
+// insignificant whitespace. Number literals are preserved exactly via
+// json.Number, so no precision is lost and distinct literals stay distinct. A
+// line that is not exactly one valid JSON value is returned as-is (minus a
+// trailing \r), making the comparison fall back to raw bytes for it.
+func canonicalJSONLLine(line []byte) []byte {
+	line = bytes.TrimSuffix(line, []byte{'\r'})
+	trimmed := bytes.TrimSpace(line)
+	if len(trimmed) == 0 {
+		return line
+	}
+	dec := json.NewDecoder(bytes.NewReader(trimmed))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		return line
+	}
+	// Reject trailing content after the value ("{...}garbage"): not a clean
+	// JSONL record, so compare it raw.
+	if _, err := dec.Token(); err != io.EOF {
+		return line
+	}
+	canon, err := json.Marshal(v)
+	if err != nil {
+		return line
+	}
+	return canon
 }
 
 // mergePlaintext returns the plaintext bytes to compare for a merge: the bundle's

@@ -2,6 +2,27 @@
 
 All notable changes to codex-claude-transfer are documented here.
 
+## [1.1.1] - 2026-07-18
+
+### Fixed
+- **False merge conflicts after a cross-platform transfer** ([#6]). `import
+  --merge` compared session records byte-for-byte, so the SAME records
+  serialized with a different JSON key order (e.g. exported on macOS, imported
+  on WSL/Linux) were misread as divergent — in the reported case 14 of 15
+  sessions came back as conflicts even though 13 were identical and 1 had only
+  grown. When the byte comparison says "diverged", merge now retries with a
+  canonical comparison: each JSONL line is parsed and re-marshaled with sorted
+  keys (normalizing key order, string escaping, and line endings), with number
+  literals preserved exactly so values beyond float64 precision can never
+  collapse into false equality. Canonically identical sessions report as
+  already up to date; a canonically grown session fast-forwards by appending
+  only the bundle's raw new lines — the local file's own serialization is
+  preserved verbatim, and any genuine value difference remains a conflict.
+  Works with `--map-cwd` (the mapping is applied before the comparison) and for
+  compressed `.jsonl.zst` sessions.
+
+[#6]: https://github.com/ahmojo/codex-claude-transfer/issues/6
+
 ## [1.1.0] - 2026-07-11
 
 ### Security / CI

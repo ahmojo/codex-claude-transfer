@@ -56,7 +56,7 @@ Use this page when you need exact commands and flags. For guided workflows, see
 | `--interval <n>` / `--once` | sync daemon | Poll every `<n>` seconds (default 5), or run one discover-and-sync sweep and exit. |
 | `--map-cwd OLD=NEW` | import, sync | Rewrite matching sessions' recorded cwd. Plain `.jsonl` always; `.jsonl.zst` when `zstd` is installed. Repeatable. |
 | `--map-cwd-here` | import, sync | Map the bundle's project to the current directory. Single-project only; cannot combine with `--map-cwd`. |
-| `--merge` | import | Incremental sync. If local content is a prefix of bundle content, append only the new messages. |
+| `--merge` | import | Incremental sync. If the local session is a prefix of the bundle's, append only the new messages. The comparison is serialization-tolerant: records that differ only in JSON key order or escaping (as after a cross-platform transfer) count as equal, and the local file's own serialization is preserved. |
 | `--replace-with-backup` | import | On conflict, back up the local file and overwrite it with the bundle's version. |
 | `--import-as-copy` | import | On conflict, import the bundle's version as a new session, leaving yours untouched. Excludes `--replace-with-backup`. |
 | `--clone <dir>` | import | After importing, clone the bundle's recorded git remote into `<dir>` and check out its commit. |
