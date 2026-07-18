@@ -6,7 +6,7 @@ The command is **`cct`**.
 ![CI](https://github.com/ahmojo/codex-claude-transfer/actions/workflows/ci.yml/badge.svg)
 ![Go](https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go)
 ![License](https://img.shields.io/badge/license-MIT-blue)
-![Status](https://img.shields.io/badge/status-v1.1.1-blue)
+![Status](https://img.shields.io/badge/status-v1.2.0-blue)
 
 > **Unofficial.** Not affiliated with or endorsed by OpenAI or Anthropic.
 > These tools' internals can change at any time and break this tool. Use at your
@@ -95,6 +95,23 @@ cct import ./project.codexbundle
 Use `--tool claude` to export Claude Code sessions. Use `import --to claude` or
 `import --to codex` to translate a session into the other agent. After importing,
 restart the agent so it re-scans the files.
+
+## Compatibility
+
+Codex's and Claude Code's on-disk formats are their own internals and can change
+at any time. This table records what each agent's support covers and the newest
+agent version it was last verified against:
+
+| Agent | Last tested | Supported data | Known gaps |
+| --- | --- | --- | --- |
+| **Codex CLI** | 0.144.0 (2026-07-18) | Sessions (`rollout-*.jsonl`, compressed `.jsonl.zst`), session metadata, git context, inline images | SQLite index is never copied (Codex rebuilds it by re-scanning); `.jsonl.zst` needs the external `zstd` tool for metadata, `--map-cwd`, and merge |
+| **Claude Code** | 2.1.212 (2026-07-18) | Conversations (`projects/<encoded-cwd>/*.jsonl`), tool events, project mapping | `~/.claude.json` config is never touched; sidechains/subagent transcripts transfer as files but are not translated cross-agent |
+| **Cross-agent handoff** (`import --to`) | same versions | Conversation text and project context, translated between the two formats | A translation, not a clone: tool calls, command output, runtime state, and provider-specific ids do not carry over byte-for-byte |
+
+If a newer agent version breaks something, please
+[open an issue](https://github.com/ahmojo/codex-claude-transfer/issues) — with
+synthetic session data only, never a real bundle (see
+[SECURITY.md](SECURITY.md)).
 
 ## Docs
 

@@ -2,6 +2,34 @@
 
 All notable changes to codex-claude-transfer are documented here.
 
+## [1.2.0] - 2026-07-18
+
+### Added
+- **Fuzz tests for the canonical merge comparator** (issue [#6] follow-up).
+  Four Go fuzz targets hammer the serialization-tolerant comparison with deeply
+  nested JSON, huge number literals, unusual unicode escapes, mixed CRLF/LF,
+  corrupted trailing lines, very large single lines, and both plain and
+  `.jsonl.zst` paths. The fuzzed invariant: the canonical comparison must never
+  classify two semantically different values as equal, a fast-forward must
+  preserve local bytes verbatim, and merging must be idempotent.
+- **`SECURITY.md`**: supported versions, private vulnerability reporting (now
+  enabled on the GitHub repo), response-time targets, and a hard rule to never
+  attach real bundles or session files to reports.
+- **Compatibility matrix in the README**: last-tested agent versions
+  (Codex CLI 0.144.0, Claude Code 2.1.212), supported data, and known gaps per
+  agent, including cross-agent handoff.
+- **Release provenance.** Releases now ship `SHA256SUMS.txt`, a keyless
+  Sigstore signature over it (`SHA256SUMS.txt.sigstore.json`), an SPDX SBOM,
+  and GitHub artifact attestations for every archive. Verification steps are
+  documented in docs/internals.md ("Verifying a release").
+
+### Dependencies
+- `github.com/mattn/go-isatty` 0.0.22 → 0.0.23 (Dependabot #8).
+- Workflow actions bumped (supersedes Dependabot #1, #3, #4, #5, #7):
+  `actions/checkout` v5 → v7, `actions/setup-go` v6 → v7,
+  `actions/upload-artifact` v4 → v7, `actions/download-artifact` v4 → v8,
+  `softprops/action-gh-release` v2 → v3.
+
 ## [1.1.1] - 2026-07-18
 
 ### Fixed

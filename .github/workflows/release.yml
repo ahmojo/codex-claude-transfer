@@ -10,7 +10,7 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -27,10 +27,10 @@ jobs:
           - { goos: windows, goarch: amd64 }
     steps:
       - name: Check out code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           check-latest: true
@@ -53,7 +53,7 @@ jobs:
           ( cd dist && tar -czf "${name}_${version}_${GOOS}_${GOARCH}.tar.gz" "$(basename "$outdir")" )
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cct_${{ matrix.goos }}_${{ matrix.goarch }}
           path: dist/*.tar.gz
@@ -62,15 +62,62 @@ jobs:
     name: Publish release
     needs: build
     runs-on: ubuntu-latest
+    # Provenance: checksums + SBOM + GitHub artifact attestation + a
+    # Sigstore-signed checksum file, so every release asset is verifiable.
+    # See "Verifying a release" in docs/internals.md.
+    permissions:
+      contents: write      # create the release and upload assets
+      id-token: write      # keyless (OIDC) signing via Sigstore
+      attestations: write  # GitHub artifact attestations
     steps:
+      - name: Check out code
+        uses: actions/checkout@v7
+
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+      - name: Generate SBOM (SPDX)
+        uses: anchore/sbom-action@v0
         with:
-          files: dist/*.tar.gz
+          path: .
+          format: spdx-json
+          output-file: dist/cct_${{ github.ref_name }}_sbom.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Generate SHA256 checksums
+        shell: bash
+        run: |
+          cd dist
+          sha256sum *.tar.gz *_sbom.spdx.json > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign checksum file (Sigstore keyless)
+        shell: bash
+        run: |
+          cosign sign-blob --yes \
+            --bundle dist/SHA256SUMS.txt.sigstore.json \
+            dist/SHA256SUMS.txt
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/SHA256SUMS.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/SHA256SUMS.txt
+            dist/SHA256SUMS.txt.sigstore.json
+            dist/cct_${{ github.ref_name }}_sbom.spdx.json
           generate_release_notes: true

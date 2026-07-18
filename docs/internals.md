@@ -104,6 +104,40 @@ As of **v1.0.0**, `cct` follows [semantic versioning](https://semver.org/):
 - What `cct` reads is the agents' own on-disk formats, which are outside this
   project's control and can change at any time.
 
+## Verifying a release
+
+Releases newer than v1.1.1 ship with provenance material next to the binaries:
+
+- `SHA256SUMS.txt` — SHA-256 checksums of every archive and the SBOM,
+- `SHA256SUMS.txt.sigstore.json` — a keyless [Sigstore](https://www.sigstore.dev/)
+  signature over the checksum file, made by the release workflow's OIDC
+  identity (no long-lived private key exists),
+- `cct_<tag>_sbom.spdx.json` — an SPDX SBOM of the source module,
+- GitHub [artifact attestations](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations)
+  binding each archive to the exact workflow run that built it.
+
+To verify a download:
+
+```bash
+# 1. Checksums
+sha256sum -c SHA256SUMS.txt --ignore-missing
+
+# 2. Signature on the checksum file (requires cosign)
+cosign verify-blob \
+  --bundle SHA256SUMS.txt.sigstore.json \
+  --certificate-identity-regexp '^https://github.com/ahmojo/codex-claude-transfer/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  SHA256SUMS.txt
+
+# 3. Build provenance (requires the GitHub CLI)
+gh attestation verify cct_<tag>_linux_amd64.tar.gz \
+  --repo ahmojo/codex-claude-transfer
+```
+
+Step 1 alone proves integrity; steps 2 and 3 additionally prove the assets were
+built by this repository's release workflow on GitHub Actions, not on someone's
+machine.
+
 ## Claude Code research
 
 Claude Code support was verified empirically against a live install. The storage
