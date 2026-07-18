@@ -4,7 +4,7 @@ go 1.23.0
 
 require (
 	github.com/charmbracelet/huh v1.0.0
-	github.com/mattn/go-isatty v0.0.22
+	github.com/mattn/go-isatty v0.0.23
 )
 
 require (
