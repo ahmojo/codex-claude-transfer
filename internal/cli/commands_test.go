@@ -506,7 +506,7 @@ func TestRunImportSelectSession(t *testing.T) {
 	if !strings.Contains(out.String(), "New sessions: 1") {
 		t.Errorf("expected 1 new session, output:\n%s", out.String())
 	}
-	if !strings.Contains(out.String(), "Skipped (not selected by --session): 1") {
+	if !strings.Contains(out.String(), "Skipped (excluded by filter): 1") {
 		t.Errorf("expected 1 deselected, output:\n%s", out.String())
 	}
 	// Only id1's file should exist in the destination.

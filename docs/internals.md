@@ -64,6 +64,11 @@ The full model lives in [safety.md](safety.md). In short:
 - Default import is byte-for-byte. Content changes are opt-in and narrow:
   `--map-cwd` changes the `cwd` field, and `--import-as-copy` changes the `id`
   field.
+- Every `cct import` records a small journal in cct's own config directory (never
+  in the agent home). `cct undo` reverses the most recent import: it deletes the
+  files that import created and restores the backups it made, but only for files
+  that still hash to exactly what the import wrote — anything edited afterward is
+  left untouched and reported as skipped.
 
 A `.codexbundle` can contain prompts, code, command output, file paths, and
 accidentally printed secrets. Treat it like shell history plus source context.

@@ -212,6 +212,68 @@ func printImportJSON(w io.Writer, path string, res bundle.ImportResult) {
 	})
 }
 
+type diffChangeJSON struct {
+	ThreadID   string `json:"thread_id,omitempty"`
+	Preview    string `json:"preview,omitempty"`
+	BundlePath string `json:"bundle_path"`
+	Change     string `json:"change"` // "new", "grow", "conflict"
+	LinesAdded int    `json:"lines_added,omitempty"`
+}
+
+type diffJSON struct {
+	Bundle           string           `json:"bundle"`
+	SessionsInBundle int              `json:"sessions_in_bundle"`
+	New              int              `json:"new"`
+	Grow             int              `json:"grow"`
+	Identical        int              `json:"identical"`
+	Ahead            int              `json:"ahead"`
+	Conflicts        int              `json:"conflicts"`
+	Filtered         int              `json:"filtered,omitempty"`
+	Changes          []diffChangeJSON `json:"changes"`
+	Warnings         []string         `json:"warnings,omitempty"`
+}
+
+func printDiffJSON(w io.Writer, path string, res bundle.ImportResult) {
+	byPath := map[string]bundle.ManifestSession{}
+	for _, ms := range res.Manifest.Sessions {
+		byPath[ms.BundlePath] = ms
+	}
+	changes := make([]diffChangeJSON, 0)
+	for _, it := range res.Items {
+		var change string
+		switch it.Action {
+		case bundle.ActionImport:
+			change = "new"
+		case bundle.ActionUpdate:
+			change = "grow"
+		case bundle.ActionConflict:
+			change = "conflict"
+		default:
+			continue
+		}
+		ms := byPath[it.BundlePath]
+		changes = append(changes, diffChangeJSON{
+			ThreadID:   ms.ThreadID,
+			Preview:    ms.Preview,
+			BundlePath: it.BundlePath,
+			Change:     change,
+			LinesAdded: it.LinesAdded,
+		})
+	}
+	writeJSON(w, diffJSON{
+		Bundle:           path,
+		SessionsInBundle: len(res.Manifest.Sessions),
+		New:              res.Imported,
+		Grow:             res.Updated,
+		Identical:        res.SkippedIdentical,
+		Ahead:            res.AlreadyAhead,
+		Conflicts:        res.Conflicts,
+		Filtered:         res.SkippedDeselected,
+		Changes:          changes,
+		Warnings:         res.Warnings,
+	})
+}
+
 type syncJSON struct {
 	PeerHost     string `json:"peer_host"`
 	DryRun       bool   `json:"dry_run"`

@@ -444,7 +444,7 @@ func printImport(w io.Writer, kind agent.Kind, path string, res bundle.ImportRes
 		fmt.Fprintf(w, "Imported as new copies: %d\n", res.ImportedCopies)
 	}
 	if res.SkippedDeselected > 0 {
-		fmt.Fprintf(w, "Skipped (not selected by --session): %d\n", res.SkippedDeselected)
+		fmt.Fprintf(w, "Skipped (excluded by filter): %d\n", res.SkippedDeselected)
 	}
 	if res.SkippedOther > 0 {
 		fmt.Fprintf(w, "Other skipped (archived/non-session): %d\n", res.SkippedOther)

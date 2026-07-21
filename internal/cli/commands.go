@@ -69,6 +69,10 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runInspect(rest, stdout, stderr)
 	case "import":
 		return runImport(rest, stdout, stderr)
+	case "diff":
+		return runDiff(rest, stdout, stderr)
+	case "undo":
+		return runUndo(rest, stdout, stderr)
 	case "repair-times":
 		return runRepairTimes(rest, stdout, stderr)
 	case "sync":
@@ -137,6 +141,7 @@ type commonFlags struct {
 	interval        int
 	port            int
 	noBrowser       bool
+	list            bool
 	positional      []string
 }
 
@@ -340,6 +345,8 @@ func parseFlags(args []string) (commonFlags, error) {
 			f.jsonOut = true
 		case arg == "--no-browser":
 			f.noBrowser = true
+		case arg == "--list":
+			f.list = true
 		case arg == "--port":
 			val, err := takeValue(args, &i, "--port")
 			if err != nil {
@@ -1118,6 +1125,15 @@ func runImport(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
+	var since time.Time
+	if f.since != "" {
+		since, err = parseSince(f.since)
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 2
+		}
+	}
+
 	if f.mapCWDHere && len(f.mapCWD) > 0 {
 		fmt.Fprintln(stderr, "error: --map-cwd and --map-cwd-here are mutually exclusive (use one or the other)")
 		return 2
@@ -1157,20 +1173,29 @@ func runImport(args []string, stdout, stderr io.Writer) int {
 	}
 
 	res, err := bundle.Import(home, bundle.ImportOptions{
-		BundlePath:        bundlePath,
-		DryRun:            f.dryRun,
-		ProjectPath:       absProject,
-		MapCWD:            mappings,
-		MapCWDHere:        f.mapCWDHere,
-		HereDir:           hereDir,
-		ReplaceWithBackup: f.replaceBackup,
-		ImportAsCopy:      f.importAsCopy,
-		Merge:             f.merge,
-		SessionIDs:        f.sessions,
+		BundlePath:         bundlePath,
+		DryRun:             f.dryRun,
+		ProjectPath:        absProject,
+		ProjectFilter:      absProject != "",
+		Since:              since,
+		Match:              f.match,
+		MatchRegex:         f.regex,
+		MatchCaseSensitive: f.caseSensitive,
+		MapCWD:             mappings,
+		MapCWDHere:         f.mapCWDHere,
+		HereDir:            hereDir,
+		ReplaceWithBackup:  f.replaceBackup,
+		ImportAsCopy:       f.importAsCopy,
+		Merge:              f.merge,
+		SessionIDs:         f.sessions,
+		RecordUndo:         !f.dryRun,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "error: import failed: %v\n", err)
 		return 1
+	}
+	if !f.dryRun {
+		recordUndoJournal(f, kind, home, f.positional[0], res, stderr)
 	}
 	if f.jsonOut {
 		printImportJSON(stdout, f.positional[0], res)
@@ -1497,7 +1522,12 @@ Commands:
              export refuses to write a bundle that contains a likely secret;
              use --redact or --allow-secrets)
   inspect   Show a bundle's manifest and contents, read-only (no extraction)
-  import    Import a .codexbundle into your Codex home (never overwrites)
+  diff      Preview what importing a bundle would do (new / grow / conflict),
+            read-only — nothing is written
+  import    Import a .codexbundle into your Codex home (never overwrites).
+            Filter which sessions with --session/--project/--since/--match
+  undo      Reverse the most recent import (delete created files, restore
+            backups); --list shows recent imports, --dry-run previews
   repair-times  Reset imported session files' modification time to their real
             last-activity time, so the agent stops re-parsing them on every open
             (a one-time fix; only changes mtimes, never content or the index)
@@ -1530,15 +1560,20 @@ Flags:
                         port chosen automatically)
   --no-browser          app: do not auto-open the browser; just print the URL
   --project <path>      export: filter sessions by recorded cwd
-                        import: warn on cwd mismatch (never rewrites paths)
+                        import/diff: import only sessions whose recorded cwd is
+                        <path> (pull one project out of a multi-project bundle)
   --all                 export: include every session (no cwd filter);
                         mutually exclusive with --project
   --session <id>        export: export only the session with this thread id
                         (a unique prefix is enough); ignores cwd filtering
-                        import: import only the session(s) with this thread id
-                        (a unique prefix is enough); repeatable to pick several
-  --since <when>        export: only sessions updated at/after <when>, where
-                        <when> is a date (YYYY-MM-DD) or a duration (7d, 48h, 90m)
+                        import/diff: act only on the session(s) with this thread
+                        id (a unique prefix is enough); repeatable to pick several
+  --since <when>        export/import/diff: only sessions updated at/after <when>,
+                        where <when> is a date (YYYY-MM-DD) or a duration
+                        (7d, 48h, 90m). On import/diff it filters the bundle
+  --match <q>           export/import/diff: only sessions whose conversation text
+                        matches <q> (with --regex/--case-sensitive). On import/diff
+                        it filters the bundle; .jsonl.zst sessions are skipped
   --with-git            export: also record the project's git remote/branch/
                         commit (and dirty/unpushed status) in the bundle, even
                         with --all or --session
@@ -1637,8 +1672,14 @@ Examples:
   cct export --project . --since 2026-06-01
   cct export --session 9f3c1a2b     # one session by thread-id prefix
   cct inspect ./my-project.codexbundle
+  cct diff ./my-project.codexbundle       # preview: new / grow / conflict (read-only)
   cct import ./my-project.codexbundle --dry-run
   cct import ./my-project.codexbundle
+  cct import ./big.codexbundle --project . # import only THIS project's sessions
+  cct import ./big.codexbundle --since 7d  # import only recently-updated sessions
+  cct import ./big.codexbundle --match "auth"   # import only sessions about a topic
+  cct undo                                 # reverse the most recent import
+  cct undo --dry-run                       # …preview what undo would do first
   cct import ./my-project.codexbundle --merge   # append new messages to grown sessions
   cct import ./my-project.codexbundle --map-cwd "/old/path=/new/path"
   cct import ./my-project.codexbundle --map-cwd-here   # group under the current folder

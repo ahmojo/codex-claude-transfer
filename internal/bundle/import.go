@@ -15,6 +15,7 @@ import (
 	"github.com/ahmojo/codex-claude-transfer/internal/agent"
 	"github.com/ahmojo/codex-claude-transfer/internal/codexhome"
 	"github.com/ahmojo/codex-claude-transfer/internal/safety"
+	"github.com/ahmojo/codex-claude-transfer/internal/search"
 	"github.com/ahmojo/codex-claude-transfer/internal/zstdcli"
 )
 
@@ -31,7 +32,7 @@ const (
 	ActionSkipAhead      Action = "skip-ahead"       // --merge: bundle is a prefix of the local file; local already current
 	ActionSkipArchived   Action = "skip-archived"    // archived_sessions entry; not imported in v0.1
 	ActionSkipNonSession Action = "skip-non-session" // unexpected non-session file
-	ActionSkipDeselected Action = "skip-deselected"  // not among the --session ids requested for import
+	ActionSkipDeselected Action = "skip-deselected"  // excluded by a selection filter (--session/--project/--since/--match)
 )
 
 // ImportItem is the plan/outcome for a single bundle entry.
@@ -91,6 +92,28 @@ type ImportOptions struct {
 	// other session in the bundle is skipped (ActionSkipDeselected). An id that
 	// matches no session in the bundle is an error (nothing is written).
 	SessionIDs []string
+	// ProjectFilter restricts the import to bundle sessions whose recorded cwd
+	// matches ProjectPath. It turns ProjectPath from an advisory cwd-mismatch
+	// check into a selection filter, so a project's sessions can be pulled out of
+	// a bundle that spans several. When false, ProjectPath only drives the
+	// (advisory) cwd-mismatch warnings, as before.
+	ProjectFilter bool
+	// Since, when non-zero, restricts the import to bundle sessions updated at or
+	// after this instant (by the manifest's recorded UpdatedAt).
+	Since time.Time
+	// Match, when non-empty, restricts the import to bundle sessions whose
+	// conversation text matches this query. Regex/case-sensitivity follow the two
+	// fields below. Compressed (.jsonl.zst) sessions cannot be searched and are
+	// excluded when Match is set.
+	Match              string
+	MatchRegex         bool
+	MatchCaseSensitive bool
+	// RecordUndo makes the import capture what it needs to be reversed later by
+	// `cct undo`: for an in-place --merge update it saves a backup of the original
+	// file (set on ImportItem.BackupPath) before appending. New files and
+	// --replace-with-backup already carry enough to reverse. Ambient sync leaves
+	// this off so repeated merges do not litter backups.
+	RecordUndo bool
 	// ImportAsCopy turns conflicts into a brand-new session: the bundle's
 	// version is assigned a fresh session id and written under a new rollout
 	// filename, so it coexists with the diverged local session rather than being
@@ -227,12 +250,14 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 		mappings = m
 	}
 
-	// Resolve a --session filter (if any) to the exact set of bundle paths it
-	// selects, erroring before any write if a requested id matches nothing.
-	selectedPaths, err := resolveSelectedPaths(manifest, opts.SessionIDs)
+	// Resolve the selection filters (--session/--project/--since/--match) to the
+	// exact set of bundle paths to import, erroring before any write if the active
+	// filters select nothing. nil means "no filter — import everything".
+	selectedPaths, filterWarns, err := resolveImportSelection(&zr.Reader, manifest, opts)
 	if err != nil {
 		return result, err
 	}
+	result.Warnings = append(result.Warnings, filterWarns...)
 
 	for _, f := range zr.File {
 		if f.Name == ManifestName || f.Name == ChecksumsName {
@@ -439,6 +464,17 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 			}
 			item.BackupPath = backup
 			result.Warnings = append(result.Warnings, fmt.Sprintf("%s: backed up local file to %s", item.BundlePath, backup))
+		}
+		// A --merge update rewrites the file in place (append-only). It normally
+		// leaves no backup so repeated ambient syncs stay clean, but when undo
+		// recording is on (an explicit `cct import`), save the pre-append original
+		// so `cct undo` can restore it exactly.
+		if item.Action == ActionUpdate && opts.RecordUndo {
+			backup, err := backupFile(item.DestPath)
+			if err != nil {
+				return result, fmt.Errorf("back up %s before updating: %w", item.BundlePath, err)
+			}
+			item.BackupPath = backup
 		}
 		if item.content != nil {
 			if err := safety.CopyAtomic(item.DestPath, bytes.NewReader(item.content)); err != nil {
@@ -812,6 +848,102 @@ func readMeta(zr *zip.Reader) (Manifest, Checksums, error) {
 		return manifest, checksums, fmt.Errorf("bundle is missing %s", ChecksumsName)
 	}
 	return manifest, checksums, nil
+}
+
+// resolveImportSelection computes the set of bundle paths to import after
+// applying every active selection filter (--session, --project, --since,
+// --match) with AND semantics, mirroring the export-side filters so a slice of a
+// large bundle can be pulled out on import. It returns:
+//
+//   - (nil, nil, nil) when no filter is active — the caller imports everything;
+//   - (set, warnings, nil) when at least one filter is active;
+//   - (_, _, err) when a --session id matches nothing (typo guard), or the
+//     combined filters select no session at all.
+//
+// --match reads each candidate's conversation text from the bundle; compressed
+// (.jsonl.zst) sessions cannot be searched and are excluded with a warning.
+func resolveImportSelection(zr *zip.Reader, manifest Manifest, opts ImportOptions) (map[string]bool, []string, error) {
+	projectFilter := opts.ProjectFilter && opts.ProjectPath != ""
+	sinceFilter := !opts.Since.IsZero()
+	matchFilter := opts.Match != ""
+	if len(opts.SessionIDs) == 0 && !projectFilter && !sinceFilter && !matchFilter {
+		return nil, nil, nil
+	}
+
+	// Start from the --session selection (or all sessions when no id was given).
+	selected, err := resolveSelectedPaths(manifest, opts.SessionIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+	if selected == nil {
+		selected = map[string]bool{}
+		for _, ms := range manifest.Sessions {
+			selected[ms.BundlePath] = true
+		}
+	}
+
+	byPath := make(map[string]ManifestSession, len(manifest.Sessions))
+	for _, ms := range manifest.Sessions {
+		byPath[ms.BundlePath] = ms
+	}
+
+	var warnings []string
+	var q search.Query
+	if matchFilter {
+		q = search.Query{Text: opts.Match, Regex: opts.MatchRegex, CaseSensitive: opts.MatchCaseSensitive}
+	}
+	compressedSkipped := 0
+	for p := range selected {
+		ms := byPath[p]
+		if projectFilter && (ms.OriginalCWD == "" || !pathEqual(ms.OriginalCWD, opts.ProjectPath)) {
+			delete(selected, p)
+			continue
+		}
+		if sinceFilter && manifestBeforeSince(ms, opts.Since) {
+			delete(selected, p)
+			continue
+		}
+		if matchFilter {
+			if ms.Compressed || strings.HasSuffix(p, compressedSessionSuffix) {
+				compressedSkipped++
+				delete(selected, p)
+				continue
+			}
+			data, rerr := readEntryBytes(zr, p)
+			if rerr != nil {
+				delete(selected, p)
+				continue
+			}
+			ok, merr := search.Matches(data, q)
+			if merr != nil {
+				return nil, nil, fmt.Errorf("--match: %w", merr)
+			}
+			if !ok {
+				delete(selected, p)
+			}
+		}
+	}
+	if compressedSkipped > 0 {
+		warnings = append(warnings, fmt.Sprintf("%d compressed session(s) skipped by --match (searching .jsonl.zst is not supported)", compressedSkipped))
+	}
+	if len(selected) == 0 {
+		return nil, nil, fmt.Errorf("no session in the bundle matched the given filters (--project/--since/--match/--session)")
+	}
+	return selected, warnings, nil
+}
+
+// manifestBeforeSince reports whether a manifest session's recorded update time
+// is before the cutoff. A session whose time cannot be parsed is treated as NOT
+// before the cutoff (kept), so a malformed timestamp never silently drops it.
+func manifestBeforeSince(ms ManifestSession, since time.Time) bool {
+	if ms.UpdatedAt == "" {
+		return false
+	}
+	t, err := time.Parse(time.RFC3339, ms.UpdatedAt)
+	if err != nil {
+		return false
+	}
+	return t.Before(since)
 }
 
 // resolveSelectedPaths maps a list of requested --session ids to the set of

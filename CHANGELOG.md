@@ -2,6 +2,30 @@
 
 All notable changes to codex-claude-transfer are documented here.
 
+## [1.3.0] - 2026-07-22
+
+### Added
+- **`cct undo`** reverses the most recent import. Every `cct import` now records a
+  small journal in cct's own config directory (never in an agent home) listing the
+  files it created and the backups it made. `cct undo` deletes the created files
+  and restores the backups — but only for files that still hash to exactly what
+  the import wrote, so anything edited afterward is left untouched and reported as
+  skipped. `--dry-run` previews the reversal and `--list` shows recent imports. A
+  `--merge` update is reversible too: the pre-append original is backed up first.
+- **Selective import.** `cct import` now honors `--project`, `--since`, and
+  `--match` in addition to `--session`, so you can pull just a slice out of a large
+  bundle (one project, only recent sessions, or only sessions matching a query).
+  Filters combine with AND semantics and mirror the export-side filters.
+- **`cct diff`** previews what importing a bundle would do — new, would-grow (with
+  line counts), already-present, and conflicting sessions — completely read-only,
+  using the same `--merge` analysis and the same selection/remap flags as import.
+  Supports `--json`.
+
+### Changed
+- `import --project <path>` now **filters** the import to that project's sessions
+  rather than only warning on a cwd mismatch. When importing everything is what you
+  want, omit `--project`.
+
 ## [1.2.0] - 2026-07-18
 
 ### Added

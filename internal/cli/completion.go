@@ -27,7 +27,9 @@ var completionCommands = []completionCommand{
 	{"config", "Save user defaults (tool, homes, port)"},
 	{"export", "Export sessions into a .codexbundle"},
 	{"inspect", "Show a bundle's contents (read-only)"},
+	{"diff", "Preview what importing a bundle would do (read-only)"},
 	{"import", "Import a bundle into the agent's home"},
+	{"undo", "Reverse the most recent import"},
 	{"repair-times", "Fix imported sessions' modification times"},
 	{"sync", "Experimental device-to-device LAN sync"},
 	{"ui", "Interactive guided menu"},
@@ -46,7 +48,7 @@ var completionFlags = []string{
 	"--match", "--format", "--redact", "--allow-secrets", "--regex",
 	"--case-sensitive", "--run", "--remember", "--i-understand", "--allow-public",
 	"--pull-only", "--push-only", "--code", "--once", "--interval",
-	"--version", "--help",
+	"--list", "--version", "--help",
 }
 
 // runCompletion prints a completion script for the requested shell.

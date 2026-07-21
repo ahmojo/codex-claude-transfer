@@ -7,6 +7,7 @@ package search
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -98,6 +99,19 @@ func SessionMatches(path string, q Query) (bool, error) {
 	return hits > 0, err
 }
 
+// Matches reports whether an in-memory transcript (raw .jsonl bytes) matches the
+// query. It applies the same content extraction as file search, so callers that
+// already hold the bytes — e.g. import --match scanning a bundle entry — need not
+// write a temp file. Compressed (.jsonl.zst) content must be decompressed first.
+func Matches(data []byte, q Query) (bool, error) {
+	m, err := newMatcher(q)
+	if err != nil {
+		return false, err
+	}
+	hits, _, err := scanReader(bufio.NewReader(bytes.NewReader(data)), m)
+	return hits > 0, err
+}
+
 // scanFile reads a transcript, extracts readable text per line, and counts hits.
 func scanFile(path string, m matcher) (hits int, snippet string, err error) {
 	f, err := os.Open(path)
@@ -105,7 +119,11 @@ func scanFile(path string, m matcher) (hits int, snippet string, err error) {
 		return 0, "", err
 	}
 	defer f.Close()
-	r := bufio.NewReader(f)
+	return scanReader(bufio.NewReader(f), m)
+}
+
+// scanReader extracts readable text per line from r and counts hits.
+func scanReader(r *bufio.Reader, m matcher) (hits int, snippet string, err error) {
 	for {
 		line, readErr := readLine(r, maxLineBytes)
 		if len(line) > 0 {

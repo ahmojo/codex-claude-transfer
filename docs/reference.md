@@ -20,7 +20,9 @@ Use this page when you need exact commands and flags. For guided workflows, see
 | `cct config list\|get\|set\|path` | Save defaults such as tool, homes, and port. Explicit flags always win. |
 | `cct export [--project <path> \| --all \| --session <id>]` | Package matching sessions into a `.codexbundle`, or render readable Markdown/HTML with `--format`. By default it refuses likely secrets unless `--redact` or `--allow-secrets` is set. |
 | `cct inspect <bundle>` | Show a bundle's manifest and contents, read-only, and flag missing recorded project folders. |
-| `cct import <bundle>` | Import session files into the matching agent home, or translate across agents with `--to`. Verifies checksums and never overwrites by default. |
+| `cct diff <bundle>` | Preview what importing the bundle would do — new, would-grow (with line counts), already-present, and conflicting sessions — read-only, nothing is written. Honors the same selection/remap flags as `import`. |
+| `cct import <bundle>` | Import session files into the matching agent home, or translate across agents with `--to`. Verifies checksums and never overwrites by default. Filter which sessions to import with `--session`, `--project`, `--since`, or `--match`. |
+| `cct undo [--list] [--dry-run]` | Reverse the most recent import: delete the files it created and restore the backups it made. Only touches files that still match what the import wrote, so later edits are never lost. `--list` shows recent imports; `--dry-run` previews. |
 | `cct repair-times` | Fix modification times for sessions imported by older versions. Supports `--dry-run`; changes mtimes only. |
 | `cct sync serve` / `cct sync connect [host:port]` / `cct sync daemon` | Experimental LAN sync. Peer-to-peer, no server/cloud, paired by one-time code or remembered devices, requires `--i-understand`. |
 | `cct version` | Print the version. Also supports `--version`. |
@@ -34,20 +36,21 @@ Use this page when you need exact commands and flags. For guided workflows, see
 | `--tool <codex\|claude>` | all | Which agent to act on. Default: auto-detect when possible. On import, the bundle's recorded tool wins. |
 | `--codex-home <path>` | all | Use a specific Codex home instead of the default. Also honors `$CODEX_HOME`. |
 | `--claude-home <path>` | all | Use a specific Claude Code home instead of `~/.claude`. Also honors `$CLAUDE_HOME`. |
-| `--project <path>` | export, import | Export: filter sessions by recorded cwd. Import: warn on cwd mismatch. |
+| `--project <path>` | export, import, diff | Export: filter sessions by recorded cwd. Import/diff: import only the sessions whose recorded cwd is `<path>` — pull one project out of a multi-project bundle. |
 | `--all` | export | Export every session regardless of cwd. Mutually exclusive with `--project`. |
-| `--session <id>` | export, import | Export exactly one session by thread id prefix. Import only matching sessions. Repeatable on import. |
-| `--since <when>` | export | Only sessions updated at or after a date (`YYYY-MM-DD`) or duration (`7d`, `48h`, `90m`). |
+| `--session <id>` | export, import, diff | Export exactly one session by thread id prefix. Import/diff: act only on matching sessions. Repeatable on import/diff. |
+| `--since <when>` | export, import, diff | Only sessions updated at or after a date (`YYYY-MM-DD`) or duration (`7d`, `48h`, `90m`). On import/diff it filters which of the bundle's sessions are considered. |
 | `--with-git` | export | Record the project's git remote, branch, commit, and dirty/unpushed status. |
 | `--git-push` | export | Opt-in. Push the current branch to its own remote first so the recorded commit is fetchable. Never force-pushes. |
 | `--strip-images` | export | Replace inline base64 images with placeholders to shrink the bundle. Lossy; needs `zstd` for `.jsonl.zst`. |
 | `--output`, `-o <path>` | export | Bundle output path. Defaults are derived from `--project`, `--all`, or `--session`. |
 | `--include-archived` | list, export | Include archived sessions. |
-| `--json` | doctor, list, inspect, export, import, sync | Print machine-readable JSON instead of text. |
-| `--dry-run` | import, sync | Validate and report only; write nothing. |
+| `--json` | doctor, list, inspect, export, import, diff, sync | Print machine-readable JSON instead of text. |
+| `--dry-run` | import, undo, sync | Validate and report only; write nothing. |
+| `--list` | undo | Show recent imports (newest first) instead of reversing one. |
 | `--to <codex\|claude>` | import | Cross-agent handoff: translate bundle sessions into the other agent's format. |
-| `--regex` / `--case-sensitive` | search, export | Treat the query (`search` or `export --match`) as regex / match case-sensitively. |
-| `--match <query>` | export | Bundle only sessions whose conversation text matches the query. |
+| `--regex` / `--case-sensitive` | search, export, import, diff | Treat the query (`--match`) as regex / match case-sensitively. |
+| `--match <query>` | export, import, diff | Keep only sessions whose conversation text matches the query. On import/diff it filters the bundle; compressed `.jsonl.zst` sessions are skipped. |
 | `--format md\|html` | export | Render selected sessions as readable Markdown or self-contained HTML instead of a re-importable bundle. |
 | `--redact` | export, sync | Replace likely secrets with placeholders. Lossy and opt-in. |
 | `--allow-secrets` | export, sync | Proceed even though a likely secret was detected. |

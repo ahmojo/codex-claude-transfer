@@ -116,16 +116,52 @@ cct import ./project.codexbundle.age --identity ~/.age/key.txt
 
 Passphrase encryption is also available with `--passphrase`.
 
-### Export one session or a subset
+### Export or import only a subset
 
-Use a thread-id prefix to export or import only selected sessions:
+Use a thread-id prefix to export or import a single session, or pull a slice out
+of a large bundle on import with the same filters `export` uses:
 
 ```bash
 cct export --session <id>
-cct import ./project.codexbundle --session <id>
+cct import ./big.codexbundle --session <id>     # one session (repeatable)
+cct import ./big.codexbundle --project .         # only this project's sessions
+cct import ./big.codexbundle --since 7d          # only recently-updated sessions
+cct import ./big.codexbundle --match "auth"      # only sessions about a topic
 ```
 
-`--session` is repeatable on import.
+The filters combine (AND). `--match` reads conversation text, so compressed
+`.jsonl.zst` sessions are skipped by it.
+
+### Preview an import
+
+`cct diff` shows exactly what an import would do — which sessions are new, which
+would grow (and by how many lines), which are already present, and which would
+conflict — without writing anything:
+
+```bash
+cct diff ./project.codexbundle
+#   new        3   would be imported
+#   grow       2   would append new messages
+#   identical  9   already present, unchanged
+#   conflict   1   changed on both sides
+```
+
+It accepts the same selection and remap flags as `import`, so the preview matches
+the command you are about to run.
+
+### Undo the last import
+
+`import` is the only command that writes files, so it records a small journal you
+can reverse:
+
+```bash
+cct undo --dry-run    # preview what would be undone
+cct undo              # delete the files this import created, restore its backups
+cct undo --list       # show recent imports
+```
+
+Undo only removes or restores a file that still matches what the import wrote, so
+anything you edited afterward is never lost — it is reported as skipped instead.
 
 ### Incremental sync
 
