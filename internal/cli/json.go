@@ -149,24 +149,26 @@ func printInspectJSON(w io.Writer, path string, res bundle.InspectResult) {
 }
 
 type exportJSON struct {
-	Bundle            string   `json:"bundle"`
-	Included          int      `json:"included"`
-	TotalScanned      int      `json:"total_scanned"`
-	CompressedSkipped int      `json:"compressed_skipped"`
-	ImagesStripped    int      `json:"images_stripped"`
-	BytesSaved        int64    `json:"bytes_saved"`
-	Warnings          []string `json:"warnings,omitempty"`
+	Bundle                 string   `json:"bundle"`
+	Included               int      `json:"included"`
+	TotalScanned           int      `json:"total_scanned"`
+	CompressedSkipped      int      `json:"compressed_skipped"`
+	MatchCompressedSkipped int      `json:"match_compressed_skipped,omitempty"`
+	ImagesStripped         int      `json:"images_stripped"`
+	BytesSaved             int64    `json:"bytes_saved"`
+	Warnings               []string `json:"warnings,omitempty"`
 }
 
 func printExportJSON(w io.Writer, res bundle.ExportResult) {
 	writeJSON(w, exportJSON{
-		Bundle:            res.BundlePath,
-		Included:          res.IncludedCount,
-		TotalScanned:      res.TotalScanned,
-		CompressedSkipped: res.CompressedSkipped,
-		ImagesStripped:    res.ImagesStripped,
-		BytesSaved:        res.BytesSaved,
-		Warnings:          res.Warnings,
+		Bundle:                 res.BundlePath,
+		Included:               res.IncludedCount,
+		TotalScanned:           res.TotalScanned,
+		CompressedSkipped:      res.CompressedSkipped,
+		MatchCompressedSkipped: res.MatchCompressedSkipped,
+		ImagesStripped:         res.ImagesStripped,
+		BytesSaved:             res.BytesSaved,
+		Warnings:               res.Warnings,
 	})
 }
 
@@ -298,7 +300,7 @@ type searchMatchJSON struct {
 	Path     string `json:"path"`
 }
 
-func printSearchJSON(w io.Writer, matches []search.Match) {
+func printSearchJSON(w io.Writer, matches []search.Match, compressedSkipped int) {
 	out := make([]searchMatchJSON, 0, len(matches))
 	for _, m := range matches {
 		s := m.Session
@@ -312,10 +314,10 @@ func printSearchJSON(w io.Writer, matches []search.Match) {
 			Path:     s.Path,
 		})
 	}
-	writeJSON(w, map[string]any{"matches": out, "count": len(out)})
+	writeJSON(w, map[string]any{"matches": out, "count": len(out), "compressed_skipped": compressedSkipped})
 }
 
-func printScanJSON(w io.Writer, hits []secretHit) {
+func printScanJSON(w io.Writer, hits []secretHit, compressedSkipped int) {
 	type findingJSON struct {
 		Type   string `json:"type"`
 		Masked string `json:"masked"`
@@ -336,7 +338,7 @@ func printScanJSON(w io.Writer, hits []secretHit) {
 		total += len(fs)
 		out = append(out, hitJSON{ThreadID: h.Session.ThreadID, CWD: h.Session.CWD, Path: h.Session.Path, Findings: fs})
 	}
-	writeJSON(w, map[string]any{"sessions": out, "session_count": len(out), "secret_count": total})
+	writeJSON(w, map[string]any{"sessions": out, "session_count": len(out), "secret_count": total, "compressed_skipped": compressedSkipped})
 }
 
 func printStatsJSON(w io.Writer, kind agent.Kind, s stats.Stats) {

@@ -109,6 +109,49 @@ func TestRunUndoKeepsEditedFile(t *testing.T) {
 	}
 }
 
+// TestRunUndoRefusesCorruptJournal confirms the end-to-end invariant: if the
+// most recent import journal is corrupted, `cct undo` errors and changes nothing.
+func TestRunUndoRefusesCorruptJournal(t *testing.T) {
+	cfg := t.TempDir()
+	t.Setenv("CCT_CONFIG_DIR", cfg)
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "src")
+	dst := filepath.Join(tmp, "dst")
+	id := "aaaa1111-2222-3333-4444-555566667777"
+	writeSessionCWD(t, src, id, "/proj/a")
+	bundle := filepath.Join(tmp, "p.codexbundle")
+	exportAllFrom(t, src, bundle)
+
+	var out, errOut bytes.Buffer
+	if code := Run([]string{"import", bundle, "--codex-home", dst}, &out, &errOut); code != 0 {
+		t.Fatalf("import exit=%d stderr=%s", code, errOut.String())
+	}
+	dest := filepath.Join(dst, "sessions", "2026", "06", "13", "rollout-2026-06-13T18-22-01-"+id+".jsonl")
+
+	// Corrupt the journal on disk (truncate to invalid JSON).
+	journals, _ := filepath.Glob(filepath.Join(cfg, "undo", "*.json"))
+	if len(journals) != 1 {
+		t.Fatalf("expected 1 journal, found %d", len(journals))
+	}
+	if err := os.WriteFile(journals[0], []byte("{corrupt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out.Reset()
+	errOut.Reset()
+	code := Run([]string{"undo", "--codex-home", dst}, &out, &errOut)
+	if code == 0 {
+		t.Fatalf("undo must fail on a corrupt journal; got exit 0\n%s", out.String())
+	}
+	if !strings.Contains(errOut.String(), "refusing to touch anything") {
+		t.Errorf("expected a refuse message, got: %s", errOut.String())
+	}
+	// The imported file must still be present (nothing was undone).
+	if _, err := os.Stat(dest); err != nil {
+		t.Errorf("corrupt-journal undo removed the imported file: %v", err)
+	}
+}
+
 // TestRunUndoDryRun previews the reversal without changing anything.
 func TestRunUndoDryRun(t *testing.T) {
 	t.Setenv("CCT_CONFIG_DIR", t.TempDir())

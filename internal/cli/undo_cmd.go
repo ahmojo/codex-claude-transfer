@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/ahmojo/codex-claude-transfer/internal/agent"
@@ -24,27 +25,34 @@ import (
 func recordUndoJournal(f commonFlags, kind agent.Kind, home codexhome.Home, bundlePath string, res bundle.ImportResult, stderr io.Writer) {
 	var entries []undo.Entry
 	for _, it := range res.Items {
+		dest := absPath(it.DestPath)
 		switch it.Action {
 		case bundle.ActionImport, bundle.ActionImportCopy:
-			if sum, ok := fileSHA(it.DestPath); ok {
+			if sum, ok := fileSHA(dest); ok {
 				entries = append(entries, undo.Entry{
-					Action: string(it.Action), Dest: it.DestPath, WroteSHA: sum, Created: true,
+					Action: string(it.Action), Dest: dest, WroteSHA: sum, Created: true,
 					ThreadID: threadIDFor(res, it.BundlePath, it.NewThreadID), Preview: previewFor(res, it.BundlePath),
 				})
 			}
 		case bundle.ActionReplace, bundle.ActionUpdate:
 			// Both overwrote an existing file and left a backup (replace always;
-			// update because RecordUndo was set). Without a backup path there is
-			// nothing to restore, so skip — better no undo than a broken one.
+			// update because RecordUndo was set). Undo can only restore an
+			// overwritten file from a hashed backup, so record both the written
+			// hash and the backup's hash; if either is unavailable, skip the entry
+			// entirely — better no undo for it than an unverifiable one.
 			if it.BackupPath == "" {
 				continue
 			}
-			if sum, ok := fileSHA(it.DestPath); ok {
-				entries = append(entries, undo.Entry{
-					Action: string(it.Action), Dest: it.DestPath, WroteSHA: sum, Backup: it.BackupPath,
-					ThreadID: threadIDFor(res, it.BundlePath, it.NewThreadID), Preview: previewFor(res, it.BundlePath),
-				})
+			backup := absPath(it.BackupPath)
+			wrote, okW := fileSHA(dest)
+			bsum, okB := fileSHA(backup)
+			if !okW || !okB {
+				continue
 			}
+			entries = append(entries, undo.Entry{
+				Action: string(it.Action), Dest: dest, WroteSHA: wrote, Backup: backup, BackupSHA: bsum,
+				ThreadID: threadIDFor(res, it.BundlePath, it.NewThreadID), Preview: previewFor(res, it.BundlePath),
+			})
 		}
 	}
 	if len(entries) == 0 {
@@ -59,13 +67,23 @@ func recordUndoJournal(f commonFlags, kind agent.Kind, home codexhome.Home, bund
 	j := undo.Journal{
 		Time:    time.Now().UTC().Format(time.RFC3339),
 		Tool:    string(kind),
-		Home:    home.Root,
+		Home:    absPath(home.Root),
 		Bundle:  bundlePath,
 		Entries: entries,
 	}
 	if _, err := undo.Record(dir, j); err != nil {
 		fmt.Fprintf(stderr, "note: import succeeded but recording undo failed: %v\n", err)
 	}
+}
+
+// absPath returns the absolute form of p, falling back to p if that fails, so the
+// undo journal always records absolute, self-consistent paths (undo validates
+// that every dest/backup is absolute and inside the recorded home).
+func absPath(p string) string {
+	if abs, err := filepath.Abs(p); err == nil {
+		return abs
+	}
+	return p
 }
 
 func threadIDFor(res bundle.ImportResult, bundlePath, newID string) string {

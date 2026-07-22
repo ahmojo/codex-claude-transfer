@@ -924,7 +924,7 @@ func resolveImportSelection(zr *zip.Reader, manifest Manifest, opts ImportOption
 		}
 	}
 	if compressedSkipped > 0 {
-		warnings = append(warnings, fmt.Sprintf("%d compressed session(s) skipped by --match (searching .jsonl.zst is not supported)", compressedSkipped))
+		warnings = append(warnings, fmt.Sprintf("%d compressed session(s) skipped by --match because searchable text was unavailable (compressed .jsonl.zst)", compressedSkipped))
 	}
 	if len(selected) == 0 {
 		return nil, nil, fmt.Errorf("no session in the bundle matched the given filters (--project/--since/--match/--session)")

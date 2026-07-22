@@ -45,6 +45,12 @@ contain:
 - absolute paths, usernames, and machine details,
 - API keys, tokens, and other secrets that were ever printed in a session.
 
+The same applies to cct's undo backups: a `--replace-with-backup` or `--merge`
+import saves a verbatim copy of your previous session (a `.cct-bak-…` file next
+to it) so `cct undo` can restore it, and those copies carry the same sensitive
+content. Do not attach them either. See the undo-journal lifecycle in
+[docs/internals.md](docs/internals.md).
+
 Reproduce with throwaway data instead: the test suite shows how to build fake
 Codex/Claude homes in a temp directory, and `cct` itself never requires a real
 home (`--codex-home` / `CODEX_HOME` point it anywhere).
@@ -52,7 +58,8 @@ home (`--codex-home` / `CODEX_HOME` point it anywhere).
 ## What is in scope
 
 - Anything that writes outside the target agent home (path traversal, zip-slip,
-  symlink tricks) — the importer is designed to reject all of these.
+  symlink tricks) — the importer and `cct undo` are designed to reject all of
+  these; undo additionally refuses corrupt, manipulated, or ambiguous journals.
 - Checksum or verification bypasses.
 - Data leaving the machine unexpectedly. Apart from the opt-in `--clone` fetch
   and the experimental, explicitly gated LAN `cct sync`, `cct` must never touch

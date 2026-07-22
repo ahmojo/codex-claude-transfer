@@ -20,7 +20,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/ahmojo/codex-claude-transfer/internal/safety"
@@ -47,6 +49,10 @@ type Entry struct {
 	// Dest before the import overwrote it (replace and merge-update). Reversal
 	// restores it. Empty for a newly created file, which reversal deletes.
 	Backup string `json:"backup,omitempty"`
+	// BackupSHA is the SHA-256 of the backup's contents, recorded at import time.
+	// Reversal refuses to restore a backup whose bytes no longer match, so a
+	// swapped or tampered backup can never be written over a session.
+	BackupSHA string `json:"backup_sha256,omitempty"`
 	// Created is true when the import created a new file (no prior file at Dest),
 	// so reversal deletes it rather than restoring a backup.
 	Created bool `json:"created"`
@@ -133,16 +139,120 @@ func List(configDir string) ([]Journal, error) {
 	return out, nil
 }
 
-// Latest returns the most recent journal, or nil when none exist.
+// Latest returns the most recent journal for reversal, or nil when none exist.
+//
+// It is deliberately strict: it loads the single newest journal file and
+// validates it, and if that file is missing fields, points outside its recorded
+// home, is truncated, or is otherwise malformed, it returns an error rather than
+// silently falling back to an older journal. This upholds the core invariant —
+// a corrupt, manipulated, or ambiguous journal must lead to "change nothing".
 func Latest(configDir string) (*Journal, error) {
-	js, err := List(configDir)
+	dir := Dir(configDir)
+	names, err := journalNames(dir)
 	if err != nil {
 		return nil, err
 	}
-	if len(js) == 0 {
+	if len(names) == 0 {
 		return nil, nil
 	}
-	return &js[0], nil
+	// journalNames is sorted oldest-first; the newest is the last.
+	newest := names[len(names)-1]
+	j, err := load(filepath.Join(dir, newest))
+	if err != nil {
+		return nil, fmt.Errorf("the most recent import journal is unreadable, so undo is refusing to touch anything (inspect %s): %w", filepath.Join(dir, newest), err)
+	}
+	if err := Validate(j); err != nil {
+		return nil, fmt.Errorf("the most recent import journal is invalid, so undo is refusing to touch anything: %w", err)
+	}
+	return &j, nil
+}
+
+// journalNames returns the *.json journal file names in dir, sorted oldest-first
+// (fixed-width nanosecond prefix makes lexical order chronological).
+func journalNames(dir string) ([]string, error) {
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var names []string
+	for _, e := range ents {
+		if !e.IsDir() && filepath.Ext(e.Name()) == ".json" {
+			names = append(names, e.Name())
+		}
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+// Validate checks a journal is structurally sound and self-consistent before any
+// reversal touches the disk. Every failure mode here resolves to "change
+// nothing": an unsupported version, a missing/relative path, a path that escapes
+// the recorded agent home, a missing hash, or a created/overwritten record that
+// disagrees with its backup fields all reject the whole journal.
+func Validate(j Journal) error {
+	if j.Version != JournalVersion {
+		return fmt.Errorf("unsupported journal version %d (this cct understands %d)", j.Version, JournalVersion)
+	}
+	if j.Home == "" || !filepath.IsAbs(j.Home) {
+		return fmt.Errorf("journal home %q is not an absolute path", j.Home)
+	}
+	if len(j.Entries) == 0 {
+		return fmt.Errorf("journal has no entries")
+	}
+	for i, e := range j.Entries {
+		if e.Dest == "" || !filepath.IsAbs(e.Dest) {
+			return fmt.Errorf("entry %d: dest %q is not an absolute path", i, e.Dest)
+		}
+		if !pathWithin(j.Home, e.Dest) {
+			return fmt.Errorf("entry %d: dest %q is outside the recorded home %q", i, e.Dest, j.Home)
+		}
+		if !isHex64(e.WroteSHA) {
+			return fmt.Errorf("entry %d: wrote_sha256 is not a valid hash", i)
+		}
+		if e.Created {
+			if e.Backup != "" || e.BackupSHA != "" {
+				return fmt.Errorf("entry %d: a created file must not carry a backup", i)
+			}
+			continue
+		}
+		// Overwritten file: it must carry a backup, inside the home, with a hash.
+		if e.Backup == "" || !filepath.IsAbs(e.Backup) {
+			return fmt.Errorf("entry %d: overwritten file has no absolute backup path", i)
+		}
+		if !pathWithin(j.Home, e.Backup) {
+			return fmt.Errorf("entry %d: backup %q is outside the recorded home %q", i, e.Backup, j.Home)
+		}
+		if !isHex64(e.BackupSHA) {
+			return fmt.Errorf("entry %d: backup_sha256 is not a valid hash", i)
+		}
+	}
+	return nil
+}
+
+// pathWithin reports whether target is root itself or lies under it, comparing
+// cleaned absolute paths (case-insensitively on Windows, matching the OS).
+func pathWithin(root, target string) bool {
+	r := filepath.Clean(root)
+	t := filepath.Clean(target)
+	sep := string(filepath.Separator)
+	if runtime.GOOS == "windows" {
+		rl, tl := strings.ToLower(r), strings.ToLower(t)
+		return tl == rl || strings.HasPrefix(tl, rl+sep)
+	}
+	return t == r || strings.HasPrefix(t, r+sep)
+}
+
+// isHex64 reports whether s is a 64-character lowercase-or-uppercase hex string
+// (a SHA-256 digest).
+func isHex64(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	_, err := hex.DecodeString(s)
+	return err == nil
 }
 
 func load(p string) (Journal, error) {
@@ -160,8 +270,9 @@ func load(p string) (Journal, error) {
 
 // Outcome is what reversal did to one entry.
 type Outcome struct {
-	Entry   Entry
-	Status  string // "removed", "restored", "already-gone", "changed", "backup-missing", "error"
+	Entry  Entry
+	Status string // removed | restored | already-gone | changed | not-regular |
+	// backup-missing | backup-changed | error
 	Message string
 }
 
@@ -197,10 +308,21 @@ func Reverse(j Journal, dryRun bool) Result {
 }
 
 func reverseEntry(e Entry, dryRun bool) Outcome {
-	sum, err := sha256File(e.Dest)
+	// Dest must still be an ordinary file. If it is gone (moved/deleted) there is
+	// nothing to undo; if it was replaced by a symlink, directory, or device, it
+	// was tampered with and we refuse to follow it — never delete or write through
+	// a symlink a session file was swapped for.
+	fi, err := os.Lstat(e.Dest)
 	if os.IsNotExist(err) {
 		return Outcome{Entry: e, Status: "already-gone", Message: "file no longer present; nothing to undo"}
 	}
+	if err != nil {
+		return Outcome{Entry: e, Status: "error", Message: err.Error()}
+	}
+	if !fi.Mode().IsRegular() {
+		return Outcome{Entry: e, Status: "not-regular", Message: "no longer a regular file (symlink/dir?); left as-is"}
+	}
+	sum, err := sha256File(e.Dest)
 	if err != nil {
 		return Outcome{Entry: e, Status: "error", Message: err.Error()}
 	}
@@ -219,12 +341,25 @@ func reverseEntry(e Entry, dryRun bool) Outcome {
 		return Outcome{Entry: e, Status: "removed"}
 	}
 
-	// Overwritten file: restore its backup.
-	if e.Backup == "" {
-		return Outcome{Entry: e, Status: "error", Message: "no backup recorded; cannot restore"}
-	}
-	if _, err := os.Stat(e.Backup); err != nil {
+	// Overwritten file: restore its backup — but only a backup that is still an
+	// ordinary file whose bytes match the hash recorded at import time, so a
+	// swapped or corrupted backup can never be written over the session.
+	bfi, err := os.Lstat(e.Backup)
+	if os.IsNotExist(err) {
 		return Outcome{Entry: e, Status: "backup-missing", Message: "backup file is gone; left as-is"}
+	}
+	if err != nil {
+		return Outcome{Entry: e, Status: "error", Message: err.Error()}
+	}
+	if !bfi.Mode().IsRegular() {
+		return Outcome{Entry: e, Status: "backup-changed", Message: "backup is not a regular file; left as-is"}
+	}
+	bsum, err := sha256File(e.Backup)
+	if err != nil {
+		return Outcome{Entry: e, Status: "error", Message: err.Error()}
+	}
+	if bsum != e.BackupSHA {
+		return Outcome{Entry: e, Status: "backup-changed", Message: "backup no longer matches its recorded hash; left as-is"}
 	}
 	if dryRun {
 		return Outcome{Entry: e, Status: "restored", Message: "would restore from backup"}

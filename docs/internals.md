@@ -73,6 +73,54 @@ The full model lives in [safety.md](safety.md). In short:
 A `.codexbundle` can contain prompts, code, command output, file paths, and
 accidentally printed secrets. Treat it like shell history plus source context.
 
+## The undo journal
+
+`cct import` is the only command that writes session files, so each run records a
+small **journal** that `cct undo` uses to reverse it. Because a journal points at
+real files — and merge/replace journals reference backups that contain your
+previous session bytes — its lifecycle is worth understanding.
+
+- **Location.** Journals live under cct's own config directory, in the `undo/`
+  subfolder — never inside a coding-agent home. The base directory is
+  `$CCT_CONFIG_DIR` when set, otherwise the OS user-config dir's `cct/` folder
+  (e.g. `~/.config/cct/undo/` on Linux, `%AppData%\cct\undo\` on Windows). One
+  `import-<timestamp>-<random>.json` file is written per import.
+- **Permissions.** Journal files and backup files are written with the atomic
+  writer (temp file + rename), which creates them mode `0600` (owner read/write
+  only) — so the sensitive content is owner-only. The `undo/` directory itself is
+  created `0755` (subject to your umask); only its filenames, not their contents,
+  are directory-readable.
+- **Format version.** Each journal carries a `version` field (currently `1`).
+  `cct undo` refuses a journal whose version it does not understand rather than
+  guessing, so a future format change can never cause a wrong reversal.
+- **Retention.** Journals are kept automatically, newest-wins, up to a fixed
+  cap (25); older ones are pruned as new imports are recorded. `cct undo`
+  reverses only the single most recent import; `cct undo --list` shows the
+  retained history. There is no time-based expiry.
+- **Deletion.** A successful `cct undo` deletes the journal it reversed (and the
+  backups it consumed). To discard undo history without reversing anything,
+  delete the files in the `undo/` directory — they are plain JSON and removing
+  them only forfeits the ability to undo those imports.
+- **Upgrades.** The location and format are stable within a major version. A cct
+  upgrade does not migrate or invalidate existing journals; a journal written by
+  a newer cct that bumped the format would be refused (not misapplied) by an
+  older binary, per the version check above.
+- **Do backups contain session content?** Yes. For a `--replace-with-backup` or
+  `--merge` import, the backup is a verbatim copy of your **previous** local
+  session file, so it can contain everything a session file can (prompts, code,
+  command output, paths, and any secrets printed into the session). Backups sit
+  next to the session (a `.cct-bak-…` sibling, ignored by the agents) and are
+  removed when the import is undone. Treat them as sensitive local history. The
+  journal JSON itself stores only paths, timestamps, and SHA-256 hashes — never
+  session content.
+- **Tamper-resistance.** `cct undo` verifies, before touching anything, that the
+  journal is structurally valid and that every path stays inside the recorded
+  agent home; it only deletes or restores a file whose current bytes still match
+  the SHA-256 recorded at import time, it refuses a backup whose bytes no longer
+  match their recorded hash, and it never follows a path that has been replaced
+  by a symlink or directory. A corrupt, manipulated, or ambiguous journal always
+  results in changing nothing.
+
 ## Limitations
 
 - **Codex internals may change.** Parsing is defensive, but the on-disk format

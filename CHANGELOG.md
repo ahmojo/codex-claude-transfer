@@ -2,6 +2,35 @@
 
 All notable changes to codex-claude-transfer are documented here.
 
+## [1.3.1] - 2026-07-22
+
+### Security / hardening
+- **`cct undo` is now fail-closed against crashes and tampering.** A corrupt,
+  incomplete, manipulated, or version-mismatched import journal always results in
+  changing nothing: `undo` validates the newest journal (structure, version, and
+  that every path stays inside the recorded agent home) before touching disk, and
+  refuses rather than silently falling back to an older journal. Backups are now
+  hashed at import time and verified before restore (a swapped or altered backup
+  is refused), reversal never follows a dest or backup that was replaced by a
+  symlink or directory, and the existing "only touch a file that still matches
+  what the import wrote" guard is unchanged. Added an extensive test suite for
+  these paths (corrupt/truncated/manipulated journals, moved/symlinked/dir-swapped
+  files, tampered/missing backups, permission errors, and concurrent
+  import/undo).
+- **The undo journal lifecycle is documented** (location, `0600` file
+  permissions, format version, retention, safe deletion, upgrade behavior, and
+  the fact that merge/replace backups contain session content) in
+  docs/internals.md, with a pointer from SECURITY.md.
+
+### Added
+- **The release workflow now smoke-tests the packaged artifacts.** A new gating
+  job unpacks each built binary and runs `version → doctor → export → diff →
+  import → undo` on Linux and Windows; a broken artifact blocks the release.
+- **Compressed sessions skipped by full-text search are now visible.** `cct
+  search`, `cct scan`, and `export --match` print how many `.jsonl.zst` sessions
+  were skipped because their text was unavailable (and expose it in `--json`),
+  instead of dropping them silently; `import --match`'s wording is aligned.
+
 ## [1.3.0] - 2026-07-22
 
 ### Added

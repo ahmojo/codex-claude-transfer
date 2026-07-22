@@ -579,10 +579,12 @@ func runSearch(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 2
 	}
+	compressedSkipped := countCompressedSessions(candidates)
 	if f.jsonOut {
-		printSearchJSON(stdout, matches)
+		printSearchJSON(stdout, matches, compressedSkipped)
 	} else {
 		printSearch(stdout, kind, f.positional[0], matches)
+		printCompressedSkipNote(stdout, compressedSkipped)
 	}
 	return 0
 }
@@ -666,10 +668,12 @@ func runScan(args []string, stdout, stderr io.Writer) int {
 			hits = append(hits, secretHit{Session: s, Findings: found})
 		}
 	}
+	compressedSkipped := countCompressedSessions(candidates)
 	if f.jsonOut {
-		printScanJSON(stdout, hits)
+		printScanJSON(stdout, hits, compressedSkipped)
 	} else {
 		printScan(stdout, kind, hits)
+		printCompressedSkipNote(stdout, compressedSkipped)
 	}
 	return 0
 }

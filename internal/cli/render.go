@@ -110,6 +110,27 @@ func printSearch(w io.Writer, kind agent.Kind, query string, matches []search.Ma
 	fmt.Fprintf(w, "Tip: export one with  cct export --session <thread-id>\n")
 }
 
+// countCompressedSessions returns how many sessions in the list are compressed
+// (.jsonl.zst). Full-text search reads plain text only, so these are skipped —
+// callers surface the count so the gap is visible, not silent.
+func countCompressedSessions(list []sessions.Session) int {
+	n := 0
+	for _, s := range list {
+		if s.Compressed {
+			n++
+		}
+	}
+	return n
+}
+
+// printCompressedSkipNote prints a visible line when full-text search skipped
+// compressed sessions, so users know their result set was not exhaustive.
+func printCompressedSkipNote(w io.Writer, n int) {
+	if n > 0 {
+		fmt.Fprintf(w, "\n%s skipped because searchable text was unavailable (compressed .jsonl.zst; needs the 'zstd' tool to read).\n", plural(n, "compressed session"))
+	}
+}
+
 // printRepair renders the outcome of a `repair-times` run.
 func printRepair(w io.Writer, kind agent.Kind, res repair.Result) {
 	if res.Scanned == 0 {
@@ -298,6 +319,10 @@ func printExport(w io.Writer, kind agent.Kind, project, session string, result b
 		fmt.Fprintln(w)
 	}
 	fmt.Fprintf(w, "Included sessions: %d\n", result.IncludedCount)
+	if result.MatchCompressedSkipped > 0 {
+		fmt.Fprintf(w, "%s skipped by --match because searchable text was unavailable (compressed .jsonl.zst).\n",
+			plural(result.MatchCompressedSkipped, "compressed session"))
+	}
 	if result.ImagesStripped > 0 {
 		fmt.Fprintf(w, "Images stripped: %d (saved ~%s)\n", result.ImagesStripped, humanBytes(result.BytesSaved))
 		fmt.Fprintln(w, "Note: a stripped bundle isn't merge-friendly — import --merge sees it as diverged")

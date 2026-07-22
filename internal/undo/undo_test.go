@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -23,12 +24,22 @@ func writeFile(t *testing.T, dir, name string, data []byte) string {
 	return p
 }
 
+// hex64 is a syntactically valid SHA-256 digest for journals whose files need
+// not exist (Validate checks structure, not the file).
+var hex64 = strings.Repeat("ab", 32)
+
+// createdJournal builds a valid single-entry "created file" journal rooted at
+// home so Validate accepts it.
+func createdJournal(home, bundle string) Journal {
+	return Journal{Tool: "codex", Home: home, Bundle: bundle, Entries: []Entry{
+		{Action: "import", Dest: filepath.Join(home, "sess.jsonl"), WroteSHA: hex64, Created: true},
+	}}
+}
+
 func TestRecordAndLatest(t *testing.T) {
 	cfg := t.TempDir()
-	j := Journal{Tool: "codex", Home: "/home", Bundle: "b.codexbundle", Entries: []Entry{
-		{Action: "import", Dest: "/x", WroteSHA: "deadbeef", Created: true},
-	}}
-	if _, err := Record(cfg, j); err != nil {
+	home := t.TempDir()
+	if _, err := Record(cfg, createdJournal(home, "b.codexbundle")); err != nil {
 		t.Fatalf("record: %v", err)
 	}
 	got, err := Latest(cfg)
@@ -63,8 +74,9 @@ func TestRecordEmptyIsNoop(t *testing.T) {
 
 func TestLatestPicksNewest(t *testing.T) {
 	cfg := t.TempDir()
+	home := t.TempDir()
 	for _, name := range []string{"first", "second", "third"} {
-		if _, err := Record(cfg, Journal{Bundle: name, Entries: []Entry{{Action: "import", Dest: "/x", WroteSHA: "s", Created: true}}}); err != nil {
+		if _, err := Record(cfg, createdJournal(home, name)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -134,7 +146,7 @@ func TestReverseReplaceRestores(t *testing.T) {
 	dest := writeFile(t, dir, "sess.jsonl", imported) // post-import content on disk
 	backup := writeFile(t, dir, "sess.jsonl.cct-bak-1", original)
 
-	j := Journal{Entries: []Entry{{Action: "replace", Dest: dest, WroteSHA: sha(imported), Backup: backup}}}
+	j := Journal{Entries: []Entry{{Action: "replace", Dest: dest, WroteSHA: sha(imported), Backup: backup, BackupSHA: sha(original)}}}
 	res := Reverse(j, false)
 	if res.Restored != 1 {
 		t.Fatalf("restored = %d, want 1", res.Restored)
@@ -185,8 +197,9 @@ func TestReverseBackupMissing(t *testing.T) {
 
 func TestPruneKeepsRecent(t *testing.T) {
 	cfg := t.TempDir()
+	home := t.TempDir()
 	for i := 0; i < maxJournals+5; i++ {
-		if _, err := Record(cfg, Journal{Bundle: "b", Entries: []Entry{{Action: "import", Dest: "/x", WroteSHA: "s", Created: true}}}); err != nil {
+		if _, err := Record(cfg, createdJournal(home, "b")); err != nil {
 			t.Fatal(err)
 		}
 	}

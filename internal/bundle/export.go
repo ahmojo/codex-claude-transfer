@@ -86,7 +86,11 @@ type ExportResult struct {
 	ImagesStripped    int   // images replaced when StripImages is set
 	BytesSaved        int64 // bundle bytes saved by stripping (original minus stored)
 	SecretsRedacted   int   // secrets replaced when Redact is set
-	Warnings          []string
+	// MatchCompressedSkipped counts compressed (.jsonl.zst) sessions that --match
+	// could not search (their text is not read here), so the count is visible
+	// rather than a silent gap in the matched set.
+	MatchCompressedSkipped int
+	Warnings               []string
 }
 
 // Export scans the Codex home, selects sessions (optionally filtered to a
@@ -135,10 +139,12 @@ func Export(home codexhome.Home, opts ExportOptions) (ExportResult, error) {
 		result.Warnings = append(result.Warnings, warns...)
 	}
 	if opts.Match != "" {
-		selected, err = filterByMatch(selected, opts)
+		var matchCompressedSkipped int
+		selected, matchCompressedSkipped, err = filterByMatch(selected, opts)
 		if err != nil {
 			return result, err
 		}
+		result.MatchCompressedSkipped = matchCompressedSkipped
 	}
 	if len(selected) == 0 {
 		if opts.Match != "" {
@@ -208,12 +214,15 @@ func filterSince(all []sessions.Session, since time.Time) []sessions.Session {
 }
 
 // filterByMatch keeps only sessions whose conversation text matches opts.Match.
-// Compressed sessions are skipped (their content is not read here).
-func filterByMatch(list []sessions.Session, opts ExportOptions) ([]sessions.Session, error) {
+// Compressed sessions are skipped (their content is not read here); the number
+// skipped is returned so the caller can surface the gap.
+func filterByMatch(list []sessions.Session, opts ExportOptions) ([]sessions.Session, int, error) {
 	q := search.Query{Text: opts.Match, Regex: opts.MatchRegex, CaseSensitive: opts.MatchCaseSensitive}
 	var out []sessions.Session
+	compressedSkipped := 0
 	for _, s := range list {
 		if s.Compressed {
+			compressedSkipped++
 			continue
 		}
 		ok, err := search.SessionMatches(s.Path, q)
@@ -224,7 +233,7 @@ func filterByMatch(list []sessions.Session, opts ExportOptions) ([]sessions.Sess
 			out = append(out, s)
 		}
 	}
-	return out, nil
+	return out, compressedSkipped, nil
 }
 
 // selectByThreadIDSet returns the sessions whose thread id is in the given set

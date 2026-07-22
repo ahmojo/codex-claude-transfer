@@ -58,9 +58,40 @@ jobs:
           name: cct_${{ matrix.goos }}_${{ matrix.goarch }}
           path: dist/*.tar.gz
 
+  smoke:
+    name: Smoke-test ${{ matrix.goos }}/${{ matrix.goarch }} artifact
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64, os: ubuntu-latest }
+          - { goos: windows, goarch: amd64, os: windows-latest }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v7
+
+      - name: Download the built artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: cct_${{ matrix.goos }}_${{ matrix.goarch }}
+          path: dist
+
+      - name: Unpack and run the packaged binary end-to-end
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p unpack
+          tar -xzf dist/*.tar.gz -C unpack
+          bin="$(find unpack -type f \( -name cct -o -name cct.exe \) -print -quit)"
+          if [ -z "$bin" ]; then echo "no cct binary found in the artifact" >&2; exit 1; fi
+          echo "Testing packaged binary: $bin"
+          bash scripts/smoke-artifact.sh "$bin"
+
   release:
     name: Publish release
-    needs: build
+    needs: [build, smoke]
     runs-on: ubuntu-latest
     # Provenance: checksums + SBOM + GitHub artifact attestation + a
     # Sigstore-signed checksum file, so every release asset is verifiable.
