@@ -1,7 +1,9 @@
 package webui
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -12,6 +14,7 @@ import (
 	"github.com/ahmojo/codex-claude-transfer/internal/bundle"
 	"github.com/ahmojo/codex-claude-transfer/internal/claudesessions"
 	"github.com/ahmojo/codex-claude-transfer/internal/codexhome"
+	"github.com/ahmojo/codex-claude-transfer/internal/codexreconcile"
 	"github.com/ahmojo/codex-claude-transfer/internal/crypt"
 	"github.com/ahmojo/codex-claude-transfer/internal/doctor"
 	"github.com/ahmojo/codex-claude-transfer/internal/git"
@@ -422,6 +425,7 @@ type importReq struct {
 	Identity          string      `json:"identity"` // age key file, for an encrypted (.age) bundle
 	DryRun            bool        `json:"dry_run"`
 	Merge             bool        `json:"merge"`
+	Reconcile         bool        `json:"reconcile"`
 	ReplaceWithBackup bool        `json:"replace_with_backup"`
 	ImportAsCopy      bool        `json:"import_as_copy"`
 	Project           string      `json:"project"`  // warn on cwd mismatch against this path
@@ -437,6 +441,27 @@ type cwdMapDTO struct {
 	New string `json:"new"`
 }
 
+type importReconcileDTO struct {
+	CodexHome          string   `json:"codex_home"`
+	Requested          int      `json:"requested"`
+	Verified           int      `json:"verified"`
+	AlreadyDiscovered  int      `json:"already_discovered"`
+	ReadForRepair      int      `json:"read_for_repair"`
+	UnknownThreadIDs   int      `json:"unknown_thread_ids,omitempty"`
+	Version            string   `json:"codex_version,omitempty"`
+	VerificationMethod string   `json:"verification_method,omitempty"`
+	Warnings           []string `json:"warnings,omitempty"`
+	Error              string   `json:"error,omitempty"`
+	FallbackCommands   []string `json:"fallback_commands,omitempty"`
+}
+
+// These seams keep the HTTP handler testable without starting a real Codex
+// process. Production always uses the native codexreconcile implementation.
+var (
+	importThreadsChanged = codexreconcile.ThreadsChangedByImport
+	reconcileCodexImport = codexreconcile.Reconcile
+)
+
 func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 	var req importReq
 	if err := decodeBody(r, &req); err != nil {
@@ -449,6 +474,14 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ReplaceWithBackup && req.ImportAsCopy {
 		apiError(w, http.StatusBadRequest, "choose either replace-with-backup or import-as-copy, not both")
+		return
+	}
+	if req.Reconcile && req.DryRun {
+		apiError(w, http.StatusBadRequest, "reconcile cannot be combined with a dry run")
+		return
+	}
+	if req.Reconcile && req.TranslateTo != "" {
+		apiError(w, http.StatusBadRequest, "reconcile is only available for native Codex imports")
 		return
 	}
 
@@ -506,7 +539,12 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	home := s.importHomeFor(agent.Normalize(agent.Kind(insp.Manifest.Tool)))
+	kind := agent.Normalize(agent.Kind(insp.Manifest.Tool))
+	if req.Reconcile && kind != agent.Codex {
+		apiError(w, http.StatusBadRequest, "reconcile applies only to Codex bundles")
+		return
+	}
+	home := s.importHomeFor(kind)
 
 	res, err := bundle.Import(home, bundle.ImportOptions{
 		BundlePath:        path,
@@ -523,6 +561,11 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		apiError(w, http.StatusUnprocessableEntity, err.Error())
 		return
+	}
+
+	var reconcile *importReconcileDTO
+	if req.Reconcile {
+		reconcile = reconcileImportedSessions(r.Context(), home, res)
 	}
 
 	// Opt-in git clone, mirroring the CLI: only on a real import, only when the
@@ -551,7 +594,7 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		projects = append(projects, projectDTO{Path: d.Path, Count: d.Count, ExistsLocal: d.ExistsLocal})
 	}
 	here, _ := os.Getwd()
-	writeJSON(w, http.StatusOK, map[string]any{
+	response := map[string]any{
 		"dry_run":            res.DryRun,
 		"imported":           res.Imported,
 		"updated":            res.Updated,
@@ -570,7 +613,60 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		"cloned":             cloned,
 		"clone_error":        cloneErr,
 		"warnings":           res.Warnings,
-	})
+	}
+	if reconcile != nil {
+		response["reconcile"] = reconcile
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+// reconcileImportedSessions asks Codex itself to discover the exact rollout
+// IDs changed by this import. Any failure is reported in-band: the file import
+// has already succeeded and remains intact.
+func reconcileImportedSessions(ctx context.Context, home codexhome.Home, result bundle.ImportResult) *importReconcileDTO {
+	changed, err := importThreadsChanged(home, result)
+	report := &importReconcileDTO{
+		CodexHome:        home.Root,
+		Requested:        len(changed.IDs) + changed.Unknown,
+		UnknownThreadIDs: changed.Unknown,
+	}
+	var native codexreconcile.Result
+	if err == nil {
+		native, err = reconcileCodexImport(ctx, codexreconcile.Options{
+			CodexHome: home.Root,
+			ThreadIDs: changed.IDs,
+		})
+	}
+	report.Verified = len(native.Verified)
+	report.AlreadyDiscovered = len(native.AlreadyDiscovered)
+	report.ReadForRepair = len(native.ReadForRepair)
+	report.Version = native.Version
+	report.VerificationMethod = string(native.VerificationMethod)
+	report.Warnings = native.Warnings
+	if err == nil && changed.Unknown > 0 {
+		err = fmt.Errorf("could not determine an exact thread ID for %d affected rollout(s)", changed.Unknown)
+	}
+	if err != nil {
+		report.Error = err.Error()
+		report.FallbackCommands = importReconcileFallbacks(changed.IDs, home.Root)
+	}
+	return report
+}
+
+func importReconcileFallbacks(threadIDs []string, codexHome string) []string {
+	const limit = 5
+	ids := threadIDs
+	if len(ids) > limit {
+		ids = ids[:limit]
+	}
+	commands := make([]string, 0, len(ids))
+	for _, id := range ids {
+		commands = append(commands, fmt.Sprintf(`cct resume %s --run --codex-home "%s"`, id, codexHome))
+	}
+	if len(commands) == 0 {
+		commands = append(commands, fmt.Sprintf(`cct resume <thread-id> --run --codex-home "%s"`, codexHome))
+	}
+	return commands
 }
 
 // handleTranslateImport performs a cross-agent handoff (import --to): it reads the

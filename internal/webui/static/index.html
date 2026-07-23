@@ -193,6 +193,11 @@
             <label class="check"><input type="radio" name="conflict" value="replace" /> Replace it, keeping a backup</label>
             <label class="check"><input type="radio" name="conflict" value="copy" /> Keep both &mdash; import it as a new session</label>
           </fieldset>
+          <label class="check" id="import-reconcile-row" style="display:none">
+            <input type="checkbox" id="import-reconcile" />
+            <span>Ask Codex to discover and verify imported sessions now</span>
+          </label>
+          <p class="hint" id="import-reconcile-hint" style="display:none">Uses Codex's native app-server. If it is unavailable or incompatible, the imported rollout files remain intact and cct shows safe restart/resume guidance.</p>
           <label class="field">
             <span>Also clone the project's code from git into (optional)</span>
             <input id="import-clone" type="text" placeholder="folder to clone the recorded git remote into" />

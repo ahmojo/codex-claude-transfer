@@ -18,7 +18,13 @@ alongside it that `cct` never writes:
 `cct` works only with those JSONL files. `export` packages them with a manifest
 and SHA-256 checksums into a `.codexbundle` ZIP. `import` verifies checksums and
 copies session files back into place. The agent then re-discovers the files on
-its next run.
+its next run. A native Codex import may opt into `--reconcile`: after the file
+import and undo journal are complete, cct starts Codex's own app-server with the
+selected `CODEX_HOME`, checks whether each changed thread is in the state-backed
+`thread/list`, calls `thread/read` for a missing ID, and verifies the list again.
+This is deliberately outside `bundle.Import`, so the checksum/atomic-file
+importer stays independent of Codex protocol drift and retains its no-index-write
+invariant.
 
 The bundle records which agent it came from, so import writes to the matching
 home unless you explicitly request a cross-agent handoff with `--to`.
@@ -58,7 +64,11 @@ The full model lives in [safety.md](safety.md). In short:
 - New files are written, identical files are skipped, and differing files are
   conflicts unless you opt into `--merge`, `--replace-with-backup`, or
   `--import-as-copy`.
-- SQLite/index files are never modified.
+- SQLite/index files are never modified directly by cct.
+- `--reconcile` never opens an index either. It delegates discovery to a native
+  Codex child process, which may repair Codex's own index through its supported
+  app-server behavior. Capability or verification failures are non-fatal to the
+  already-completed rollout import and fall back to restart/resume guidance.
 - Path traversal, zip-slip, and absolute paths inside bundles are rejected.
 - Writes are atomic: temp file plus rename.
 - Default import is byte-for-byte. Content changes are opt-in and narrow:
@@ -125,6 +135,10 @@ previous session bytes — its lifecycle is worth understanding.
 
 - **Codex internals may change.** Parsing is defensive, but the on-disk format
   can drift.
+- **Codex app-server may change.** `import --reconcile` is opt-in and probes the
+  live methods/fields instead of assuming that a version number guarantees them.
+  The last synthetic live-import verification was 0.144.6; other/newer builds
+  safely fall back when the protocol is incompatible.
 - **Claude Code's format is closed-source and moves fast.** Support is based on
   empirical behavior and may need updates after Claude Code changes.
 - **Compressed `.jsonl.zst` sessions need `zstd`** to recover metadata and to be

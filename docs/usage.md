@@ -16,6 +16,7 @@ cct export --project .               # -> project.codexbundle
 cct inspect ./project.codexbundle    # look inside (read-only)
 cct import  ./project.codexbundle --dry-run   # preview, write nothing
 cct import  ./project.codexbundle             # import for real
+cct import  ./project.codexbundle --reconcile # optional Codex discovery now
 ```
 
 For Claude Code, add `--tool claude` to commands that discover or export
@@ -27,7 +28,15 @@ cct export --tool claude --project .
 cct import ./project.codexbundle
 ```
 
-After importing, run the agent again so it re-scans the files.
+After importing, run the agent again so it re-scans the files. For a native
+Codex import, `--reconcile` is an opt-in alternative: cct launches a short-lived
+Codex app-server scoped to the selected `CODEX_HOME`, asks Codex to read any
+changed thread IDs missing from its state-backed list, then verifies them through
+`thread/list`. cct does not write SQLite or `session_index.jsonl`; the Codex
+process owns any index repair. Because app-server is experimental, an unavailable
+or incompatible protocol is a non-fatal reconcile failure: the rollout import
+remains complete and cct prints exact restart / `cct resume <thread-id> --run`
+fallback guidance.
 
 ## Optional external tools
 
@@ -40,6 +49,7 @@ is skipped.
 | [`git`](https://git-scm.com/) | `export --with-git`, `import --clone` | git metadata not recorded; `--clone` errors |
 | [`age`](https://github.com/FiloSottile/age) | bundle encryption / decryption | encrypt/decrypt errors; plain bundles unaffected |
 | [`zstd`](https://github.com/facebook/zstd) | reading compressed `.jsonl.zst` metadata; `--map-cwd` on compressed sessions | compressed sessions are copied as-is, with cwd/preview unknown |
+| Codex `app-server` | opt-in `import --reconcile` | import succeeds; cct prints restart / resume fallback guidance |
 
 These tools are only used locally. They do not change the "nothing is uploaded"
 guarantee.
@@ -51,7 +61,15 @@ interface with Doctor, Sessions, Export, Inspect, Import, Search, Stats, and Sca
 views. It is feature-parity with the CLI for the core workflows: project export,
 single-session export, `--since`, git metadata, image stripping, recipient-based
 encryption, import preview, incremental merge, conflict handling, cwd remap,
-selective import, cross-agent handoff, and git clone.
+selective import, cross-agent handoff, and git clone. Post-import Codex
+reconciliation is also available: after previewing a native Codex bundle, enable
+**Ask Codex to discover and verify imported sessions now**. The browser reports
+the native verification result and, if app-server is unavailable or
+incompatible, keeps the completed import and shows restart / exact resume
+fallback guidance.
+
+The terminal wizard (`cct ui`) offers the same opt-in question for native Codex
+imports and then runs the normal `import --reconcile` path.
 
 ```bash
 cct app                  # opens the app in your default browser

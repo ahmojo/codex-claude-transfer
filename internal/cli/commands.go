@@ -5,6 +5,7 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -19,6 +20,7 @@ import (
 	"github.com/ahmojo/codex-claude-transfer/internal/claudehome"
 	"github.com/ahmojo/codex-claude-transfer/internal/claudesessions"
 	"github.com/ahmojo/codex-claude-transfer/internal/codexhome"
+	"github.com/ahmojo/codex-claude-transfer/internal/codexreconcile"
 	"github.com/ahmojo/codex-claude-transfer/internal/crypt"
 	"github.com/ahmojo/codex-claude-transfer/internal/doctor"
 	"github.com/ahmojo/codex-claude-transfer/internal/git"
@@ -122,6 +124,7 @@ type commonFlags struct {
 	replaceBackup   bool
 	importAsCopy    bool
 	merge           bool
+	reconcile       bool
 	flat            bool
 	jsonOut         bool
 	code            string
@@ -337,6 +340,8 @@ func parseFlags(args []string) (commonFlags, error) {
 			f.importAsCopy = true
 		case arg == "--merge":
 			f.merge = true
+		case arg == "--reconcile":
+			f.reconcile = true
 		case arg == "--flat":
 			f.flat = true
 		case arg == "--include-archived":
@@ -1112,11 +1117,19 @@ func runImport(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if len(f.positional) != 1 {
-		fmt.Fprintln(stderr, "usage: cct import <file.codexbundle> [--dry-run] [--merge] [--session <id>] [--project <path>] [--map-cwd OLD=NEW | --map-cwd-here] [--replace-with-backup] [--import-as-copy] [--clone <dir>]")
+		fmt.Fprintln(stderr, "usage: cct import <file.codexbundle> [--dry-run] [--merge] [--reconcile] [--session <id>] [--project <path>] [--map-cwd OLD=NEW | --map-cwd-here] [--replace-with-backup] [--import-as-copy] [--clone <dir>]")
 		return 2
 	}
 	if f.replaceBackup && f.importAsCopy {
 		fmt.Fprintln(stderr, "error: --replace-with-backup and --import-as-copy are mutually exclusive (they resolve conflicts in opposite ways)")
+		return 2
+	}
+	if f.reconcile && f.dryRun {
+		fmt.Fprintln(stderr, "error: --reconcile cannot be combined with --dry-run (there are no imported threads to reconcile)")
+		return 2
+	}
+	if f.reconcile && f.to != "" {
+		fmt.Fprintln(stderr, "error: --reconcile is not yet supported with cross-agent --to imports")
 		return 2
 	}
 
@@ -1175,6 +1188,10 @@ func runImport(args []string, stdout, stderr io.Writer) int {
 	if !ok {
 		return 1
 	}
+	if f.reconcile && kind != agent.Codex {
+		fmt.Fprintln(stderr, "error: --reconcile applies only to Codex imports")
+		return 2
+	}
 
 	res, err := bundle.Import(home, bundle.ImportOptions{
 		BundlePath:         bundlePath,
@@ -1201,10 +1218,28 @@ func runImport(args []string, stdout, stderr io.Writer) int {
 	if !f.dryRun {
 		recordUndoJournal(f, kind, home, f.positional[0], res, stderr)
 	}
+	reconcile := postImportReconcile{Requested: f.reconcile}
+	if f.reconcile {
+		reconcile.CodexHome = home.Root
+		var changed codexreconcile.ImportThreads
+		changed, reconcile.Err = codexreconcile.ThreadsChangedByImport(home, res)
+		reconcile.ThreadIDs = changed.IDs
+		reconcile.UnknownThreadIDs = changed.Unknown
+		if reconcile.Err == nil {
+			reconcile.Result, reconcile.Err = codexreconcile.Reconcile(context.Background(), codexreconcile.Options{
+				CodexHome: home.Root,
+				ThreadIDs: reconcile.ThreadIDs,
+			})
+		}
+		if reconcile.Err == nil && reconcile.UnknownThreadIDs > 0 {
+			reconcile.Err = fmt.Errorf("could not determine an exact thread ID for %d affected rollout(s)", reconcile.UnknownThreadIDs)
+		}
+	}
 	if f.jsonOut {
-		printImportJSON(stdout, f.positional[0], res)
+		printImportJSON(stdout, f.positional[0], res, reconcile)
 	} else {
-		printImport(stdout, kind, f.positional[0], res)
+		printImport(stdout, kind, f.positional[0], res, f.reconcile)
+		printPostImportReconcile(stdout, reconcile)
 	}
 
 	if f.cloneDir != "" {
@@ -1218,6 +1253,15 @@ func runImport(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	return 0
+}
+
+type postImportReconcile struct {
+	Requested        bool
+	CodexHome        string
+	ThreadIDs        []string
+	UnknownThreadIDs int
+	Result           codexreconcile.Result
+	Err              error
 }
 
 // runRepairTimes resets the modification time of session files that were imported
@@ -1529,7 +1573,8 @@ Commands:
   diff      Preview what importing a bundle would do (new / grow / conflict),
             read-only — nothing is written
   import    Import a .codexbundle into your Codex home (never overwrites).
-            Filter which sessions with --session/--project/--since/--match
+            Filter with --session/--project/--since/--match; use --reconcile
+            to ask Codex to discover and verify changed rollouts immediately
   undo      Reverse the most recent import (delete created files, restore
             backups); --list shows recent imports, --dry-run previews
   repair-times  Reset imported session files' modification time to their real
@@ -1597,6 +1642,10 @@ Flags:
                         this is lossless). Sessions that changed on both sides stay
                         conflicts; combine with --replace-with-backup/--import-as-
                         copy to resolve those too
+  --reconcile           import (Codex only): after writing rollout files, ask a
+                        short-lived native Codex app-server to read missing thread
+                        IDs and verify them in thread/list. Capability-probed and
+                        best-effort; cct never writes SQLite/session_index itself
   --to <codex|claude>   import: cross-agent handoff. Instead of importing the
                         bundle's sessions natively, translate them into the OTHER
                         agent's format and write them into that agent's home. A
@@ -1685,6 +1734,7 @@ Examples:
   cct undo                                 # reverse the most recent import
   cct undo --dry-run                       # …preview what undo would do first
   cct import ./my-project.codexbundle --merge   # append new messages to grown sessions
+  cct import ./my-project.codexbundle --reconcile # make changed Codex threads discoverable now
   cct import ./my-project.codexbundle --map-cwd "/old/path=/new/path"
   cct import ./my-project.codexbundle --map-cwd-here   # group under the current folder
   cct import ./my-project.codexbundle --replace-with-backup

@@ -173,26 +173,57 @@ func printExportJSON(w io.Writer, res bundle.ExportResult) {
 }
 
 type importJSON struct {
-	Bundle                  string   `json:"bundle"`
-	SessionsInBundle        int      `json:"sessions_in_bundle"`
-	Imported                int      `json:"imported"`
-	SkippedIdentical        int      `json:"skipped_identical"`
-	Conflicts               int      `json:"conflicts"`
-	Updated                 int      `json:"updated"`
-	LinesAdded              int      `json:"lines_added"`
-	AlreadyAhead            int      `json:"already_ahead"`
-	Replaced                int      `json:"replaced"`
-	ImportedCopies          int      `json:"imported_copies"`
-	SkippedDeselected       int      `json:"skipped_deselected"`
-	SkippedOther            int      `json:"skipped_other"`
-	Mapped                  int      `json:"mapped"`
-	MappedCompressedSkipped int      `json:"mapped_compressed_skipped"`
-	CWDMismatchCount        int      `json:"cwd_mismatch_count"`
-	DryRun                  bool     `json:"dry_run"`
-	Warnings                []string `json:"warnings,omitempty"`
+	Bundle                  string               `json:"bundle"`
+	SessionsInBundle        int                  `json:"sessions_in_bundle"`
+	Imported                int                  `json:"imported"`
+	SkippedIdentical        int                  `json:"skipped_identical"`
+	Conflicts               int                  `json:"conflicts"`
+	Updated                 int                  `json:"updated"`
+	LinesAdded              int                  `json:"lines_added"`
+	AlreadyAhead            int                  `json:"already_ahead"`
+	Replaced                int                  `json:"replaced"`
+	ImportedCopies          int                  `json:"imported_copies"`
+	SkippedDeselected       int                  `json:"skipped_deselected"`
+	SkippedOther            int                  `json:"skipped_other"`
+	Mapped                  int                  `json:"mapped"`
+	MappedCompressedSkipped int                  `json:"mapped_compressed_skipped"`
+	CWDMismatchCount        int                  `json:"cwd_mismatch_count"`
+	DryRun                  bool                 `json:"dry_run"`
+	Warnings                []string             `json:"warnings,omitempty"`
+	Reconcile               *importReconcileJSON `json:"reconcile,omitempty"`
 }
 
-func printImportJSON(w io.Writer, path string, res bundle.ImportResult) {
+type importReconcileJSON struct {
+	CodexHome          string   `json:"codex_home"`
+	Requested          int      `json:"requested"`
+	Verified           int      `json:"verified"`
+	AlreadyDiscovered  int      `json:"already_discovered"`
+	ReadForRepair      int      `json:"read_for_repair"`
+	UnknownThreadIDs   int      `json:"unknown_thread_ids,omitempty"`
+	Version            string   `json:"codex_version,omitempty"`
+	VerificationMethod string   `json:"verification_method,omitempty"`
+	Warnings           []string `json:"warnings,omitempty"`
+	Error              string   `json:"error,omitempty"`
+}
+
+func printImportJSON(w io.Writer, path string, res bundle.ImportResult, report postImportReconcile) {
+	var reconcile *importReconcileJSON
+	if report.Requested {
+		reconcile = &importReconcileJSON{
+			CodexHome:          report.CodexHome,
+			Requested:          len(report.ThreadIDs) + report.UnknownThreadIDs,
+			Verified:           len(report.Result.Verified),
+			AlreadyDiscovered:  len(report.Result.AlreadyDiscovered),
+			ReadForRepair:      len(report.Result.ReadForRepair),
+			UnknownThreadIDs:   report.UnknownThreadIDs,
+			Version:            report.Result.Version,
+			VerificationMethod: string(report.Result.VerificationMethod),
+			Warnings:           report.Result.Warnings,
+		}
+		if report.Err != nil {
+			reconcile.Error = report.Err.Error()
+		}
+	}
 	writeJSON(w, importJSON{
 		Bundle:                  path,
 		SessionsInBundle:        len(res.Manifest.Sessions),
@@ -211,6 +242,7 @@ func printImportJSON(w io.Writer, path string, res bundle.ImportResult) {
 		CWDMismatchCount:        res.CWDMismatchCount,
 		DryRun:                  res.DryRun,
 		Warnings:                res.Warnings,
+		Reconcile:               reconcile,
 	})
 }
 

@@ -90,11 +90,18 @@ cct export --project .
 # copy project.codexbundle to the other machine
 cct import ./project.codexbundle --dry-run
 cct import ./project.codexbundle
+# Optional: ask Codex to discover and verify changed threads immediately.
+cct import ./project.codexbundle --reconcile
 ```
 
 Use `--tool claude` to export Claude Code sessions. Use `import --to claude` or
 `import --to codex` to translate a session into the other agent. After importing,
-restart the agent so it re-scans the files.
+restart the agent so it re-scans the files. For a native Codex bundle, opt-in
+`--reconcile` can instead ask Codex's own app-server to read and verify the
+changed thread IDs immediately; failure leaves the imported rollout files intact
+and prints restart / `cct resume <thread-id> --run` fallback guidance. The
+terminal wizard (`cct ui`) and browser app (`cct app`) expose the same opt-in
+native Codex reconciliation flow.
 
 ## Compatibility
 
@@ -104,7 +111,7 @@ agent version it was last verified against:
 
 | Agent | Last tested | Supported data | Known gaps |
 | --- | --- | --- | --- |
-| **Codex CLI** | 0.144.0 (2026-07-18) | Sessions (`rollout-*.jsonl`, compressed `.jsonl.zst`), session metadata, git context, inline images | SQLite index is never copied (Codex rebuilds it by re-scanning); `.jsonl.zst` needs the external `zstd` tool for metadata, `--map-cwd`, and merge |
+| **Codex CLI / app-server** | 0.144.6 (2026-07-23) | Sessions (`rollout-*.jsonl`, compressed `.jsonl.zst`), session metadata, git context, inline images; synthetic live-import `thread/read` reconciliation | SQLite/session_index are never written directly by cct; `--reconcile` is capability-probed because app-server is experimental; `.jsonl.zst` needs external `zstd` for metadata, `--map-cwd`, and merge |
 | **Claude Code** | 2.1.212 (2026-07-18) | Conversations (`projects/<encoded-cwd>/*.jsonl`), tool events, project mapping | `~/.claude.json` config is never touched; sidechains/subagent transcripts transfer as files but are not translated cross-agent |
 | **Cross-agent handoff** (`import --to`) | same versions | Conversation text and project context, translated between the two formats | A translation, not a clone: tool calls, command output, runtime state, and provider-specific ids do not carry over byte-for-byte |
 

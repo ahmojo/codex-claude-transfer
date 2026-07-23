@@ -446,7 +446,7 @@ func plural(n int, noun string) string {
 	return fmt.Sprintf("%d %ss", n, noun)
 }
 
-func printImport(w io.Writer, kind agent.Kind, path string, res bundle.ImportResult) {
+func printImport(w io.Writer, kind agent.Kind, path string, res bundle.ImportResult, reconcileRequested bool) {
 	fmt.Fprintf(w, "Bundle: %s\n", path)
 	fmt.Fprintf(w, "Sessions in bundle: %d\n", len(res.Manifest.Sessions))
 	fmt.Fprintf(w, "New sessions: %d\n", res.Imported)
@@ -540,13 +540,61 @@ func printImport(w io.Writer, kind agent.Kind, path string, res bundle.ImportRes
 		if kind == agent.Claude {
 			fmt.Fprintln(w, "Next: run Claude Code again so it discovers the imported transcripts.")
 			fmt.Fprintln(w, "cct does not modify ~/.claude.json or the Claude cloud.")
+		} else if reconcileRequested {
+			// The detailed native reconcile/verification outcome follows below.
 		} else {
 			fmt.Fprintln(w, "Next: restart the Codex App (or run Codex again) so it scans and")
-			fmt.Fprintln(w, "reconciles the imported rollout files. cct does not modify Codex's SQLite.")
+			fmt.Fprintln(w, "reconciles the imported rollout files, or re-import with --reconcile.")
+			fmt.Fprintln(w, "cct does not modify Codex's SQLite or session_index.jsonl.")
 		}
 	} else {
 		fmt.Fprintln(w, "Nothing to import (all sessions already present or skipped).")
 	}
+}
+
+func printPostImportReconcile(w io.Writer, report postImportReconcile) {
+	if !report.Requested {
+		return
+	}
+	fmt.Fprintln(w)
+	if report.Err == nil {
+		if len(report.ThreadIDs) == 0 {
+			fmt.Fprintln(w, "Codex discovery: no changed threads required reconciliation.")
+			return
+		}
+		version := report.Result.Version
+		if version == "" {
+			version = "unknown"
+		}
+		fmt.Fprintf(w, "Codex discovery: verified %d/%d thread(s) via %s (app-server %s).\n",
+			len(report.Result.Verified), len(report.ThreadIDs), report.Result.VerificationMethod, safeTerminal(version))
+		if len(report.Result.ReadForRepair) > 0 {
+			fmt.Fprintf(w, "Codex natively read and repaired discovery metadata for %d thread(s).\n", len(report.Result.ReadForRepair))
+		}
+		for _, warning := range report.Result.Warnings {
+			fmt.Fprintf(w, "warning: %s\n", safeTerminal(warning))
+		}
+		fmt.Fprintln(w, "cct did not write Codex SQLite or session_index.jsonl; Codex performed the reconciliation.")
+		return
+	}
+
+	fmt.Fprintf(w, "warning: imported rollout files are intact, but Codex discovery reconciliation could not be verified: %s\n", safeTerminal(report.Err.Error()))
+	for _, warning := range report.Result.Warnings {
+		fmt.Fprintf(w, "warning: %s\n", safeTerminal(warning))
+	}
+	fmt.Fprintln(w, "Fallback: restart the Codex App. To force Codex to read a specific imported thread now, run:")
+	const commandLimit = 5
+	for i, id := range report.ThreadIDs {
+		if i == commandLimit {
+			fmt.Fprintf(w, "  ... and %d more thread(s); restarting Codex is simpler for a large import.\n", len(report.ThreadIDs)-commandLimit)
+			break
+		}
+		fmt.Fprintf(w, "  cct resume %s --run --codex-home \"%s\"\n", safeTerminal(id), safeTerminal(report.CodexHome))
+	}
+	if len(report.ThreadIDs) == 0 {
+		fmt.Fprintf(w, "  cct resume <thread-id> --run --codex-home \"%s\"\n", safeTerminal(report.CodexHome))
+	}
+	fmt.Fprintln(w, "cct did not write Codex SQLite or session_index.jsonl.")
 }
 
 func printTranslate(w io.Writer, path string, res bundle.TranslateResult) {

@@ -96,6 +96,14 @@ func TestBuildImportArgs(t *testing.T) {
 		t.Errorf("merge args = %v, want %v", mergeArgs, want)
 	}
 
+	reconcile := importChoices{bundle: "b.codexbundle", reconcile: true}
+	if got, want := buildImportArgs(reconcile, false), []string{"import", "b.codexbundle", "--reconcile"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("reconcile args = %v, want %v", got, want)
+	}
+	if got, want := buildImportArgs(reconcile, true), []string{"import", "b.codexbundle", "--dry-run"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("reconcile dry-run args = %v, want %v", got, want)
+	}
+
 	hereArgs := buildImportArgs(importChoices{bundle: "b.codexbundle", mapCWDHere: true}, false)
 	if want := []string{"import", "b.codexbundle", "--map-cwd-here"}; !reflect.DeepEqual(hereArgs, want) {
 		t.Errorf("map-cwd-here args = %v, want %v", hereArgs, want)

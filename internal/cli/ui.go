@@ -39,6 +39,7 @@ type exportChoices struct {
 type importChoices struct {
 	bundle        string
 	merge         bool
+	reconcile     bool
 	replaceBackup bool
 	importAsCopy  bool
 	project       string
@@ -106,6 +107,9 @@ func buildImportArgs(c importChoices, dryRun bool) []string {
 	}
 	if c.merge {
 		args = append(args, "--merge")
+	}
+	if c.reconcile && !dryRun {
+		args = append(args, "--reconcile")
 	}
 	if c.replaceBackup {
 		args = append(args, "--replace-with-backup")
@@ -605,7 +609,18 @@ func uiImport(f commonFlags, stdout, stderr io.Writer) {
 		}
 	}
 
-	// 6) If the bundle recorded a git remote, offer to clone the code too.
+	// 6) Native Codex imports may ask Codex to discover and verify the changed
+	//    rollouts immediately. This is opt-in because app-server is experimental;
+	//    the CLI path prints safe restart/resume guidance if it cannot reconcile.
+	if bkind == agent.Codex {
+		if !runField(huh.NewConfirm().
+			Title("Ask Codex to discover and verify the imported sessions now?\nUses Codex's native app-server; failure falls back safely to restart/resume guidance.").
+			Value(&c.reconcile), stderr) {
+			return
+		}
+	}
+
+	// 7) If the bundle recorded a git remote, offer to clone the code too.
 	if gi := res.Manifest.Git; gi != nil && !gi.Empty() && gi.RemoteURL != "" {
 		var doClone bool
 		if !runField(huh.NewConfirm().
@@ -625,7 +640,7 @@ func uiImport(f commonFlags, stdout, stderr io.Writer) {
 		}
 	}
 
-	// 7) Final confirmation, then run the real command (echoed for transparency).
+	// 8) Final confirmation, then run the real command (echoed for transparency).
 	var proceed bool
 	if !runField(huh.NewConfirm().
 		Title("Import now?").

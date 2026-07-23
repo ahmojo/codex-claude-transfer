@@ -1,7 +1,9 @@
 package webui
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/ahmojo/codex-claude-transfer/internal/claudehome"
 	"github.com/ahmojo/codex-claude-transfer/internal/codexhome"
+	"github.com/ahmojo/codex-claude-transfer/internal/codexreconcile"
 )
 
 const testToken = "testtoken123"
@@ -126,9 +129,14 @@ func TestServesIndex(t *testing.T) {
 	if !strings.Contains(string(data), "<title>cct</title>") {
 		t.Errorf("index.html not served")
 	}
+	if !strings.Contains(string(data), `id="import-reconcile"`) {
+		t.Errorf("index.html does not expose the post-import reconcile control")
+	}
 	// Static assets serve too.
-	if res, _ := do(t, ts, "GET", "/app.js", "", ""); res.StatusCode != http.StatusOK {
+	if res, js := do(t, ts, "GET", "/app.js", "", ""); res.StatusCode != http.StatusOK {
 		t.Errorf("app.js: got %d", res.StatusCode)
+	} else if !strings.Contains(string(js), "configureReconcile") {
+		t.Errorf("app.js does not wire the post-import reconcile control")
 	}
 }
 
@@ -194,6 +202,118 @@ func TestExportInspectImportRoundTrip(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dst.home.SessionsDir, "2026", "06", "13", "rollout-2026-06-13T18-22-01-abcd1234-1111-2222-3333-444455556666.jsonl")); err != nil {
 		t.Errorf("imported file missing: %v", err)
+	}
+}
+
+func TestImportReconcileViaAPI(t *testing.T) {
+	src, srcTS := testServer(t)
+	writeSession(t, src.home, sessID, "/work/p")
+	out := exportAll(t, srcTS, "reconcile.codexbundle")
+
+	dst, dstTS := testServer(t)
+	original := reconcileCodexImport
+	t.Cleanup(func() { reconcileCodexImport = original })
+	var called bool
+	reconcileCodexImport = func(_ context.Context, opts codexreconcile.Options) (codexreconcile.Result, error) {
+		called = true
+		if opts.CodexHome != dst.home.Root {
+			t.Errorf("CodexHome = %q, want %q", opts.CodexHome, dst.home.Root)
+		}
+		if len(opts.ThreadIDs) != 1 || opts.ThreadIDs[0] != sessID {
+			t.Errorf("ThreadIDs = %v, want [%s]", opts.ThreadIDs, sessID)
+		}
+		return codexreconcile.Result{
+			Version:            "0.145.0-alpha.30",
+			Requested:          opts.ThreadIDs,
+			ReadForRepair:      opts.ThreadIDs,
+			Verified:           opts.ThreadIDs,
+			VerificationMethod: codexreconcile.VerificationStateDB,
+		}, nil
+	}
+
+	res, data := do(t, dstTS, "POST", "/api/import", testToken,
+		`{"path":"`+out+`","reconcile":true}`)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("import reconcile: %d %s", res.StatusCode, data)
+	}
+	if !called {
+		t.Fatal("native Codex reconcile was not called")
+	}
+	var got struct {
+		Imported  int `json:"imported"`
+		Reconcile struct {
+			Requested          int    `json:"requested"`
+			Verified           int    `json:"verified"`
+			ReadForRepair      int    `json:"read_for_repair"`
+			Version            string `json:"codex_version"`
+			VerificationMethod string `json:"verification_method"`
+			Error              string `json:"error"`
+		} `json:"reconcile"`
+	}
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("decode import reconcile response: %v\n%s", err, data)
+	}
+	if got.Imported != 1 || got.Reconcile.Requested != 1 || got.Reconcile.Verified != 1 || got.Reconcile.ReadForRepair != 1 {
+		t.Fatalf("unexpected reconcile counts: %+v\n%s", got, data)
+	}
+	if got.Reconcile.Version != "0.145.0-alpha.30" ||
+		got.Reconcile.VerificationMethod != string(codexreconcile.VerificationStateDB) ||
+		got.Reconcile.Error != "" {
+		t.Fatalf("unexpected reconcile result: %+v\n%s", got.Reconcile, data)
+	}
+}
+
+func TestImportReconcileFailureIsNonFatal(t *testing.T) {
+	src, srcTS := testServer(t)
+	writeSession(t, src.home, sessID, "/work/p")
+	out := exportAll(t, srcTS, "reconcile-failure.codexbundle")
+
+	_, dstTS := testServer(t)
+	original := reconcileCodexImport
+	t.Cleanup(func() { reconcileCodexImport = original })
+	reconcileCodexImport = func(_ context.Context, opts codexreconcile.Options) (codexreconcile.Result, error) {
+		return codexreconcile.Result{Requested: opts.ThreadIDs}, errors.New("app-server protocol unavailable")
+	}
+
+	res, data := do(t, dstTS, "POST", "/api/import", testToken,
+		`{"path":"`+out+`","reconcile":true}`)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("reconcile failure must not fail a completed import: %d %s", res.StatusCode, data)
+	}
+	var got struct {
+		Imported  int `json:"imported"`
+		Reconcile struct {
+			Error            string   `json:"error"`
+			FallbackCommands []string `json:"fallback_commands"`
+		} `json:"reconcile"`
+	}
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("decode failed reconcile response: %v\n%s", err, data)
+	}
+	if got.Imported != 1 {
+		t.Fatalf("imported = %d, want 1", got.Imported)
+	}
+	if !strings.Contains(got.Reconcile.Error, "protocol unavailable") {
+		t.Fatalf("missing reconcile error: %+v", got.Reconcile)
+	}
+	if len(got.Reconcile.FallbackCommands) != 1 ||
+		!strings.Contains(got.Reconcile.FallbackCommands[0], "cct resume "+sessID+" --run") {
+		t.Fatalf("missing exact resume fallback: %+v", got.Reconcile.FallbackCommands)
+	}
+}
+
+func TestImportReconcileRejectsUnsupportedModes(t *testing.T) {
+	_, ts := testServer(t)
+	for name, body := range map[string]string{
+		"dry run":     `{"path":"x.codexbundle","dry_run":true,"reconcile":true}`,
+		"cross-agent": `{"path":"x.codexbundle","translate_to":"claude","reconcile":true}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			res, data := do(t, ts, "POST", "/api/import", testToken, body)
+			if res.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400 (%s)", res.StatusCode, data)
+			}
+		})
 	}
 }
 

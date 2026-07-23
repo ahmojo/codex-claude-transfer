@@ -264,6 +264,7 @@ function importBody(dryRun) {
     translate_to: el("import-translate").value,
     dry_run: dryRun,
     merge: conflict === "merge",
+    reconcile: !dryRun && !el("import-translate").value && el("import-reconcile").checked,
     replace_with_backup: conflict === "replace",
     import_as_copy: conflict === "copy",
     project: cleanPath(el("import-project").value),
@@ -309,6 +310,7 @@ el("import-preview").addEventListener("click", async () => {
     // import that found differing local sessions.
     el("import-conflict").style.display = (!d.translated && d.conflicts > 0) ? "block" : "none";
     configureMapHere(d);
+    configureReconcile(d);
   } catch (e) { setError(out, e); lastPreview = null; }
 });
 
@@ -338,6 +340,24 @@ function setMapsDisabled(disabled) {
 }
 el("import-map-here").addEventListener("change", e => setMapsDisabled(e.target.checked));
 
+// Native Codex imports can opt into immediate discovery. Cross-agent handoffs
+// and Claude-native bundles keep the control hidden because their discovery
+// mechanisms are different.
+function configureReconcile(d) {
+  const row = el("import-reconcile-row"), hint = el("import-reconcile-hint");
+  const box = el("import-reconcile");
+  const nativeCodex = !d.translated && String(d.tool || "codex").toLowerCase() !== "claude";
+  if (!nativeCodex) {
+    row.style.display = "none"; hint.style.display = "none";
+    box.checked = false;
+    return;
+  }
+  row.style.display = "flex"; hint.style.display = "block";
+}
+el("import-translate").addEventListener("change", e => {
+  if (e.target.value) configureReconcile({ translated: true });
+});
+
 el("import-add-map").addEventListener("click", () => {
   const r = document.createElement("div");
   r.className = "maprow";
@@ -366,7 +386,33 @@ el("import-run").addEventListener("click", async () => {
     if (d.cloned) h += '<div class="row success">Cloned the project code into ' + esc(d.cloned) + " (code only).</div>";
     if (d.clone_error) h += '<div class="row warn">Clone: ' + esc(d.clone_error) + "</div>";
     if (d.cwd_mismatch) h += '<div class="row warn">' + d.cwd_mismatch + " session(s) had a cwd different from the project you named.</div>";
-    h += '<div class="preview-tip">Run your agent again (restart Codex, or relaunch Claude Code) so it picks up the imported sessions.</div></div>';
+    if (d.reconcile) {
+      if (d.reconcile.error) {
+        h += '<div class="row warn">The rollout import is complete, but Codex discovery could not be verified: ' + esc(d.reconcile.error) + "</div>";
+        (d.reconcile.warnings || []).forEach(w => { h += '<div class="row warn">' + esc(w) + "</div>"; });
+        h += '<div class="preview-tip">Restart the Codex App. To force Codex to read a specific imported thread now, run:</div>';
+        (d.reconcile.fallback_commands || []).forEach(cmd => {
+          h += '<div class="row mono cmd">' + esc(cmd) + "</div>";
+        });
+      } else if (d.reconcile.requested === 0) {
+        h += '<div class="row success">No changed Codex threads required discovery reconciliation.</div>';
+      } else {
+        let detail = "Codex discovery verified " + d.reconcile.verified + "/" + d.reconcile.requested + " thread(s)";
+        if (d.reconcile.verification_method) detail += " via " + d.reconcile.verification_method;
+        if (d.reconcile.codex_version) detail += " (app-server " + d.reconcile.codex_version + ")";
+        h += '<div class="row success">' + esc(detail) + ".</div>";
+        if (d.reconcile.read_for_repair) {
+          h += '<div class="row success">Codex natively repaired discovery metadata for ' + d.reconcile.read_for_repair + " thread(s).</div>";
+        }
+        (d.reconcile.warnings || []).forEach(w => { h += '<div class="row warn">' + esc(w) + "</div>"; });
+        h += '<div class="preview-tip">Verified through Codex itself; cct did not write SQLite or session_index.jsonl.</div>';
+      }
+    } else if (d.translated) {
+      h += '<div class="preview-tip">Relaunch the target agent so it picks up the imported sessions.</div>';
+    } else {
+      h += '<div class="preview-tip">Restart Codex (or run Codex again) so it discovers the imported sessions.</div>';
+    }
+    h += "</div>";
     out.innerHTML = h;
   } catch (e) { setError(out, e); }
 });
