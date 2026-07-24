@@ -481,6 +481,63 @@ func TestRunRelocateRollsBackIncompleteRealImport(t *testing.T) {
 	}
 }
 
+func TestRunRelocateRemovesUnexpectedCreatedSessionOnRollback(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "codex-home")
+	oldPath := filepath.Join(tmp, "old-project")
+	newPath := filepath.Join(tmp, "new-project")
+	if err := os.MkdirAll(oldPath, 0o755); err != nil {
+		t.Fatalf("create old project: %v", err)
+	}
+	id := "ddcc1111-2222-3333-4444-555566667777"
+	writeSessionCWD(t, home, id, oldPath)
+	sessionPath := relocateTestSessionPath(home, id)
+	original, err := os.ReadFile(sessionPath)
+	if err != nil {
+		t.Fatalf("read original session: %v", err)
+	}
+
+	ops := defaultRelocateOps
+	ops.importBundle = func(target codexhome.Home, opts bundle.ImportOptions) (bundle.ImportResult, error) {
+		if opts.DryRun {
+			return bundle.Import(target, opts)
+		}
+		if err := os.Remove(sessionPath); err != nil {
+			return bundle.ImportResult{}, err
+		}
+		mapped := bytes.ReplaceAll(original, []byte(oldPath), []byte(newPath))
+		if err := os.WriteFile(sessionPath, mapped, 0o600); err != nil {
+			return bundle.ImportResult{}, err
+		}
+		return bundle.ImportResult{
+			Mapped:   1,
+			Imported: 1,
+			Items: []bundle.ImportItem{{
+				DestPath: sessionPath,
+				Action:   bundle.ActionImport,
+			}},
+		}, nil
+	}
+
+	var out, errOut bytes.Buffer
+	code := runRelocateWithOps([]string{
+		oldPath, newPath, "--move-project",
+		"--tool", "codex", "--codex-home", home,
+	}, &out, &errOut, ops)
+	if code != 1 || !strings.Contains(errOut.String(), "real import was incomplete") {
+		t.Fatalf("unexpected-created exit=%d stderr=%s", code, errOut.String())
+	}
+	if _, err := os.Stat(oldPath); err != nil {
+		t.Fatalf("old project was not restored: %v", err)
+	}
+	if _, err := os.Stat(newPath); !os.IsNotExist(err) {
+		t.Fatalf("new project remains after rollback or stat failed: %v", err)
+	}
+	if _, err := os.Stat(sessionPath); !os.IsNotExist(err) {
+		t.Fatalf("unexpected created session remains after rollback or stat failed: %v", err)
+	}
+}
+
 func TestRunRelocateStopsIfSessionChangesDuringProjectMove(t *testing.T) {
 	tmp := t.TempDir()
 	home := filepath.Join(tmp, "codex-home")

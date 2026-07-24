@@ -376,13 +376,24 @@ func verifyRelocateSources(manifest bundle.Manifest) error {
 	return nil
 }
 
-// rollbackRelocateImport restores every backup produced before a failed import.
-// Backups are processed in reverse order and retained whenever restoration fails.
+// rollbackRelocateImport restores every backup produced before a failed import
+// and removes files the import unexpectedly created. Items are processed in
+// reverse order, and backups are retained whenever restoration fails.
 func rollbackRelocateImport(result bundle.ImportResult) error {
 	var errs []error
 	for i := len(result.Items) - 1; i >= 0; i-- {
 		item := result.Items[i]
 		if item.BackupPath == "" {
+			if item.Action != bundle.ActionImport && item.Action != bundle.ActionImportCopy {
+				continue
+			}
+			if item.DestPath == "" {
+				errs = append(errs, errors.New("remove newly created session: destination path is empty"))
+				continue
+			}
+			if err := os.Remove(item.DestPath); err != nil && !os.IsNotExist(err) {
+				errs = append(errs, fmt.Errorf("remove newly created session %s: %w", item.DestPath, err))
+			}
 			continue
 		}
 		backup, err := os.Open(item.BackupPath)
