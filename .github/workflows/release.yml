@@ -13,6 +13,40 @@ permissions:
   contents: read
 
 jobs:
+  dependencies:
+    name: Package Go dependencies
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      # Gentoo's go-module.eclass consumes a module cache rooted at go-mod.
+      - name: Package Go module cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          export GOMODCACHE="${PWD}/go-mod"
+          go mod download -modcacherw
+          go mod verify
+          mkdir -p dist
+          tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
+            -I 'xz -T0 -9' -cf \
+            "dist/codex-claude-transfer-${version}-deps.tar.xz" go-mod
+
+      - name: Upload dependency artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: codex-claude-transfer-go-dependencies
+          path: dist/*-deps.tar.xz
+
   build:
     name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
     runs-on: ubuntu-latest
@@ -91,7 +125,7 @@ jobs:
 
   release:
     name: Publish release
-    needs: [build, smoke]
+    needs: [build, smoke, dependencies]
     runs-on: ubuntu-latest
     # Provenance: checksums + SBOM + GitHub artifact attestation + a
     # Sigstore-signed checksum file, so every release asset is verifiable.
@@ -123,7 +157,7 @@ jobs:
         shell: bash
         run: |
           cd dist
-          sha256sum *.tar.gz *_sbom.spdx.json > SHA256SUMS.txt
+          sha256sum *.tar.gz *.tar.xz *_sbom.spdx.json > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - name: Install cosign
@@ -141,6 +175,7 @@ jobs:
         with:
           subject-path: |
             dist/*.tar.gz
+            dist/*.tar.xz
             dist/SHA256SUMS.txt
 
       - name: Create GitHub Release
@@ -148,6 +183,7 @@ jobs:
         with:
           files: |
             dist/*.tar.gz
+            dist/*.tar.xz
             dist/SHA256SUMS.txt
             dist/SHA256SUMS.txt.sigstore.json
             dist/cct_${{ github.ref_name }}_sbom.spdx.json
