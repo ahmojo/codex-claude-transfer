@@ -30,7 +30,7 @@ const (
 	ActionImportCopy     Action = "import-copy"      // conflict, imported as a brand-new session (fresh id + filename)
 	ActionUpdate         Action = "update"           // --merge: local is a prefix of the bundle; extended in place (append-only, lossless)
 	ActionSkipAhead      Action = "skip-ahead"       // --merge: bundle is a prefix of the local file; local already current
-	ActionSkipArchived   Action = "skip-archived"    // archived_sessions entry; not imported in v0.1
+	ActionSkipArchived   Action = "skip-archived"    // archived_sessions entry; skipped unless explicitly enabled
 	ActionSkipNonSession Action = "skip-non-session" // unexpected non-session file
 	ActionSkipDeselected Action = "skip-deselected"  // excluded by a selection filter (--session/--project/--since/--match)
 )
@@ -65,6 +65,10 @@ type ImportItem struct {
 type ImportOptions struct {
 	BundlePath string
 	DryRun     bool
+	// IncludeArchived permits Codex rollout entries under archived_sessions/ to
+	// use the same validated import, mapping, backup, and undo path as active
+	// sessions. It is opt-in; ordinary imports continue to skip archived entries.
+	IncludeArchived bool
 	// ProjectPath, when non-empty, enables per-session cwd-mismatch checks
 	// against this (already absolute) path.
 	ProjectPath string
@@ -265,11 +269,11 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 		}
 		// Paths were already validated as safe in verifyBundle.
 		rel := f.Name
-		if !isImportableEntry(kind, rel) {
+		if !isImportableEntryForImport(kind, rel, opts.IncludeArchived) {
 			action := ActionSkipNonSession
 			if kind != agent.Claude && isArchivedEntry(rel) {
 				action = ActionSkipArchived
-				result.Warnings = append(result.Warnings, fmt.Sprintf("%s: archived sessions are not imported in v0.1; skipped", rel))
+				result.Warnings = append(result.Warnings, fmt.Sprintf("%s: archived session skipped (enable archived import explicitly to include it)", rel))
 			} else {
 				result.Warnings = append(result.Warnings, fmt.Sprintf("%s: unexpected non-session file; skipped", rel))
 			}
@@ -528,6 +532,15 @@ func isImportableEntry(kind agent.Kind, rel string) bool {
 		return safety.IsClaudeSessionEntry(rel)
 	}
 	return safety.IsSessionEntry(rel)
+}
+
+// isImportableEntryForImport extends the normal active-session allowlist with
+// strictly shaped Codex archived paths only when the caller opts in.
+func isImportableEntryForImport(kind agent.Kind, rel string, includeArchived bool) bool {
+	if isImportableEntry(kind, rel) {
+		return true
+	}
+	return includeArchived && agent.Normalize(kind) == agent.Codex && safety.IsArchivedSessionEntry(rel)
 }
 
 // planImportCopyClaude is the Claude analog of planImportCopy: it turns a conflict
@@ -801,7 +814,7 @@ func verifyManifestBinding(zr *zip.Reader, manifest Manifest, checksums Checksum
 		if f.Name == ManifestName || f.Name == ChecksumsName {
 			continue
 		}
-		if !isImportableEntry(kind, f.Name) {
+		if !isManifestSessionEntry(kind, f.Name) {
 			continue
 		}
 		sha, ok := declared[f.Name]
@@ -813,6 +826,16 @@ func verifyManifestBinding(zr *zip.Reader, manifest Manifest, checksums Checksum
 		}
 	}
 	return nil
+}
+
+// isManifestSessionEntry recognizes every session-shaped path a bundle may
+// declare, including archived Codex rollouts that a default import later skips.
+// Binding them unconditionally prevents hidden archived sessions in a bundle.
+func isManifestSessionEntry(kind agent.Kind, rel string) bool {
+	if isImportableEntry(kind, rel) {
+		return true
+	}
+	return agent.Normalize(kind) == agent.Codex && safety.IsArchivedSessionEntry(rel)
 }
 
 func readMeta(zr *zip.Reader) (Manifest, Checksums, error) {

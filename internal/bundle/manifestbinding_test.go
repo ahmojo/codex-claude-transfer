@@ -45,6 +45,45 @@ func TestImportRejectsHiddenSession(t *testing.T) {
 	}
 }
 
+// TestImportRejectsHiddenArchivedSession verifies that opting in to archived
+// imports cannot bypass the manifest binding required for active rollouts.
+func TestImportRejectsHiddenArchivedSession(t *testing.T) {
+	dir := t.TempDir()
+	hidden := []byte("hidden archived rollout content\n")
+	manifest := Manifest{
+		FormatVersion:   FormatVersion,
+		SourceCodexHome: "/src/.codex",
+		Sessions:        nil,
+	}
+	manifestBytes, _ := json.MarshalIndent(manifest, "", "  ")
+	checks := map[string]string{
+		archivedSampleRel: sha256Hex(hidden),
+		ManifestName:      sha256Hex(manifestBytes),
+	}
+	checkBytes, _ := json.MarshalIndent(Checksums(checks), "", "  ")
+	bundlePath := filepath.Join(dir, "hidden-archived.codexbundle")
+	writeBundleZip(t, bundlePath, []rawEntry{
+		{archivedSampleRel, hidden},
+		{ManifestName, manifestBytes},
+		{ChecksumsName, checkBytes},
+	})
+
+	target := fakeHome(t)
+	_, err := Import(target, ImportOptions{
+		BundlePath:      bundlePath,
+		IncludeArchived: true,
+	})
+	if err == nil {
+		t.Fatal("import accepted an archived session not listed in its manifest")
+	}
+	if !strings.Contains(err.Error(), "hidden sessions") {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if got := listFilesRel(t, target.Root); len(got) != 0 {
+		t.Errorf("files were written despite rejection: %v", got)
+	}
+}
+
 // TestImportRejectsManifestChecksumMismatch: a session entry declared in the
 // manifest but with a manifest SHA that disagrees with checksums.json is rejected.
 func TestImportRejectsManifestChecksumMismatch(t *testing.T) {
