@@ -16,6 +16,10 @@ import (
 // files under sessions/YYYY/MM/DD/. Compressed (.jsonl.zst) variants are allowed.
 var sessionEntryRe = regexp.MustCompile(`^sessions/\d{4}/\d{2}/\d{2}/rollout-[^/]+\.jsonl(\.zst)?$`)
 
+// archivedSessionEntryRe matches current flat Codex archive paths and dated
+// layouts already emitted by CCT exports.
+var archivedSessionEntryRe = regexp.MustCompile(`^archived_sessions/(rollout-[^/]+|\d{4}/\d{2}/\d{2}/rollout-[^/]+)\.jsonl(\.zst)?$`)
+
 // claudeEntryRe matches the only Claude Code bundle paths we will import:
 // transcripts under projects/<encoded-cwd>/<uuid>.jsonl. The encoded folder and
 // the uuid are single path segments (no nested directories, no traversal).
@@ -53,6 +57,12 @@ func CleanRelPath(name string) (string, error) {
 // rollout file under sessions/YYYY/MM/DD/.
 func IsSessionEntry(rel string) bool {
 	return sessionEntryRe.MatchString(rel)
+}
+
+// IsArchivedSessionEntry reports whether a (already cleaned) relative path is a
+// Codex rollout file under archived_sessions/.
+func IsArchivedSessionEntry(rel string) bool {
+	return archivedSessionEntryRe.MatchString(rel)
 }
 
 // IsClaudeSessionEntry reports whether a (already cleaned) relative path is a

@@ -464,8 +464,9 @@ func manifestSession(s sessions.Session, bundlePath, sum string) ManifestSession
 }
 
 // bundlePathFor returns the forward-slash path inside the ZIP for a session. For
-// Codex it preserves the YYYY/MM/DD layout under sessions/ (or archived_sessions/);
-// for Claude Code it preserves the projects/<encoded-cwd>/<uuid>.jsonl layout.
+// Codex it preserves the scanned relative layout under sessions/ or
+// archived_sessions/; for Claude Code it preserves the
+// projects/<encoded-cwd>/<uuid>.jsonl layout.
 func bundlePathFor(s sessions.Session, kind agent.Kind) string {
 	if agent.Normalize(kind) == agent.Claude {
 		return path.Join(claudehome.ProjectsSubdir, s.RelPath)

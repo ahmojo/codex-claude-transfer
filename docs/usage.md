@@ -69,7 +69,57 @@ recipient/identity key files.
 
 ## Common workflows
 
-### Project path changed
+### Relocate a Codex project
+
+When a Codex project moves to a different folder on the same machine, `relocate`
+packages the matching sessions into a private temporary bundle and feeds it back
+through the normal checked import path. Preview first:
+
+```bash
+cct relocate /old/project /new/project --dry-run
+```
+
+If you already copied or moved the project, `NEW` must exist and the command
+updates only the sessions:
+
+```bash
+cct relocate /old/project /new/project
+```
+
+To have `cct` rename the project directory too, add `--move-project`. This uses
+an atomic same-filesystem rename; it intentionally does not fall back to a
+copy-and-delete operation:
+
+```bash
+cct relocate /old/project /new/project --move-project
+```
+
+Archived sessions are excluded by default. Add `--include-archived` to relocate
+matching rollouts under `archived_sessions/` through the same backup and undo
+path:
+
+```bash
+cct relocate /old/project /new/project --include-archived
+```
+
+Stop Codex before the real run so it cannot append to a session during
+relocation. CCT checks that every selected rollout still matches the temporary
+bundle, backs up each original session, records the standard undo journal, and
+checks the real import result before reporting success. An import error or
+incomplete result restores session backups and rolls the project directory back.
+`cct undo` restores session files only; if `--move-project` succeeded, move the
+project directory back separately.
+
+If any compressed rollout has unknown cwd metadata, relocation stops before
+changing files. Install [`zstd`](https://github.com/facebook/zstd) and retry so
+CCT can verify whether every compressed session belongs to the project.
+
+Relocate currently supports Codex only. Claude Code also encodes cwd into its
+transcript directory layout, which requires a separate source-removal and undo
+design. Claude support, including `--claude-home`, is tracked in
+[#13](https://github.com/ahmojo/codex-claude-transfer/issues/13).
+
+### Remap a project during import
 
 Codex and Claude Code group sessions by recorded working directory. If a project
 lives at a different path on the target machine, remap it on import:
@@ -151,8 +201,8 @@ the command you are about to run.
 
 ### Undo the last import
 
-`import` is the only command that writes files, so it records a small journal you
-can reverse:
+Commands that write session files flow through the import engine, so `import`
+and `relocate` record a small journal you can reverse:
 
 ```bash
 cct undo --dry-run    # preview what would be undone
