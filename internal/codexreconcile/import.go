@@ -39,7 +39,7 @@ func ThreadsChangedByImport(home codexhome.Home, result bundle.ImportResult) (Im
 		default:
 			continue
 		}
-		id := strings.TrimSpace(byPath[comparablePath(item.DestPath)])
+		id := byPath[comparablePath(item.DestPath)]
 		if !ValidThreadID(id) {
 			changed.Unknown++
 			continue

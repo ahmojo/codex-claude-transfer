@@ -37,8 +37,10 @@ process owns any index repair. Because app-server is experimental, an unavailabl
 or incompatible protocol is a non-fatal reconcile failure: the rollout import
 remains complete and cct prints restart guidance. It prints an exact
 `cct resume <thread-id> --run` fallback only when the imported rollout's
-`session_meta.id` is a valid UUID and the selected Codex home can be represented
-safely in a copy-paste shell command.
+`session_meta.id` is an exact UUID-shaped value and the selected Codex home can
+be represented byte-for-byte in the same copy-paste command across sh,
+PowerShell, and cmd.exe. Ambiguous paths (for example, ones containing
+consecutive backslashes) get restart guidance without a resume command.
 
 ## Optional external tools
 

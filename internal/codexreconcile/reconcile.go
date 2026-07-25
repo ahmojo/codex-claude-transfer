@@ -36,6 +36,8 @@ var (
 // Options configures a post-import reconciliation attempt.
 type Options struct {
 	CodexHome string
+	// ThreadIDs must contain exact canonical UUID-shaped IDs. Reconcile rejects
+	// the entire request before starting Codex if any value is invalid.
 	ThreadIDs []string
 	// CodexPath overrides executable discovery. It is primarily useful for
 	// controlled integration tests; normal callers should leave it empty.
@@ -66,8 +68,14 @@ const (
 // Reconcile starts a short-lived Codex app-server scoped to CodexHome, probes
 // the protocol, asks Codex to read any missing thread IDs, then verifies them
 // through thread/list. A failure never changes the imported rollout files.
+// Thread IDs are validated again at this public boundary even when callers
+// obtained them from an already-validated import scan.
 func Reconcile(parent context.Context, opts Options) (Result, error) {
-	result := Result{Requested: uniqueSorted(opts.ThreadIDs)}
+	requested, err := validatedUniqueSorted(opts.ThreadIDs)
+	if err != nil {
+		return Result{}, err
+	}
+	result := Result{Requested: requested}
 	if len(result.Requested) == 0 {
 		return result, nil
 	}
@@ -388,18 +396,20 @@ func (b *lockedBuffer) String() string {
 	return b.b.String()
 }
 
-func uniqueSorted(ids []string) []string {
+func validatedUniqueSorted(ids []string) ([]string, error) {
 	seen := make(map[string]bool)
 	result := make([]string, 0, len(ids))
-	for _, id := range ids {
-		id = strings.TrimSpace(id)
-		if id != "" && !seen[id] {
+	for i, id := range ids {
+		if !ValidThreadID(id) {
+			return nil, fmt.Errorf("invalid Codex thread ID at position %d: expected UUID in 8-4-4-4-12 hexadecimal form", i+1)
+		}
+		if !seen[id] {
 			seen[id] = true
 			result = append(result, id)
 		}
 	}
 	sort.Strings(result)
-	return result
+	return result, nil
 }
 
 func samePath(a, b string) bool {

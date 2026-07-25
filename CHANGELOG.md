@@ -7,9 +7,11 @@ All notable changes to codex-claude-transfer are documented here.
 ### Security / hardening
 - **Reconcile fallback commands now validate untrusted values before rendering.**
   Bundle-controlled `session_meta.id` values must be canonical UUIDs before cct
-  sends them to Codex or includes them in CLI/browser copy-paste guidance.
-  Fallback commands are also suppressed when `CODEX_HOME` cannot be represented
-  safely across supported shells; restart guidance remains available.
+  sends them to Codex or includes them in CLI/browser copy-paste guidance; the
+  native reconcile entry point independently rejects the whole request if any
+  ID is invalid. Fallback commands are also suppressed when `CODEX_HOME` cannot
+  be represented byte-for-byte across supported shells (including paths with
+  consecutive backslashes); restart guidance remains available.
 
 ### Added
 - **Opt-in `cct import --reconcile` for Codex discovery.** After a native Codex

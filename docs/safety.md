@@ -507,8 +507,10 @@ These are intentional non-goals. They keep the tool small, predictable, and safe
    `--reconcile`; if Codex's experimental protocol is unavailable, follow the
    printed restart guidance. cct prints an exact
    `cct resume <thread-id> --run` fallback only after validating the rollout ID
-   as a UUID and confirming the selected Codex home is safe to embed in the
-   copy-paste command.
+   as an exact UUID-shaped value and confirming the selected Codex home will be
+   preserved byte-for-byte by sh, PowerShell, and cmd.exe. Ambiguous values,
+   including homes containing consecutive backslashes, suppress the command and
+   leave restart as the safe fallback.
 8. If the session needs the project's code on this machine, either export with
    `--with-git` and follow the printed `git clone …` commands, or import with
    `--clone <dir>` to fetch the recorded commit (review the remote URL with

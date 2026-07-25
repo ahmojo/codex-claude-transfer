@@ -49,7 +49,9 @@ func ResumeFallbackCommands(threadIDs []string, codexHome string, limit int) []s
 }
 
 func safeQuotedShellValue(value string) bool {
-	if value == "" || strings.HasSuffix(value, `\`) {
+	// In POSIX double quotes, \\ is decoded to \. Reject it so the same
+	// rendered command preserves the argument in sh, PowerShell, and cmd.exe.
+	if value == "" || strings.HasSuffix(value, `\`) || strings.Contains(value, `\\`) {
 		return false
 	}
 	const shellMetacharacters = "\"'`$;&|<>()%!^"
