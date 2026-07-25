@@ -10,6 +10,7 @@ import (
 
 	"github.com/ahmojo/codex-claude-transfer/internal/agent"
 	"github.com/ahmojo/codex-claude-transfer/internal/bundle"
+	"github.com/ahmojo/codex-claude-transfer/internal/codexreconcile"
 	"github.com/ahmojo/codex-claude-transfer/internal/doctor"
 	"github.com/ahmojo/codex-claude-transfer/internal/lansync"
 	"github.com/ahmojo/codex-claude-transfer/internal/repair"
@@ -582,17 +583,17 @@ func printPostImportReconcile(w io.Writer, report postImportReconcile) {
 	for _, warning := range report.Result.Warnings {
 		fmt.Fprintf(w, "warning: %s\n", safeTerminal(warning))
 	}
-	fmt.Fprintln(w, "Fallback: restart the Codex App. To force Codex to read a specific imported thread now, run:")
+	fmt.Fprintln(w, "Fallback: restart the Codex App.")
 	const commandLimit = 5
-	for i, id := range report.ThreadIDs {
-		if i == commandLimit {
-			fmt.Fprintf(w, "  ... and %d more thread(s); restarting Codex is simpler for a large import.\n", len(report.ThreadIDs)-commandLimit)
-			break
+	commands := codexreconcile.ResumeFallbackCommands(report.ThreadIDs, report.CodexHome, commandLimit)
+	if len(commands) > 0 {
+		fmt.Fprintln(w, "To force Codex to read a specific imported thread now, run:")
+		for _, command := range commands {
+			fmt.Fprintf(w, "  %s\n", command)
 		}
-		fmt.Fprintf(w, "  cct resume %s --run --codex-home \"%s\"\n", safeTerminal(id), safeTerminal(report.CodexHome))
-	}
-	if len(report.ThreadIDs) == 0 {
-		fmt.Fprintf(w, "  cct resume <thread-id> --run --codex-home \"%s\"\n", safeTerminal(report.CodexHome))
+		if len(report.ThreadIDs) > len(commands) {
+			fmt.Fprintln(w, "  Some resume commands were omitted; restarting Codex is the safe fallback.")
+		}
 	}
 	fmt.Fprintln(w, "cct did not write Codex SQLite or session_index.jsonl.")
 }

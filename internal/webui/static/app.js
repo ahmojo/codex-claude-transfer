@@ -390,10 +390,14 @@ el("import-run").addEventListener("click", async () => {
       if (d.reconcile.error) {
         h += '<div class="row warn">The rollout import is complete, but Codex discovery could not be verified: ' + esc(d.reconcile.error) + "</div>";
         (d.reconcile.warnings || []).forEach(w => { h += '<div class="row warn">' + esc(w) + "</div>"; });
-        h += '<div class="preview-tip">Restart the Codex App. To force Codex to read a specific imported thread now, run:</div>';
-        (d.reconcile.fallback_commands || []).forEach(cmd => {
-          h += '<div class="row mono cmd">' + esc(cmd) + "</div>";
-        });
+        const fallbackCommands = d.reconcile.fallback_commands || [];
+        h += '<div class="preview-tip">Restart the Codex App.</div>';
+        if (fallbackCommands.length) {
+          h += '<div class="preview-tip">To force Codex to read a specific imported thread now, run:</div>';
+          fallbackCommands.forEach(cmd => {
+            h += '<div class="row mono cmd">' + esc(cmd) + "</div>";
+          });
+        }
       } else if (d.reconcile.requested === 0) {
         h += '<div class="row success">No changed Codex threads required discovery reconciliation.</div>';
       } else {

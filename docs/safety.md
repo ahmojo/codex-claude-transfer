@@ -505,7 +505,10 @@ These are intentional non-goals. They keep the tool small, predictable, and safe
 7. **Restart the Codex App (or run Codex again)** so it scans and reconciles the
    imported files. For a native Codex bundle you may instead import with
    `--reconcile`; if Codex's experimental protocol is unavailable, follow the
-   printed restart / `cct resume <thread-id> --run` fallback.
+   printed restart guidance. cct prints an exact
+   `cct resume <thread-id> --run` fallback only after validating the rollout ID
+   as a UUID and confirming the selected Codex home is safe to embed in the
+   copy-paste command.
 8. If the session needs the project's code on this machine, either export with
    `--with-git` and follow the printed `git clone …` commands, or import with
    `--clone <dir>` to fetch the recorded commit (review the remote URL with

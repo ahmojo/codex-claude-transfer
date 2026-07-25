@@ -655,18 +655,7 @@ func reconcileImportedSessions(ctx context.Context, home codexhome.Home, result 
 
 func importReconcileFallbacks(threadIDs []string, codexHome string) []string {
 	const limit = 5
-	ids := threadIDs
-	if len(ids) > limit {
-		ids = ids[:limit]
-	}
-	commands := make([]string, 0, len(ids))
-	for _, id := range ids {
-		commands = append(commands, fmt.Sprintf(`cct resume %s --run --codex-home "%s"`, id, codexHome))
-	}
-	if len(commands) == 0 {
-		commands = append(commands, fmt.Sprintf(`cct resume <thread-id> --run --codex-home "%s"`, codexHome))
-	}
-	return commands
+	return codexreconcile.ResumeFallbackCommands(threadIDs, codexHome, limit)
 }
 
 // handleTranslateImport performs a cross-agent handoff (import --to): it reads the

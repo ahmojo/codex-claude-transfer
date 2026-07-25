@@ -35,8 +35,10 @@ changed thread IDs missing from its state-backed list, then verifies them throug
 `thread/list`. cct does not write SQLite or `session_index.jsonl`; the Codex
 process owns any index repair. Because app-server is experimental, an unavailable
 or incompatible protocol is a non-fatal reconcile failure: the rollout import
-remains complete and cct prints exact restart / `cct resume <thread-id> --run`
-fallback guidance.
+remains complete and cct prints restart guidance. It prints an exact
+`cct resume <thread-id> --run` fallback only when the imported rollout's
+`session_meta.id` is a valid UUID and the selected Codex home can be represented
+safely in a copy-paste shell command.
 
 ## Optional external tools
 

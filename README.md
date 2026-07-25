@@ -99,9 +99,10 @@ Use `--tool claude` to export Claude Code sessions. Use `import --to claude` or
 restart the agent so it re-scans the files. For a native Codex bundle, opt-in
 `--reconcile` can instead ask Codex's own app-server to read and verify the
 changed thread IDs immediately; failure leaves the imported rollout files intact
-and prints restart / `cct resume <thread-id> --run` fallback guidance. The
-terminal wizard (`cct ui`) and browser app (`cct app`) expose the same opt-in
-native Codex reconciliation flow.
+and prints restart guidance plus an exact `cct resume <thread-id> --run`
+fallback only when the rollout ID is a valid UUID and the command can be
+rendered safely. The terminal wizard (`cct ui`) and browser app (`cct app`)
+expose the same opt-in native Codex reconciliation flow.
 
 ## Compatibility
 
