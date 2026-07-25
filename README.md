@@ -104,6 +104,26 @@ fallback only when the rollout ID is a valid UUID and the command can be
 rendered safely. The terminal wizard (`cct ui`) and browser app (`cct app`)
 expose the same opt-in native Codex reconciliation flow.
 
+### Relocate a Codex project
+
+`cct relocate` rewrites the recorded working directory (`cwd`) in every matching
+Codex session, so the sessions remain grouped with the project at its new path:
+
+```bash
+# The project was already copied or moved; NEW exists.
+cct relocate /old/project /new/project --dry-run
+cct relocate /old/project /new/project
+
+# Move the project too; NEW must not exist yet.
+cct relocate /old/project /new/project --move-project
+```
+
+The command preserves session backups and never modifies Codex's SQLite
+database. Add `--include-archived` to relocate archived sessions too. See the
+[usage guide](docs/usage.md#relocate-a-codex-project) for rollback behavior,
+same-filesystem moves, and the current Codex-only scope. Claude Code relocation
+is tracked separately in [#13](https://github.com/ahmojo/codex-claude-transfer/issues/13).
+
 ## Compatibility
 
 Codex's and Claude Code's on-disk formats are their own internals and can change

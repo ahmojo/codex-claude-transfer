@@ -13,6 +13,7 @@ import (
 )
 
 const sampleRel = "sessions/2026/06/13/rollout-2026-06-13T18-22-01-aaaa1111-2222-3333-4444-555566667777.jsonl"
+const archivedSampleRel = "archived_sessions/rollout-2026-06-13T18-22-01-aaaa1111-2222-3333-4444-555566667777.jsonl"
 
 type rawEntry struct {
 	name string
@@ -233,6 +234,59 @@ func TestImportReplaceWithBackupDryRunWritesNothing(t *testing.T) {
 	}
 	if after := listFilesRel(t, target.Root); len(after) != len(before) {
 		t.Errorf("dry-run wrote/backed up files: before=%v after=%v", before, after)
+	}
+}
+
+func TestImportArchivedRequiresOptInAndUsesNormalSafetyPath(t *testing.T) {
+	dir := t.TempDir()
+	oldCWD := "/old/project"
+	newCWD := "/new/project"
+	data := []byte(`{"type":"session_meta","payload":{"id":"aaaa1111-2222-3333-4444-555566667777","cwd":"/old/project"}}` + "\n")
+	bundlePath := buildBundle(t, dir, archivedSampleRel, data, oldCWD, nil)
+	target := fakeHome(t)
+	dest := filepath.Join(target.Root, filepath.FromSlash(archivedSampleRel))
+
+	skipped, err := Import(target, ImportOptions{BundlePath: bundlePath})
+	if err != nil {
+		t.Fatalf("default import: %v", err)
+	}
+	if skipped.SkippedOther != 1 || len(skipped.Items) != 1 || skipped.Items[0].Action != ActionSkipArchived {
+		t.Fatalf("default archived result: %+v", skipped)
+	}
+	if _, err := os.Stat(dest); !os.IsNotExist(err) {
+		t.Fatalf("default import wrote archived destination or stat failed: %v", err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		t.Fatalf("create archived destination: %v", err)
+	}
+	if err := os.WriteFile(dest, data, 0o644); err != nil {
+		t.Fatalf("write archived destination: %v", err)
+	}
+	result, err := Import(target, ImportOptions{
+		BundlePath:        bundlePath,
+		IncludeArchived:   true,
+		MapCWD:            []CWDMapping{{Old: oldCWD, New: newCWD}},
+		ReplaceWithBackup: true,
+	})
+	if err != nil {
+		t.Fatalf("opt-in archived import: %v", err)
+	}
+	if result.Replaced != 1 || result.Mapped != 1 || result.SkippedOther != 0 {
+		t.Fatalf("opt-in archived result: %+v", result)
+	}
+	got, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("read relocated archived session: %v", err)
+	}
+	if !strings.Contains(string(got), `"cwd":"/new/project"`) {
+		t.Fatalf("archived cwd was not remapped: %s", got)
+	}
+	if result.Items[0].BackupPath == "" {
+		t.Fatal("archived replacement did not keep a backup")
+	}
+	if backup, err := os.ReadFile(result.Items[0].BackupPath); err != nil || string(backup) != string(data) {
+		t.Fatalf("archived backup data=%q err=%v", backup, err)
 	}
 }
 

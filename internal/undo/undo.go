@@ -1,6 +1,6 @@
 // Package undo records what an import wrote and reverses it on request, backing
-// `cct undo`. Import is cct's only operation that changes files, so a clean,
-// verifiable reversal of the last import is the natural safety net.
+// `cct undo`. Every command that changes session files, including relocate,
+// delegates those changes to import so they share one verifiable safety net.
 //
 // A journal is written per import into cct's own config directory (never inside a
 // coding-agent home). Each entry carries the destination path, the SHA-256 of the

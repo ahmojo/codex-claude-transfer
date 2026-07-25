@@ -85,10 +85,11 @@ accidentally printed secrets. Treat it like shell history plus source context.
 
 ## The undo journal
 
-`cct import` is the only command that writes session files, so each run records a
-small **journal** that `cct undo` uses to reverse it. Because a journal points at
-real files — and merge/replace journals reference backups that contain your
-previous session bytes — its lifecycle is worth understanding.
+The import engine is the only code path that writes session files. Commands such
+as `cct import` and `cct relocate` delegate to it and record a small **journal**
+that `cct undo` uses to reverse the changes. Because a journal points at real
+files — and merge/replace journals reference backups that contain your previous
+session bytes — its lifecycle is worth understanding.
 
 - **Location.** Journals live under cct's own config directory, in the `undo/`
   subfolder — never inside a coding-agent home. The base directory is

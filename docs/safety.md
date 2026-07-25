@@ -99,6 +99,29 @@ plain `.jsonl` file.
 By default there is no force overwrite: a differing file is **never** replaced,
 and if you see conflicts reported, your existing sessions were not modified.
 
+### Relocating a Codex project
+
+`cct relocate OLD NEW` is a local wrapper around the same export, cwd-mapping,
+and import engine. It first creates a bundle inside a private temporary
+directory, validates the complete mapped import in dry-run mode, and verifies
+that the source rollouts did not change while the plan was prepared. The real
+import opts into `--replace-with-backup`, so every rewritten rollout keeps its
+original bytes and participates in the standard undo journal. CCT validates the
+real import result against the same completeness invariant before reporting
+success; an incomplete result triggers session rollback.
+
+Archived sessions use the same safety path only when `--include-archived` is
+explicit. If a compressed rollout's cwd cannot be recovered, relocation refuses
+to proceed because it cannot prove that every matching session will be updated.
+
+With `--move-project`, CCT renames the project directory only after the session
+preflight succeeds. It supports same-filesystem renames and rolls the directory
+back if import fails or produces an incomplete result; it never falls back to
+copy-and-delete. Stop Codex before relocating so it cannot append to a rollout
+between validation and replacement. Claude Code relocation is not supported
+because its cwd also controls transcript directory placement; that workflow is
+tracked in [#13](https://github.com/ahmojo/codex-claude-transfer/issues/13).
+
 ### Incremental sync (`--merge`): append-only, lossless
 
 Session files (Codex rollouts and Claude transcripts) are **append-only logs** —

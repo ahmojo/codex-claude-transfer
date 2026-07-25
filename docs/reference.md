@@ -22,6 +22,7 @@ Use this page when you need exact commands and flags. For guided workflows, see
 | `cct inspect <bundle>` | Show a bundle's manifest and contents, read-only, and flag missing recorded project folders. |
 | `cct diff <bundle>` | Preview what importing the bundle would do — new, would-grow (with line counts), already-present, and conflicting sessions — read-only, nothing is written. Honors the same selection/remap flags as `import`. |
 | `cct import <bundle>` | Import session files into the matching agent home, or translate across agents with `--to`. Verifies checksums and never overwrites by default. Filter which sessions to import with `--session`, `--project`, `--since`, or `--match`; native Codex imports may opt into post-import discovery with `--reconcile`. |
+| `cct relocate OLD NEW` | Rewrite Codex sessions after a project folder changes location. By default `NEW` must already exist; add `--move-project` to rename the folder too. Claude Code and `--claude-home` are tracked separately in [#13](https://github.com/ahmojo/codex-claude-transfer/issues/13). |
 | `cct undo [--list] [--dry-run]` | Reverse the most recent import: delete the files it created and restore the backups it made. Only touches files that still match what the import wrote, so later edits are never lost. `--list` shows recent imports; `--dry-run` previews. |
 | `cct repair-times` | Fix modification times for sessions imported by older versions. Supports `--dry-run`; changes mtimes only. |
 | `cct sync serve` / `cct sync connect [host:port]` / `cct sync daemon` | Experimental LAN sync. Peer-to-peer, no server/cloud, paired by one-time code or remembered devices, requires `--i-understand`. |
@@ -35,7 +36,7 @@ Use this page when you need exact commands and flags. For guided workflows, see
 | ---- | ---------- | ------- |
 | `--tool <codex\|claude>` | all | Which agent to act on. Default: auto-detect when possible. On import, the bundle's recorded tool wins. |
 | `--codex-home <path>` | all | Use a specific Codex home instead of the default. Also honors `$CODEX_HOME`. |
-| `--claude-home <path>` | all | Use a specific Claude Code home instead of `~/.claude`. Also honors `$CLAUDE_HOME`. |
+| `--claude-home <path>` | Claude-capable commands except relocate | Use a specific Claude Code home instead of `~/.claude`. Also honors `$CLAUDE_HOME`. Claude relocation is tracked in [#13](https://github.com/ahmojo/codex-claude-transfer/issues/13). |
 | `--project <path>` | export, import, diff | Export: filter sessions by recorded cwd. Import/diff: import only the sessions whose recorded cwd is `<path>` — pull one project out of a multi-project bundle. |
 | `--all` | export | Export every session regardless of cwd. Mutually exclusive with `--project`. |
 | `--session <id>` | export, import, diff | Export exactly one session by thread id prefix. Import/diff: act only on matching sessions. Repeatable on import/diff. |
@@ -44,9 +45,10 @@ Use this page when you need exact commands and flags. For guided workflows, see
 | `--git-push` | export | Opt-in. Push the current branch to its own remote first so the recorded commit is fetchable. Never force-pushes. |
 | `--strip-images` | export | Replace inline base64 images with placeholders to shrink the bundle. Lossy; needs `zstd` for `.jsonl.zst`. |
 | `--output`, `-o <path>` | export | Bundle output path. Defaults are derived from `--project`, `--all`, or `--session`. |
-| `--include-archived` | list, export | Include archived sessions. |
-| `--json` | doctor, list, inspect, export, import, diff, sync | Print machine-readable JSON instead of text. |
-| `--dry-run` | import, undo, sync | Validate and report only; write nothing. |
+| `--include-archived` | list, export, relocate | Include archived sessions. |
+| `--json` | doctor, list, inspect, export, import, relocate, diff, sync | Print machine-readable JSON instead of text. |
+| `--dry-run` | import, relocate, undo, sync | Validate and report only; write nothing. |
+| `--move-project` | relocate | Rename `OLD` to `NEW` before rewriting session cwd. Uses a same-filesystem rename only; `NEW` must not exist. |
 | `--list` | undo | Show recent imports (newest first) instead of reversing one. |
 | `--to <codex\|claude>` | import | Cross-agent handoff: translate bundle sessions into the other agent's format. |
 | `--regex` / `--case-sensitive` | search, export, import, diff | Treat the query (`--match`) as regex / match case-sensitively. |

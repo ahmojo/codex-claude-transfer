@@ -71,6 +71,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runInspect(rest, stdout, stderr)
 	case "import":
 		return runImport(rest, stdout, stderr)
+	case "relocate":
+		return runRelocate(rest, stdout, stderr)
 	case "diff":
 		return runDiff(rest, stdout, stderr)
 	case "undo":
@@ -1573,8 +1575,10 @@ Commands:
   diff      Preview what importing a bundle would do (new / grow / conflict),
             read-only — nothing is written
   import    Import a .codexbundle into your Codex home (never overwrites).
-            Filter with --session/--project/--since/--match; use --reconcile
-            to ask Codex to discover and verify changed rollouts immediately
+		    Filter with --session/--project/--since/--match; use --reconcile
+		    to ask Codex to discover and verify changed rollouts immediately
+  relocate  Rewrite a Codex project's session cwd after its folder moves;
+		    --move-project also renames the project directory
   undo      Reverse the most recent import (delete created files, restore
             backups); --list shows recent imports, --dry-run previews
   repair-times  Reset imported session files' modification time to their real
@@ -1602,9 +1606,9 @@ Flags:
                         (also honors $CODEX_HOME)
   --claude-home <path>  Use a specific Claude Code home instead of ~/.claude
                         (also honors $CLAUDE_HOME)
-  --include-archived    list, export: also consider archived sessions
-  --json                doctor/list/inspect/export/import: print a machine-
-                        readable JSON summary on stdout instead of human text
+  --include-archived    list, export, relocate: also consider archived sessions
+  --json                doctor/list/inspect/export/import/relocate: print a
+                        machine-readable JSON summary on stdout instead of text
   --port <n>            app: serve the desktop GUI on this port (default: a free
                         port chosen automatically)
   --no-browser          app: do not auto-open the browser; just print the URL
@@ -1636,6 +1640,9 @@ Flags:
                         conversation text is kept. Needs zstd for .jsonl.zst
   --output, -o <path>   export: bundle output path (default <project>.codexbundle)
   --dry-run             import: validate and report only, write nothing
+                        relocate: preview session rewrites and any directory move
+  --move-project        relocate: rename OLD to NEW before rewriting sessions;
+                        same-filesystem moves only (without it, NEW must exist)
   --merge               import: incremental sync. When a session already exists
                         locally but grew on the other device, append only the new
                         messages (the local file is a prefix of the bundle's, so
@@ -1739,6 +1746,9 @@ Examples:
   cct import ./my-project.codexbundle --map-cwd-here   # group under the current folder
   cct import ./my-project.codexbundle --replace-with-backup
   cct import ./my-project.codexbundle --import-as-copy
+  cct relocate /old/project /new/project --dry-run
+  cct relocate /old/project /new/project --move-project
+  cct relocate /old/project /new/project --include-archived
   cct import ./my-project.codexbundle --to claude   # Codex bundle -> Claude Code
   cct import ./claude.codexbundle      --to codex    # Claude bundle -> Codex
   cct import ./my-project.codexbundle --clone ~/dev/project

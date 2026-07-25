@@ -22,7 +22,7 @@ func TestCompletionScripts(t *testing.T) {
 			t.Errorf("%s completion missing %q:\n%s", shell, marker, s)
 		}
 		// Every command and the --json flag must appear in each script.
-		for _, want := range []string{"export", "import", "diff", "undo", "json", "reconcile"} {
+		for _, want := range []string{"export", "import", "relocate", "diff", "undo", "move-project", "json", "reconcile"} {
 			if !strings.Contains(s, want) {
 				t.Errorf("%s completion missing %q", shell, want)
 			}
