@@ -3,6 +3,7 @@
 package codexreconcile
 
 import (
+	"context"
 	"errors"
 	"io"
 	"os"
@@ -22,7 +23,9 @@ func configureCommandCancellation(cmd *exec.Cmd) {
 }
 
 func killWindowsProcessTree(process *os.Process) error {
-	taskkill := exec.Command("taskkill.exe", "/PID", strconv.Itoa(process.Pid), "/T", "/F")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	taskkill := exec.CommandContext(ctx, "taskkill.exe", "/PID", strconv.Itoa(process.Pid), "/T", "/F")
 	taskkill.Stdout = io.Discard
 	taskkill.Stderr = io.Discard
 	if err := taskkill.Run(); err == nil {
