@@ -344,19 +344,9 @@ el("import-map-here").addEventListener("change", e => setMapsDisabled(e.target.c
 // and Claude-native bundles keep the control hidden because their discovery
 // mechanisms are different.
 function configureReconcile(d) {
-  const row = el("import-reconcile-row"), hint = el("import-reconcile-hint");
-  const box = el("import-reconcile");
-  const nativeCodex = !d.translated && String(d.tool || "codex").toLowerCase() !== "claude";
-  if (!nativeCodex) {
-    row.style.display = "none"; hint.style.display = "none";
-    box.checked = false;
-    return;
-  }
-  row.style.display = "flex"; hint.style.display = "block";
+  CCTReconcileState.configureReconcile(d, el);
 }
-el("import-translate").addEventListener("change", e => {
-  if (e.target.value) configureReconcile({ translated: true });
-});
+CCTReconcileState.bindTranslationChange(el("import-translate"), () => lastPreview, el);
 
 el("import-add-map").addEventListener("click", () => {
   const r = document.createElement("div");
