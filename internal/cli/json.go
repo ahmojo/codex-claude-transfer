@@ -7,6 +7,7 @@ import (
 
 	"github.com/ahmojo/codex-claude-transfer/internal/agent"
 	"github.com/ahmojo/codex-claude-transfer/internal/bundle"
+	"github.com/ahmojo/codex-claude-transfer/internal/codexreconcile"
 	"github.com/ahmojo/codex-claude-transfer/internal/doctor"
 	"github.com/ahmojo/codex-claude-transfer/internal/lansync"
 	"github.com/ahmojo/codex-claude-transfer/internal/search"
@@ -204,6 +205,7 @@ type importReconcileJSON struct {
 	VerificationMethod string   `json:"verification_method,omitempty"`
 	Warnings           []string `json:"warnings,omitempty"`
 	Error              string   `json:"error,omitempty"`
+	FallbackCommands   []string `json:"fallback_commands,omitempty"`
 }
 
 func printImportJSON(w io.Writer, path string, res bundle.ImportResult, report postImportReconcile) {
@@ -222,6 +224,12 @@ func printImportJSON(w io.Writer, path string, res bundle.ImportResult, report p
 		}
 		if report.Err != nil {
 			reconcile.Error = report.Err.Error()
+			const commandLimit = 5
+			reconcile.FallbackCommands = codexreconcile.ResumeFallbackCommands(
+				report.ThreadIDs,
+				report.CodexHome,
+				commandLimit,
+			)
 		}
 	}
 	writeJSON(w, importJSON{
