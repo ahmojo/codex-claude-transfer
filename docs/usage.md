@@ -41,6 +41,9 @@ remains complete and cct prints restart guidance. It prints an exact
 be represented byte-for-byte in the same copy-paste command across sh,
 PowerShell, and cmd.exe. Ambiguous paths (for example, ones containing
 consecutive backslashes) get restart guidance without a resume command.
+With `--json`, the same validated commands are returned on reconcile failure as
+`reconcile.fallback_commands`; the field is omitted when no safe command is
+available.
 
 ## Optional external tools
 
