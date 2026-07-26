@@ -21,6 +21,7 @@ func TestReconcileWindowsWrapperTimeoutKillsChild(t *testing.T) {
 	}
 	temp := t.TempDir()
 	pidPath := filepath.Join(temp, "child.pid")
+	t.Cleanup(func() { killPIDFileProcess(pidPath) })
 	wrapperPath := filepath.Join(temp, "codex.cmd")
 	wrapper := fmt.Sprintf("@echo off\r\n\"%s\" -test.run=^TestReconcileWindowsNeverReplyChild$ --\r\n", executable)
 	if err := os.WriteFile(wrapperPath, []byte(wrapper), 0o644); err != nil {
@@ -41,20 +42,21 @@ func TestReconcileWindowsWrapperTimeoutKillsChild(t *testing.T) {
 			CodexHome: home,
 			ThreadIDs: []string{testThreadA},
 			CodexPath: wrapperPath,
-			Timeout:   300 * time.Millisecond,
+			Timeout:   2 * time.Second,
 		})
 		done <- outcome{err: err, elapsed: time.Since(started)}
 	}()
 
+	pid := waitForPID(t, pidPath)
 	select {
 	case got := <-done:
 		if got.err == nil {
 			t.Fatal("Reconcile unexpectedly succeeded")
 		}
-		if got.elapsed > 2*time.Second {
+		if got.elapsed > 4*time.Second {
 			t.Fatalf("Reconcile returned after %s, want bounded cancellation", got.elapsed)
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(5 * time.Second):
 		killPIDFileProcess(pidPath)
 		select {
 		case <-done:
@@ -63,7 +65,6 @@ func TestReconcileWindowsWrapperTimeoutKillsChild(t *testing.T) {
 		t.Fatal("Reconcile remained blocked after its timeout")
 	}
 
-	pid := waitForPID(t, pidPath)
 	process, err := os.FindProcess(pid)
 	if err != nil {
 		return
