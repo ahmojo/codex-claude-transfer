@@ -2,6 +2,7 @@ package codexreconcile
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -17,6 +18,34 @@ const (
 	testThreadA = "11111111-1111-4111-8111-111111111111"
 	testThreadB = "22222222-2222-4222-8222-222222222222"
 )
+
+func TestLockedBufferKeepsBoundedTail(t *testing.T) {
+	var buffer lockedBuffer
+	payload := bytes.Repeat([]byte("a"), maxStderrBufferSize+32)
+	copy(payload[len(payload)-4:], "TAIL")
+
+	n, err := buffer.Write(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != len(payload) {
+		t.Fatalf("Write reported %d bytes, want %d", n, len(payload))
+	}
+	if got := len(buffer.String()); got != maxStderrBufferSize {
+		t.Fatalf("buffer length = %d, want %d", got, maxStderrBufferSize)
+	}
+
+	if _, err := buffer.Write([]byte("END")); err != nil {
+		t.Fatal(err)
+	}
+	got := buffer.String()
+	if len(got) != maxStderrBufferSize {
+		t.Fatalf("buffer length after append = %d, want %d", len(got), maxStderrBufferSize)
+	}
+	if !strings.HasSuffix(got, "TAILEND") {
+		t.Fatalf("buffer did not retain its newest bytes: suffix %q", got[len(got)-16:])
+	}
+}
 
 func TestReconcileReadsMissingThreadAndVerifies(t *testing.T) {
 	installHelperCommand(t, "normal")

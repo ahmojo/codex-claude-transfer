@@ -23,8 +23,9 @@ import (
 )
 
 const (
-	defaultTimeout = 20 * time.Second
-	maxMessageSize = 16 << 20
+	defaultTimeout      = 20 * time.Second
+	maxMessageSize      = 16 << 20
+	maxStderrBufferSize = 64 << 10
 )
 
 var (
@@ -391,19 +392,29 @@ func (s *appServer) stderrSuffix() string {
 
 type lockedBuffer struct {
 	mu sync.Mutex
-	b  bytes.Buffer
+	b  []byte
 }
 
 func (b *lockedBuffer) Write(p []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.b.Write(p)
+	written := len(p)
+	if len(p) >= maxStderrBufferSize {
+		b.b = append(b.b[:0], p[len(p)-maxStderrBufferSize:]...)
+		return written, nil
+	}
+	if overflow := len(b.b) + len(p) - maxStderrBufferSize; overflow > 0 {
+		copy(b.b, b.b[overflow:])
+		b.b = b.b[:len(b.b)-overflow]
+	}
+	b.b = append(b.b, p...)
+	return written, nil
 }
 
 func (b *lockedBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.b.String()
+	return string(b.b)
 }
 
 func validatedUniqueSorted(ids []string) ([]string, error) {
