@@ -218,18 +218,21 @@ func startServer(ctx context.Context, codexPath, codexHome string) (*appServer, 
 
 func codexCommand(ctx context.Context, path string, args ...string) *exec.Cmd {
 	ext := strings.ToLower(filepath.Ext(path))
+	var cmd *exec.Cmd
 	switch {
 	case runtime.GOOS == "windows" && (ext == ".cmd" || ext == ".bat"):
 		cmdArgs := []string{"/d", "/c", path}
 		cmdArgs = append(cmdArgs, args...)
-		return commandContext(ctx, "cmd.exe", cmdArgs...)
+		cmd = commandContext(ctx, "cmd.exe", cmdArgs...)
 	case runtime.GOOS == "windows" && ext == ".ps1":
 		cmdArgs := []string{"-NoProfile", "-NonInteractive", "-File", path}
 		cmdArgs = append(cmdArgs, args...)
-		return commandContext(ctx, "powershell.exe", cmdArgs...)
+		cmd = commandContext(ctx, "powershell.exe", cmdArgs...)
 	default:
-		return commandContext(ctx, path, args...)
+		cmd = commandContext(ctx, path, args...)
 	}
+	configureCommandCancellation(cmd)
+	return cmd
 }
 
 func (s *appServer) initialize() (struct {
@@ -363,8 +366,15 @@ func (s *appServer) close() {
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
-		_ = s.cmd.Process.Kill()
-		<-done
+		if s.cmd.Cancel != nil {
+			_ = s.cmd.Cancel()
+		} else if s.cmd.Process != nil {
+			_ = s.cmd.Process.Kill()
+		}
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+		}
 	}
 }
 
