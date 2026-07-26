@@ -2,7 +2,7 @@
 
 All notable changes to codex-claude-transfer are documented here.
 
-## Unreleased
+## [1.5.0] - 2026-07-26
 
 ### Security / hardening
 - **Reconcile fallback commands now validate untrusted values before rendering.**
@@ -14,6 +14,14 @@ All notable changes to codex-claude-transfer are documented here.
   consecutive backslashes); restart guidance remains available.
 
 ### Added
+- **`cct relocate` safely moves Codex sessions with their project.** The new
+  command rewrites recorded project paths through cct's existing checked
+  export/import path, supports dry-run previews and archived sessions, and can
+  optionally rename the project directory with `--move-project`. It validates
+  both the preview and real import result, keeps session backups and an undo
+  journal, and rolls back the sessions and project move if relocation is
+  incomplete. Claude Code relocation remains tracked separately in
+  [#13](https://github.com/ahmojo/codex-claude-transfer/issues/13).
 - **Opt-in `cct import --reconcile` for Codex discovery.** After a native Codex
   import changes rollout files, cct now capability-probes a short-lived Codex
   app-server, checks the state-backed thread list, asks Codex to `thread/read`
@@ -27,6 +35,10 @@ All notable changes to codex-claude-transfer are documented here.
   browser app (`cct app`) expose the same opt-in flow; the browser reports
   verification details or safe fallbacks without turning a reconcile failure
   into an import failure.
+- **GitHub releases now include a deterministic Go module-cache archive.** The
+  release workflow packages the dependencies needed for Gentoo source builds,
+  includes the archive in release checksums and provenance attestations, and
+  uploads it alongside the prebuilt binaries.
 
 ## [1.3.1] - 2026-07-22
 
