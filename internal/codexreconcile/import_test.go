@@ -49,3 +49,37 @@ func TestThreadsChangedByImportRejectsNonCanonicalSessionMetaID(t *testing.T) {
 		})
 	}
 }
+
+func TestThreadsChangedByImportReadsExactArchivedDestination(t *testing.T) {
+	root := t.TempDir()
+	home, err := codexhome.Detect(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const id = "aaaaaaaa-1111-4111-8111-111111111111"
+	dest := filepath.Join(
+		home.ArchivedSessionsDir,
+		"rollout-2026-07-25T12-00-00-"+id+".jsonl",
+	)
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"type":"session_meta","payload":{"id":"` + id + `","cwd":"/tmp/project","source":"cli"}}` + "\n"
+	if err := os.WriteFile(dest, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	changed, err := ThreadsChangedByImport(home, bundle.ImportResult{
+		Items: []bundle.ImportItem{{DestPath: dest, Action: bundle.ActionImport}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changed.IDs) != 1 || changed.IDs[0] != id {
+		t.Fatalf("ids = %#v, want [%q]", changed.IDs, id)
+	}
+	if changed.Unknown != 0 {
+		t.Fatalf("unknown = %d, want 0", changed.Unknown)
+	}
+}

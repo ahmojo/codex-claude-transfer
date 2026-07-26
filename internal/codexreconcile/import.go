@@ -1,7 +1,6 @@
 package codexreconcile
 
 import (
-	"fmt"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -22,34 +21,48 @@ type ImportThreads struct {
 // their actual session_meta IDs. It deliberately does not trust manifest thread
 // IDs, which are metadata rather than the source of truth Codex will read.
 func ThreadsChangedByImport(home codexhome.Home, result bundle.ImportResult) (ImportThreads, error) {
-	scan, err := sessions.Scan(home, sessions.ScanOptions{DecompressCompressed: true})
-	if err != nil {
-		return ImportThreads{}, fmt.Errorf("scan imported Codex rollouts for exact thread IDs: %w", err)
-	}
-	byPath := make(map[string]string, len(scan.Sessions))
-	for _, session := range scan.Sessions {
-		byPath[comparablePath(session.Path)] = session.ThreadID
-	}
-
 	var changed ImportThreads
 	seen := make(map[string]bool)
+	type pathResult struct {
+		id  string
+		err error
+	}
+	byPath := make(map[string]pathResult)
 	for _, item := range result.Items {
 		switch item.Action {
 		case bundle.ActionImport, bundle.ActionReplace, bundle.ActionUpdate, bundle.ActionImportCopy:
 		default:
 			continue
 		}
-		id := byPath[comparablePath(item.DestPath)]
-		if !ValidThreadID(id) {
+		if !withinDirectory(item.DestPath, home.SessionsDir) &&
+			!withinDirectory(item.DestPath, home.ArchivedSessionsDir) {
 			changed.Unknown++
 			continue
 		}
-		if !seen[id] {
-			seen[id] = true
-			changed.IDs = append(changed.IDs, id)
+		key := comparablePath(item.DestPath)
+		read, ok := byPath[key]
+		if !ok {
+			read.id, read.err = sessions.ReadThreadID(item.DestPath)
+			byPath[key] = read
+		}
+		if read.err != nil || !ValidThreadID(read.id) {
+			changed.Unknown++
+			continue
+		}
+		if !seen[read.id] {
+			seen[read.id] = true
+			changed.IDs = append(changed.IDs, read.id)
 		}
 	}
 	return changed, nil
+}
+
+func withinDirectory(path, root string) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func comparablePath(path string) string {
