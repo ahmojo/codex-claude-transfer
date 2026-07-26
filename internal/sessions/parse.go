@@ -128,6 +128,28 @@ func parseCompressedHead(path string) (parsedMeta, []string, error) {
 	return meta, warnings, nil
 }
 
+// ReadThreadID reads session_meta.id from one exact rollout path. Compressed
+// rollouts are decompressed read-only; no sibling rollout files or index state
+// are inspected.
+func ReadThreadID(path string) (string, error) {
+	var (
+		meta parsedMeta
+		err  error
+	)
+	if strings.HasSuffix(path, CompressedExt) {
+		meta, _, err = parseCompressedHead(path)
+	} else {
+		meta, _, err = parsePlainRollout(path)
+	}
+	if err != nil {
+		return "", err
+	}
+	if !meta.FoundSessionMeta {
+		return "", fmt.Errorf("no session_meta found")
+	}
+	return meta.ThreadID, nil
+}
+
 // consumeLine parses a single JSONL line into meta. It returns a warning string
 // if the line could not be parsed (empty string means no warning).
 func consumeLine(line string, lineNo int, meta *parsedMeta) string {

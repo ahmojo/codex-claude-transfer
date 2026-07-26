@@ -2,6 +2,32 @@
 
 All notable changes to codex-claude-transfer are documented here.
 
+## Unreleased
+
+### Security / hardening
+- **Reconcile fallback commands now validate untrusted values before rendering.**
+  Bundle-controlled `session_meta.id` values must be canonical UUIDs before cct
+  sends them to Codex or includes them in CLI/browser copy-paste guidance; the
+  native reconcile entry point independently rejects the whole request if any
+  ID is invalid. Fallback commands are also suppressed when `CODEX_HOME` cannot
+  be represented byte-for-byte across supported shells (including paths with
+  consecutive backslashes); restart guidance remains available.
+
+### Added
+- **Opt-in `cct import --reconcile` for Codex discovery.** After a native Codex
+  import changes rollout files, cct now capability-probes a short-lived Codex
+  app-server, checks the state-backed thread list, asks Codex to `thread/read`
+  missing exact IDs, and verifies the result. Protocol/startup/verification
+  failures never invalidate the completed file import and print restart plus,
+  when safely representable, exact `cct resume <thread-id> --run` fallbacks. cct
+  still never writes Codex SQLite or `session_index.jsonl` directly. A synthetic
+  live-import regression test
+  captures the previously observed file-present/list-missing state and verifies
+  native read-repair with Codex 0.144.6. The terminal wizard (`cct ui`) and
+  browser app (`cct app`) expose the same opt-in flow; the browser reports
+  verification details or safe fallbacks without turning a reconcile failure
+  into an import failure.
+
 ## [1.3.1] - 2026-07-22
 
 ### Security / hardening

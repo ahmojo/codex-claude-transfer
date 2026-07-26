@@ -462,7 +462,11 @@ to preview an import.
 These are intentional non-goals. They keep the tool small, predictable, and safe:
 
 - **Does not modify Codex's SQLite database.** Ever. It only works with rollout
-  files.
+  files. Opt-in `import --reconcile` does not open SQLite or
+  `session_index.jsonl`; it launches Codex's native app-server and asks Codex to
+  read/verify exact thread IDs. The Codex process may update its own rebuildable
+  index. If capability probing or verification fails, cct leaves the successful
+  rollout import alone and prints restart/resume fallback guidance.
 - **Does not rewrite session content by default.** Normal import is byte-for-byte.
   The only content mutations are opt-in and narrow: `--map-cwd` (the `cwd` field)
   and `--import-as-copy` (the `id` field), each touching a single `session_meta`
@@ -522,7 +526,14 @@ These are intentional non-goals. They keep the tool small, predictable, and safe
    diverged on this machine and you want the bundle's version, add
    `--replace-with-backup` (a backup of the local file is kept).
 7. **Restart the Codex App (or run Codex again)** so it scans and reconciles the
-   imported files.
+   imported files. For a native Codex bundle you may instead import with
+   `--reconcile`; if Codex's experimental protocol is unavailable, follow the
+   printed restart guidance. cct prints an exact
+   `cct resume <thread-id> --run` fallback only after validating the rollout ID
+   as an exact UUID-shaped value and confirming the selected Codex home will be
+   preserved byte-for-byte by sh, PowerShell, and cmd.exe. Ambiguous values,
+   including homes containing consecutive backslashes, suppress the command and
+   leave restart as the safe fallback.
 8. If the session needs the project's code on this machine, either export with
    `--with-git` and follow the printed `git clone …` commands, or import with
    `--clone <dir>` to fetch the recorded commit (review the remote URL with
