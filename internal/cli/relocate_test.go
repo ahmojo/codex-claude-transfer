@@ -588,7 +588,7 @@ func TestRunRelocateStopsIfSessionChangesDuringProjectMove(t *testing.T) {
 	}
 }
 
-func TestRunRelocateRejectsNestedPathsAndClaude(t *testing.T) {
+func TestRunRelocateRejectsNestedPaths(t *testing.T) {
 	tmp := t.TempDir()
 	oldPath := filepath.Join(tmp, "project")
 	newPath := filepath.Join(oldPath, "nested")
@@ -605,12 +605,27 @@ func TestRunRelocateRejectsNestedPathsAndClaude(t *testing.T) {
 	if code != 2 || !strings.Contains(errOut.String(), "must not contain") {
 		t.Fatalf("nested paths exit=%d stderr=%s", code, errOut.String())
 	}
+}
 
-	out.Reset()
-	errOut.Reset()
-	code = Run([]string{"relocate", oldPath, tmp, "--tool", "claude"}, &out, &errOut)
-	if code != 2 || !strings.Contains(errOut.String(), "supports Codex only") {
-		t.Fatalf("Claude relocate exit=%d stderr=%s", code, errOut.String())
+// TestRunRelocateRejectsClaudeHomeForCodex keeps the flag surface honest: a
+// Claude home has no meaning for a Codex relocation, so it is refused rather than
+// silently ignored.
+func TestRunRelocateRejectsClaudeHomeForCodex(t *testing.T) {
+	tmp := t.TempDir()
+	oldPath := filepath.Join(tmp, "old-project")
+	newPath := filepath.Join(tmp, "new-project")
+	if err := os.MkdirAll(newPath, 0o755); err != nil {
+		t.Fatalf("create new project: %v", err)
+	}
+
+	var out, errOut bytes.Buffer
+	code := Run([]string{
+		"relocate", oldPath, newPath,
+		"--tool", "codex", "--codex-home", filepath.Join(tmp, "codex-home"),
+		"--claude-home", filepath.Join(tmp, "claude-home"),
+	}, &out, &errOut)
+	if code != 2 || !strings.Contains(errOut.String(), "--claude-home applies to --tool claude only") {
+		t.Fatalf("claude-home with codex exit=%d stderr=%s", code, errOut.String())
 	}
 }
 

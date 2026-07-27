@@ -2,6 +2,28 @@
 
 All notable changes to codex-claude-transfer are documented here.
 
+## [Unreleased]
+
+### Added
+- **`cct relocate --tool claude` relocates a Claude Code project.** Claude records
+  a project both in each transcript's `cwd` and in the `projects/<encoded-cwd>/`
+  folder holding it, so relocation now moves the transcripts too: every remapped
+  transcript is written under the folder encoding `NEW` first, and each original
+  is backed up and removed only after all destination writes succeed — so a
+  session id is never present twice. It supports the same session-only and
+  `--move-project` modes as Codex, plus `--claude-home`. A destination that is
+  already taken, a transcript that changed mid-relocation, an unsafe path overlap,
+  or a cross-filesystem project move stops the command before anything is
+  written; a failure afterward restores the removed originals, deletes the
+  copies, and rolls the project rename back. `~/.claude.json` is never touched.
+  Closes [#13](https://github.com/ahmojo/codex-claude-transfer/issues/13).
+- **`cct undo` reverses a relocation's removals.** The undo journal (now version
+  2; version 1 journals stay reversible) records transcripts a relocation
+  removed, alongside the copies it created. Undo restores each original before
+  deleting its copy, and if an original cannot be restored — missing or tampered
+  backup, or something occupying its path again — the copy is deliberately kept,
+  so a session is never left with no copy on disk.
+
 ## [1.5.0] - 2026-07-26
 
 ### Security / hardening

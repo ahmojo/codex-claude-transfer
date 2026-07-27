@@ -28,8 +28,17 @@ import (
 	"github.com/ahmojo/codex-claude-transfer/internal/safety"
 )
 
-// JournalVersion is the on-disk journal schema version.
-const JournalVersion = 1
+// JournalVersion is the on-disk journal schema version written by this cct.
+//
+// Version 2 added the Removed/Pair entry fields used by Claude Code relocation
+// (a transcript that cct deleted from its old project folder after writing the
+// relocated copy). Version 1 journals are still understood and reversible, so an
+// upgrade never strands a recorded import; an older cct reading a version 2
+// journal refuses it outright, which is the safe direction.
+const JournalVersion = 2
+
+// minJournalVersion is the oldest schema this cct can still reverse.
+const minJournalVersion = 1
 
 // maxJournals bounds how many import journals are kept; older ones are pruned as
 // new imports are recorded. Undo only ever reverses the most recent import.
@@ -56,6 +65,18 @@ type Entry struct {
 	// Created is true when the import created a new file (no prior file at Dest),
 	// so reversal deletes it rather than restoring a backup.
 	Created bool `json:"created"`
+	// Removed is true when cct deleted the file at Dest after copying it to
+	// Backup. Claude Code relocation uses it: once the relocated transcript is
+	// written under the new project folder, the original under the old folder is
+	// removed so the session id is not duplicated. Reversal puts the original back
+	// from its hashed backup, and only when nothing else occupies Dest. A removed
+	// entry has no written bytes, so WroteSHA is empty. (Journal version 2+.)
+	Removed bool `json:"removed,omitempty"`
+	// Pair, when set, is the Dest of a Removed entry in the same journal that must
+	// be restored before this entry may be deleted. Relocation sets it on the new
+	// copy so undo can never delete the copy while the original is still missing.
+	// (Journal version 2+.)
+	Pair string `json:"pair,omitempty"`
 	// ThreadID and Preview are carried for a readable undo listing.
 	ThreadID string `json:"thread_id,omitempty"`
 	Preview  string `json:"preview,omitempty"`
@@ -193,14 +214,21 @@ func journalNames(dir string) ([]string, error) {
 // the recorded agent home, a missing hash, or a created/overwritten record that
 // disagrees with its backup fields all reject the whole journal.
 func Validate(j Journal) error {
-	if j.Version != JournalVersion {
-		return fmt.Errorf("unsupported journal version %d (this cct understands %d)", j.Version, JournalVersion)
+	if j.Version < minJournalVersion || j.Version > JournalVersion {
+		return fmt.Errorf("unsupported journal version %d (this cct understands %d-%d)", j.Version, minJournalVersion, JournalVersion)
 	}
 	if j.Home == "" || !filepath.IsAbs(j.Home) {
 		return fmt.Errorf("journal home %q is not an absolute path", j.Home)
 	}
 	if len(j.Entries) == 0 {
 		return fmt.Errorf("journal has no entries")
+	}
+	// Removed entries are the only valid Pair targets, so collect them first.
+	removedDests := map[string]bool{}
+	for _, e := range j.Entries {
+		if e.Removed {
+			removedDests[pathKey(e.Dest)] = true
+		}
 	}
 	for i, e := range j.Entries {
 		if e.Dest == "" || !filepath.IsAbs(e.Dest) {
@@ -209,7 +237,28 @@ func Validate(j Journal) error {
 		if !pathWithin(j.Home, e.Dest) {
 			return fmt.Errorf("entry %d: dest %q is outside the recorded home %q", i, e.Dest, j.Home)
 		}
-		if !isHex64(e.WroteSHA) {
+		if (e.Removed || e.Pair != "") && j.Version < 2 {
+			return fmt.Errorf("entry %d: relocation fields require journal version 2, not %d", i, j.Version)
+		}
+		if e.Pair != "" {
+			if e.Removed {
+				return fmt.Errorf("entry %d: a removed file must not depend on a pair", i)
+			}
+			if !filepath.IsAbs(e.Pair) || !pathWithin(j.Home, e.Pair) {
+				return fmt.Errorf("entry %d: pair %q is not an absolute path inside the recorded home", i, e.Pair)
+			}
+			if !removedDests[pathKey(e.Pair)] {
+				return fmt.Errorf("entry %d: pair %q is not a removed file in this journal", i, e.Pair)
+			}
+		}
+		if e.Removed {
+			if e.Created {
+				return fmt.Errorf("entry %d: a file cannot be both created and removed", i)
+			}
+			if e.WroteSHA != "" {
+				return fmt.Errorf("entry %d: a removed file has no written bytes to hash", i)
+			}
+		} else if !isHex64(e.WroteSHA) {
 			return fmt.Errorf("entry %d: wrote_sha256 is not a valid hash", i)
 		}
 		if e.Created {
@@ -218,7 +267,8 @@ func Validate(j Journal) error {
 			}
 			continue
 		}
-		// Overwritten file: it must carry a backup, inside the home, with a hash.
+		// Overwritten or removed file: it must carry a backup, inside the home,
+		// with a hash, so reversal can verify the bytes before restoring them.
 		if e.Backup == "" || !filepath.IsAbs(e.Backup) {
 			return fmt.Errorf("entry %d: overwritten file has no absolute backup path", i)
 		}
@@ -230,6 +280,16 @@ func Validate(j Journal) error {
 		}
 	}
 	return nil
+}
+
+// pathKey normalizes a path for comparison, matching the case sensitivity of the
+// host filesystem (Windows compares case-insensitively).
+func pathKey(p string) string {
+	c := filepath.Clean(p)
+	if runtime.GOOS == "windows" {
+		return strings.ToLower(c)
+	}
+	return c
 }
 
 // pathWithin reports whether target is root itself or lies under it, comparing
@@ -272,7 +332,7 @@ func load(p string) (Journal, error) {
 type Outcome struct {
 	Entry  Entry
 	Status string // removed | restored | already-gone | changed | not-regular |
-	// backup-missing | backup-changed | error
+	// backup-missing | backup-changed | occupied | pair-missing | error
 	Message string
 }
 
@@ -285,15 +345,44 @@ type Result struct {
 	Outcomes []Outcome
 }
 
-// Reverse undoes an import journal. It deletes files the import created and
-// restores backups for files it overwrote — but only when the file on disk still
-// matches what the import wrote, so any change made afterward is left untouched
-// and reported as skipped. On a real (non-dry-run) reversal, restored backups are
-// removed and the journal file is deleted afterward by the caller via Remove.
+// Reverse undoes an import journal. It deletes files the import created,
+// restores backups for files it overwrote, and puts back files it removed — but
+// only when the file on disk still matches what the import wrote, so any change
+// made afterward is left untouched and reported as skipped. On a real
+// (non-dry-run) reversal, restored backups are removed and the journal file is
+// deleted afterward by the caller via Remove.
+//
+// Removed entries are processed first: a relocated copy that names its original
+// via Pair is only deleted once that original is back in place, so a failed or
+// skipped restore can never leave the session with no copy at all.
 func Reverse(j Journal, dryRun bool) Result {
 	res := Result{DryRun: dryRun}
-	for _, e := range j.Entries {
+	outcomes := make([]Outcome, len(j.Entries))
+	back := map[string]bool{} // originals restored in pass 1
+
+	for i, e := range j.Entries {
+		if !e.Removed {
+			continue
+		}
 		o := reverseEntry(e, dryRun)
+		outcomes[i] = o
+		if o.Status == "restored" {
+			back[pathKey(e.Dest)] = true
+		}
+	}
+	for i, e := range j.Entries {
+		if e.Removed {
+			continue
+		}
+		if e.Pair != "" && !back[pathKey(e.Pair)] {
+			outcomes[i] = Outcome{Entry: e, Status: "pair-missing",
+				Message: "the original transcript was not restored, so this copy was kept"}
+			continue
+		}
+		outcomes[i] = reverseEntry(e, dryRun)
+	}
+
+	for _, o := range outcomes {
 		switch o.Status {
 		case "removed":
 			res.Removed++
@@ -302,12 +391,15 @@ func Reverse(j Journal, dryRun bool) Result {
 		default:
 			res.Skipped++
 		}
-		res.Outcomes = append(res.Outcomes, o)
 	}
+	res.Outcomes = outcomes
 	return res
 }
 
 func reverseEntry(e Entry, dryRun bool) Outcome {
+	if e.Removed {
+		return restoreRemoved(e, dryRun)
+	}
 	// Dest must still be an ordinary file. If it is gone (moved/deleted) there is
 	// nothing to undo; if it was replaced by a symlink, directory, or device, it
 	// was tampered with and we refuse to follow it — never delete or write through
@@ -344,22 +436,8 @@ func reverseEntry(e Entry, dryRun bool) Outcome {
 	// Overwritten file: restore its backup — but only a backup that is still an
 	// ordinary file whose bytes match the hash recorded at import time, so a
 	// swapped or corrupted backup can never be written over the session.
-	bfi, err := os.Lstat(e.Backup)
-	if os.IsNotExist(err) {
-		return Outcome{Entry: e, Status: "backup-missing", Message: "backup file is gone; left as-is"}
-	}
-	if err != nil {
-		return Outcome{Entry: e, Status: "error", Message: err.Error()}
-	}
-	if !bfi.Mode().IsRegular() {
-		return Outcome{Entry: e, Status: "backup-changed", Message: "backup is not a regular file; left as-is"}
-	}
-	bsum, err := sha256File(e.Backup)
-	if err != nil {
-		return Outcome{Entry: e, Status: "error", Message: err.Error()}
-	}
-	if bsum != e.BackupSHA {
-		return Outcome{Entry: e, Status: "backup-changed", Message: "backup no longer matches its recorded hash; left as-is"}
+	if bad, ok := verifyBackup(e); !ok {
+		return bad
 	}
 	if dryRun {
 		return Outcome{Entry: e, Status: "restored", Message: "would restore from backup"}
@@ -369,6 +447,53 @@ func reverseEntry(e Entry, dryRun bool) Outcome {
 	}
 	_ = os.Remove(e.Backup)
 	return Outcome{Entry: e, Status: "restored"}
+}
+
+// restoreRemoved puts back a file cct deleted (a relocated Claude transcript's
+// original). It refuses to overwrite anything that occupies the path now, and
+// restores only from a backup that is still a regular file with the exact bytes
+// recorded at relocation time.
+func restoreRemoved(e Entry, dryRun bool) Outcome {
+	if _, err := os.Lstat(e.Dest); err == nil {
+		return Outcome{Entry: e, Status: "occupied", Message: "a file is back at this path; left as-is"}
+	} else if !os.IsNotExist(err) {
+		return Outcome{Entry: e, Status: "error", Message: err.Error()}
+	}
+	if bad, ok := verifyBackup(e); !ok {
+		return bad
+	}
+	if dryRun {
+		return Outcome{Entry: e, Status: "restored", Message: "would restore from backup"}
+	}
+	if err := restore(e.Backup, e.Dest); err != nil {
+		return Outcome{Entry: e, Status: "error", Message: err.Error()}
+	}
+	_ = os.Remove(e.Backup)
+	return Outcome{Entry: e, Status: "restored"}
+}
+
+// verifyBackup checks that an entry's backup is still an ordinary file holding
+// exactly the bytes hashed at import time. It returns the refusing Outcome and
+// false when the backup cannot be trusted.
+func verifyBackup(e Entry) (Outcome, bool) {
+	bfi, err := os.Lstat(e.Backup)
+	if os.IsNotExist(err) {
+		return Outcome{Entry: e, Status: "backup-missing", Message: "backup file is gone; left as-is"}, false
+	}
+	if err != nil {
+		return Outcome{Entry: e, Status: "error", Message: err.Error()}, false
+	}
+	if !bfi.Mode().IsRegular() {
+		return Outcome{Entry: e, Status: "backup-changed", Message: "backup is not a regular file; left as-is"}, false
+	}
+	bsum, err := sha256File(e.Backup)
+	if err != nil {
+		return Outcome{Entry: e, Status: "error", Message: err.Error()}, false
+	}
+	if bsum != e.BackupSHA {
+		return Outcome{Entry: e, Status: "backup-changed", Message: "backup no longer matches its recorded hash; left as-is"}, false
+	}
+	return Outcome{}, true
 }
 
 // Remove deletes a journal file after it has been reversed.

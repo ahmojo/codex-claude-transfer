@@ -170,14 +170,16 @@ func printUndoList(w io.Writer, journals []undo.Journal) {
 	}
 	fmt.Fprintln(w, "Recorded imports (newest first):")
 	for i, j := range journals {
-		created, replaced, updated := 0, 0, 0
+		created, replaced, updated, relocated := 0, 0, 0, 0
 		for _, e := range j.Entries {
-			switch e.Action {
-			case "import", "import-copy":
+			switch {
+			case e.Removed:
+				relocated++
+			case e.Action == "import", e.Action == "import-copy":
 				created++
-			case "replace":
+			case e.Action == "replace":
 				replaced++
-			case "update":
+			case e.Action == "update":
 				updated++
 			}
 		}
@@ -186,14 +188,27 @@ func printUndoList(w io.Writer, journals []undo.Journal) {
 			marker = "→ " // the one `cct undo` would reverse
 		}
 		fmt.Fprintf(w, "%s%s  %s  (%s)\n", marker, when(j.Time), agent.Normalize(agent.Kind(j.Tool)).Label(), safeTerminal(j.Bundle))
-		fmt.Fprintf(w, "     %d created, %d replaced, %d updated\n", created, replaced, updated)
+		line := fmt.Sprintf("     %d created, %d replaced, %d updated", created, replaced, updated)
+		if relocated > 0 {
+			// A relocation also deleted the originals; undo puts them back.
+			line += fmt.Sprintf(", %d moved out of the old project folder", relocated)
+		}
+		fmt.Fprintln(w, line)
 	}
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "`cct undo` reverses the most recent (→). `cct undo --dry-run` previews it.")
 }
 
 func printUndoResult(w io.Writer, j undo.Journal, res undo.Result) {
-	fmt.Fprintf(w, "Undoing import: %s\n", safeTerminal(j.Bundle))
+	// A journal that removed files came from a relocation, not a plain import.
+	what := "import"
+	for _, e := range j.Entries {
+		if e.Removed {
+			what = "relocation"
+			break
+		}
+	}
+	fmt.Fprintf(w, "Undoing %s: %s\n", what, safeTerminal(j.Bundle))
 	fmt.Fprintf(w, "Recorded: %s (%s)\n\n", when(j.Time), agent.Normalize(agent.Kind(j.Tool)).Label())
 
 	for _, o := range res.Outcomes {

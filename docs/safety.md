@@ -99,7 +99,7 @@ plain `.jsonl` file.
 By default there is no force overwrite: a differing file is **never** replaced,
 and if you see conflicts reported, your existing sessions were not modified.
 
-### Relocating a Codex project
+### Relocating a project
 
 `cct relocate OLD NEW` is a local wrapper around the same export, cwd-mapping,
 and import engine. It first creates a bundle inside a private temporary
@@ -110,17 +110,39 @@ original bytes and participates in the standard undo journal. CCT validates the
 real import result against the same completeness invariant before reporting
 success; an incomplete result triggers session rollback.
 
-Archived sessions use the same safety path only when `--include-archived` is
-explicit. If a compressed rollout's cwd cannot be recovered, relocation refuses
-to proceed because it cannot prove that every matching session will be updated.
+Archived Codex sessions use the same safety path only when `--include-archived`
+is explicit. If a compressed rollout's cwd cannot be recovered, relocation
+refuses to proceed because it cannot prove that every matching session will be
+updated.
 
 With `--move-project`, CCT renames the project directory only after the session
 preflight succeeds. It supports same-filesystem renames and rolls the directory
 back if import fails or produces an incomplete result; it never falls back to
-copy-and-delete. Stop Codex before relocating so it cannot append to a rollout
-between validation and replacement. Claude Code relocation is not supported
-because its cwd also controls transcript directory placement; that workflow is
-tracked in [#13](https://github.com/ahmojo/codex-claude-transfer/issues/13).
+copy-and-delete. Stop the agent before relocating so it cannot append to a
+session between validation and replacement.
+
+**Claude Code (`--tool claude`).** Claude records the project in two places: the
+per-line `cwd` inside a transcript and the `projects/<encoded-cwd>/` folder
+holding it. Relocating therefore also moves each transcript to the folder that
+encodes the new path, which the import path alone would not finish — it would
+write the remapped copy and leave the original behind under the same session id.
+So relocation writes every remapped transcript first, and only then backs up and
+deletes each original, re-verifying immediately before each delete that the file
+is still an ordinary file with exactly the bytes that were exported. If any
+destination is already taken (whether its content differs or matches), relocation
+stops before writing anything rather than duplicating a session id. A failure
+after the copies are written restores the removed originals from their backups,
+deletes the copies, and rolls back a `--move-project` rename. `~/.claude.json` is
+never read or written; Claude Code rediscovers the transcripts on its next run.
+
+`cct undo` reverses both halves of a Claude relocation. It restores each original
+before removing its relocated copy, and if an original cannot be restored — a
+missing or tampered backup, or something occupying its path again — the copy is
+kept, so a session is never left with no copy at all.
+
+`--include-archived` is refused with `--tool claude`: Claude Code keeps no
+separate archive location, so every transcript recorded under `OLD` is already
+part of the relocation.
 
 ### Incremental sync (`--merge`): append-only, lossless
 
