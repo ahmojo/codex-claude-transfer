@@ -104,10 +104,10 @@ fallback only when the rollout ID is a valid UUID and the command can be
 rendered safely. The terminal wizard (`cct ui`) and browser app (`cct app`)
 expose the same opt-in native Codex reconciliation flow.
 
-### Relocate a Codex project
+### Relocate a project
 
 `cct relocate` rewrites the recorded working directory (`cwd`) in every matching
-Codex session, so the sessions remain grouped with the project at its new path:
+session, so the sessions remain grouped with the project at its new path:
 
 ```bash
 # The project was already copied or moved; NEW exists.
@@ -116,13 +116,18 @@ cct relocate /old/project /new/project
 
 # Move the project too; NEW must not exist yet.
 cct relocate /old/project /new/project --move-project
+
+# Claude Code: transcripts also move into the folder encoding the new path.
+cct relocate /old/project /new/project --tool claude
 ```
 
-The command preserves session backups and never modifies Codex's SQLite
-database. Add `--include-archived` to relocate archived sessions too. See the
-[usage guide](docs/usage.md#relocate-a-codex-project) for rollback behavior,
-same-filesystem moves, and the current Codex-only scope. Claude Code relocation
-is tracked separately in [#13](https://github.com/ahmojo/codex-claude-transfer/issues/13).
+The command preserves session backups and never modifies Codex's SQLite database
+or `~/.claude.json`. Add `--include-archived` to relocate archived Codex sessions
+too. For Claude Code, each transcript is written under the new project folder
+first and its original removed only afterward, so a session id is never
+duplicated; `cct undo` reverses both halves. See the
+[usage guide](docs/usage.md#relocate-a-project) for rollback behavior and
+same-filesystem moves.
 
 ## Compatibility
 
@@ -133,7 +138,7 @@ agent version it was last verified against:
 | Agent | Last tested | Supported data | Known gaps |
 | --- | --- | --- | --- |
 | **Codex CLI / app-server** | 0.144.6 (2026-07-23) | Sessions (`rollout-*.jsonl`, compressed `.jsonl.zst`), session metadata, git context, inline images; synthetic live-import `thread/read` reconciliation | SQLite/session_index are never written directly by cct; `--reconcile` is capability-probed because app-server is experimental; `.jsonl.zst` needs external `zstd` for metadata, `--map-cwd`, and merge |
-| **Claude Code** | 2.1.212 (2026-07-18) | Conversations (`projects/<encoded-cwd>/*.jsonl`), tool events, project mapping | `~/.claude.json` config is never touched; sidechains/subagent transcripts transfer as files but are not translated cross-agent |
+| **Claude Code** | 2.1.212 (2026-07-18) | Conversations (`projects/<encoded-cwd>/*.jsonl`), tool events, project mapping, project relocation (`relocate --tool claude`) | `~/.claude.json` config is never touched; sidechains/subagent transcripts transfer as files but are not translated cross-agent; the project-folder encoding is lossy, so two project paths can share one folder (relocation rewrites those in place) |
 | **Cross-agent handoff** (`import --to`) | same versions | Conversation text and project context, translated between the two formats | A translation, not a clone: tool calls, command output, runtime state, and provider-specific ids do not carry over byte-for-byte |
 
 If a newer agent version breaks something, please

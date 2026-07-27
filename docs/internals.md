@@ -101,9 +101,16 @@ session bytes — its lifecycle is worth understanding.
   only) — so the sensitive content is owner-only. The `undo/` directory itself is
   created `0755` (subject to your umask); only its filenames, not their contents,
   are directory-readable.
-- **Format version.** Each journal carries a `version` field (currently `1`).
-  `cct undo` refuses a journal whose version it does not understand rather than
-  guessing, so a future format change can never cause a wrong reversal.
+- **Format version.** Each journal carries a `version` field (currently `2`;
+  version `1` journals are still understood and reversible). `cct undo` refuses a
+  journal whose version it does not understand rather than guessing, so a future
+  format change can never cause a wrong reversal.
+- **Entry kinds.** An entry records a file that was *created* (undo deletes it),
+  *overwritten* (undo restores its backup), or — for a Claude Code relocation —
+  *removed* after its relocated copy was written (undo puts it back from its
+  backup). A relocated copy also names the original it came from, and undo
+  restores originals first: it never deletes a copy while the original is still
+  missing, so a session always has at least one copy on disk.
 - **Retention.** Journals are kept automatically, newest-wins, up to a fixed
   cap (25); older ones are pruned as new imports are recorded. `cct undo`
   reverses only the single most recent import; `cct undo --list` shows the
@@ -117,9 +124,10 @@ session bytes — its lifecycle is worth understanding.
   a newer cct that bumped the format would be refused (not misapplied) by an
   older binary, per the version check above.
 - **Do backups contain session content?** Yes. For a `--replace-with-backup` or
-  `--merge` import, the backup is a verbatim copy of your **previous** local
-  session file, so it can contain everything a session file can (prompts, code,
-  command output, paths, and any secrets printed into the session). Backups sit
+  `--merge` import — and for each transcript a Claude Code relocation removes from
+  its old project folder — the backup is a verbatim copy of your **previous**
+  local session file, so it can contain everything a session file can (prompts,
+  code, command output, paths, and any secrets printed into the session). Backups sit
   next to the session (a `.cct-bak-…` sibling, ignored by the agents) and are
   removed when the import is undone. Treat them as sensitive local history. The
   journal JSON itself stores only paths, timestamps, and SHA-256 hashes — never
@@ -129,7 +137,8 @@ session bytes — its lifecycle is worth understanding.
   agent home; it only deletes or restores a file whose current bytes still match
   the SHA-256 recorded at import time, it refuses a backup whose bytes no longer
   match their recorded hash, and it never follows a path that has been replaced
-  by a symlink or directory. A corrupt, manipulated, or ambiguous journal always
+  by a symlink or directory. Restoring a removed original is refused if anything
+  occupies its path again. A corrupt, manipulated, or ambiguous journal always
   results in changing nothing.
 
 ## Limitations

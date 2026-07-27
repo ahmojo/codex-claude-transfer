@@ -497,6 +497,12 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 	return result, nil
 }
 
+// BackupFile preserves a session file as a sibling ".cct-bak-<unix-nanos>" copy
+// and returns the backup's path. Claude Code relocation uses it before deleting a
+// transcript from its old project folder, so the file uses the same backup naming,
+// atomic write, and undo-restore path as an import that replaces a session.
+func BackupFile(path string) (string, error) { return backupFile(path) }
+
 // backupFile copies an existing file to a sibling backup path before it is
 // overwritten. The backup name ends in ".cct-bak-<unix-nanos>", which does
 // not match Codex's rollout-*.jsonl pattern, so Codex will not treat the backup

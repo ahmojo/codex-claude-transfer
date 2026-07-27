@@ -11,17 +11,19 @@ import (
 
 	"github.com/ahmojo/codex-claude-transfer/internal/agent"
 	"github.com/ahmojo/codex-claude-transfer/internal/bundle"
+	"github.com/ahmojo/codex-claude-transfer/internal/claudehome"
 	"github.com/ahmojo/codex-claude-transfer/internal/codexhome"
 	"github.com/ahmojo/codex-claude-transfer/internal/safety"
 )
 
-const relocateUsage = "usage: cct relocate OLD NEW [--move-project] [--dry-run] [--include-archived] [--codex-home <path>] [--tool codex] [--json]"
+const relocateUsage = "usage: cct relocate OLD NEW [--move-project] [--dry-run] [--include-archived] [--tool codex|claude] [--codex-home <path>] [--claude-home <path>] [--json]"
 
 // relocateFlags contains only the options supported by relocate. Keeping a
 // command-specific parser prevents unrelated export/import flags from being
 // accepted and then silently ignored.
 type relocateFlags struct {
 	codexHome       string
+	claudeHome      string
 	tool            string
 	moveProject     bool
 	includeArchived bool
@@ -30,42 +32,65 @@ type relocateFlags struct {
 	positional      []string
 }
 
-// relocateOps isolates the three stateful operations so rollback behavior can
-// be exercised with deterministic failures in tests.
+// relocateOps isolates the stateful operations so rollback behavior can be
+// exercised with deterministic failures in tests.
 type relocateOps struct {
 	export       func(codexhome.Home, bundle.ExportOptions) (bundle.ExportResult, error)
 	importBundle func(codexhome.Home, bundle.ImportOptions) (bundle.ImportResult, error)
 	rename       func(string, string) error
+	// removeSource deletes an original Claude transcript after its relocated copy
+	// was written and backed up.
+	removeSource func(string) error
 }
 
 var defaultRelocateOps = relocateOps{
 	export:       bundle.Export,
 	importBundle: bundle.Import,
 	rename:       os.Rename,
+	removeSource: os.Remove,
 }
 
-// relocateJSON is the stable machine-readable summary emitted by --json.
+// relocateJSON is the stable machine-readable summary emitted by --json. The
+// last two fields describe the Claude Code workflow, where relocating also moves
+// each transcript into the folder encoding the new project path.
 type relocateJSON struct {
-	Tool          string   `json:"tool"`
-	OldPath       string   `json:"old_path"`
-	NewPath       string   `json:"new_path"`
-	Sessions      int      `json:"sessions"`
-	Remapped      int      `json:"remapped"`
-	Replaced      int      `json:"replaced"`
-	ProjectAction string   `json:"project_action"`
-	DryRun        bool     `json:"dry_run"`
-	Backups       []string `json:"backups,omitempty"`
+	Tool           string   `json:"tool"`
+	OldPath        string   `json:"old_path"`
+	NewPath        string   `json:"new_path"`
+	Sessions       int      `json:"sessions"`
+	Remapped       int      `json:"remapped"`
+	Replaced       int      `json:"replaced"`
+	ProjectAction  string   `json:"project_action"`
+	DryRun         bool     `json:"dry_run"`
+	Backups        []string `json:"backups,omitempty"`
+	MovedFiles     int      `json:"moved_files,omitempty"`
+	RemovedSources int      `json:"removed_sources,omitempty"`
 }
 
-// runRelocate safely rewrites Codex session cwd metadata after a project folder
-// changes location. It delegates all session writes to bundle.Import, preserving
-// the existing backup, checksum, atomic-write, and undo guarantees.
+// relocateOutcome carries what the summary printer reports after either agent's
+// workflow.
+type relocateOutcome struct {
+	kind    agent.Kind
+	oldPath string
+	newPath string
+	result  bundle.ImportResult
+	backups []string
+	// movedFiles counts Claude transcripts written under the new project folder,
+	// and removedSources the originals deleted from the old one.
+	movedFiles     int
+	removedSources int
+}
+
+// runRelocate safely rewrites a project's recorded working directory after its
+// folder changes location. It delegates all session writes to bundle.Import,
+// preserving the existing backup, checksum, atomic-write, and undo guarantees.
 func runRelocate(args []string, stdout, stderr io.Writer) int {
 	return runRelocateWithOps(args, stdout, stderr, defaultRelocateOps)
 }
 
-// runRelocateWithOps contains the command workflow with injectable stateful
-// operations for failure-path tests.
+// runRelocateWithOps parses and validates the shared arguments, then hands off to
+// the workflow for the selected agent. Injectable stateful operations let the
+// failure paths be exercised deterministically in tests.
 func runRelocateWithOps(args []string, stdout, stderr io.Writer, ops relocateOps) int {
 	f, err := parseRelocateFlags(args)
 	if err != nil {
@@ -77,18 +102,35 @@ func runRelocateWithOps(args []string, stdout, stderr io.Writer, ops relocateOps
 		return 2
 	}
 
-	common := commonFlags{codexHome: f.codexHome, tool: f.tool}
+	common := commonFlags{codexHome: f.codexHome, claudeHome: f.claudeHome, tool: f.tool}
 	kind, ok := resolveTool(common, stderr)
 	if !ok {
 		return 2
 	}
-	if kind != agent.Codex {
-		fmt.Fprintln(stderr, "error: relocate currently supports Codex only; Claude Code stores cwd in both transcript contents and its project-directory layout")
-		return 2
-	}
-	home, ok := resolveHome(common, stderr)
-	if !ok {
-		return 1
+
+	// Both agents relocate through the same export/import engine, but Claude Code
+	// also addresses a project by folder name, so its transcripts move on disk.
+	var home codexhome.Home
+	var claudeHome claudehome.Home
+	if kind == agent.Claude {
+		if f.includeArchived {
+			fmt.Fprintln(stderr, "error: --include-archived does not apply to Claude Code: it keeps no separate archive location, so every transcript recorded under OLD is already relocated")
+			return 2
+		}
+		claudeHome, ok = resolveClaudeHome(common, stderr)
+		if !ok {
+			return 1
+		}
+		home = codexhome.Home{Root: claudeHome.Root, SessionsDir: claudeHome.ProjectsDir, Source: claudeHome.Source}
+	} else {
+		if f.claudeHome != "" {
+			fmt.Fprintln(stderr, "error: --claude-home applies to --tool claude only")
+			return 2
+		}
+		home, ok = resolveHome(common, stderr)
+		if !ok {
+			return 1
+		}
 	}
 
 	oldPath, newPath, err := resolveRelocatePaths(f.positional[0], f.positional[1])
@@ -96,11 +138,20 @@ func runRelocateWithOps(args []string, stdout, stderr io.Writer, ops relocateOps
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 2
 	}
-	if err := validateRelocateProjectPaths(oldPath, newPath, home.Root, f.moveProject); err != nil {
+	if err := validateRelocateProjectPaths(oldPath, newPath, home.Root, kind, f.moveProject); err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
 	}
 
+	if kind == agent.Claude {
+		return runRelocateClaude(f, claudeHome, home, oldPath, newPath, stdout, stderr, ops)
+	}
+	return runRelocateCodex(f, home, oldPath, newPath, stdout, stderr, ops)
+}
+
+// runRelocateCodex rewrites Codex session cwd metadata in place: a Codex rollout
+// stays at its dated path, so only the file's contents change.
+func runRelocateCodex(f relocateFlags, home codexhome.Home, oldPath, newPath string, stdout, stderr io.Writer, ops relocateOps) int {
 	tmpDir, err := os.MkdirTemp("", "cct-relocate-")
 	if err != nil {
 		fmt.Fprintf(stderr, "error: cannot create private temporary directory: %v\n", err)
@@ -143,7 +194,9 @@ func runRelocateWithOps(args []string, stdout, stderr io.Writer, ops relocateOps
 	}
 
 	if f.dryRun {
-		printRelocateResult(stdout, f, oldPath, newPath, preview, nil)
+		printRelocateResult(stdout, f, relocateOutcome{
+			kind: agent.Codex, oldPath: oldPath, newPath: newPath, result: preview,
+		})
 		return 0
 	}
 
@@ -188,9 +241,17 @@ func runRelocateWithOps(args []string, stdout, stderr io.Writer, ops relocateOps
 		return 1
 	}
 
-	recordUndoJournal(common, kind, home, fmt.Sprintf("relocate %s -> %s", oldPath, newPath), result, stderr)
-	printRelocateResult(stdout, f, oldPath, newPath, result, backupPaths(result))
+	recordUndoJournal(commonFlags{}, agent.Codex, home, relocateLabel(oldPath, newPath), result, stderr)
+	printRelocateResult(stdout, f, relocateOutcome{
+		kind: agent.Codex, oldPath: oldPath, newPath: newPath, result: result, backups: backupPaths(result),
+	})
 	return 0
+}
+
+// relocateLabel is the journal's "bundle" description for a relocation, which has
+// no user-visible bundle file (it uses a private temporary one).
+func relocateLabel(oldPath, newPath string) string {
+	return fmt.Sprintf("relocate %s -> %s", oldPath, newPath)
 }
 
 // parseRelocateFlags accepts the deliberately small relocate interface.
@@ -207,6 +268,14 @@ func parseRelocateFlags(args []string) (relocateFlags, error) {
 			f.codexHome = value
 		case hasPrefix(arg, "--codex-home="):
 			f.codexHome = arg[len("--codex-home="):]
+		case arg == "--claude-home":
+			value, err := takeValue(args, &i, "--claude-home")
+			if err != nil {
+				return f, err
+			}
+			f.claudeHome = value
+		case hasPrefix(arg, "--claude-home="):
+			f.claudeHome = arg[len("--claude-home="):]
 		case arg == "--tool":
 			value, err := takeValue(args, &i, "--tool")
 			if err != nil {
@@ -256,10 +325,10 @@ func resolveRelocatePaths(oldArg, newArg string) (string, string, error) {
 
 // validateRelocateProjectPaths enforces the filesystem preconditions for either
 // a session-only remap or an opt-in project-directory rename.
-func validateRelocateProjectPaths(oldPath, newPath, homeRoot string, moveProject bool) error {
+func validateRelocateProjectPaths(oldPath, newPath, homeRoot string, kind agent.Kind, moveProject bool) error {
 	if moveProject {
 		if pathsOverlap(oldPath, homeRoot) || pathsOverlap(newPath, homeRoot) {
-			return errors.New("the project paths must not overlap the Codex home")
+			return fmt.Errorf("the project paths must not overlap the %s home", agent.Normalize(kind).Label())
 		}
 		oldInfo, err := os.Lstat(oldPath)
 		if err != nil {
@@ -296,6 +365,16 @@ func validateRelocateProjectPaths(oldPath, newPath, homeRoot string, moveProject
 // pathsOverlap reports whether two paths are equal or one contains the other.
 func pathsOverlap(first, second string) bool {
 	return pathEqualCLI(first, second) || pathContains(first, second) || pathContains(second, first)
+}
+
+// relocatePathKey normalizes a path for map lookups and comparisons, matching the
+// case sensitivity of the host filesystem.
+func relocatePathKey(p string) string {
+	c := filepath.Clean(p)
+	if runtime.GOOS == "windows" {
+		return strings.ToLower(c)
+	}
+	return c
 }
 
 // pathContains reports whether child is strictly below parent. Rel is used so
@@ -431,7 +510,8 @@ func backupPaths(result bundle.ImportResult) []string {
 
 // printRelocateResult emits either a compact JSON object or a human-oriented
 // summary without exposing the temporary bundle path.
-func printRelocateResult(stdout io.Writer, f relocateFlags, oldPath, newPath string, result bundle.ImportResult, backups []string) {
+func printRelocateResult(stdout io.Writer, f relocateFlags, out relocateOutcome) {
+	kind := agent.Normalize(out.kind)
 	action := "not-requested"
 	if f.moveProject {
 		if f.dryRun {
@@ -442,24 +522,33 @@ func printRelocateResult(stdout io.Writer, f relocateFlags, oldPath, newPath str
 	}
 	if f.jsonOut {
 		writeJSON(stdout, relocateJSON{
-			Tool:          string(agent.Codex),
-			OldPath:       oldPath,
-			NewPath:       newPath,
-			Sessions:      len(result.Manifest.Sessions),
-			Remapped:      result.Mapped,
-			Replaced:      result.Replaced,
-			ProjectAction: action,
-			DryRun:        f.dryRun,
-			Backups:       backups,
+			Tool:           string(kind),
+			OldPath:        out.oldPath,
+			NewPath:        out.newPath,
+			Sessions:       len(out.result.Manifest.Sessions),
+			Remapped:       out.result.Mapped,
+			Replaced:       out.result.Replaced,
+			ProjectAction:  action,
+			DryRun:         f.dryRun,
+			Backups:        out.backups,
+			MovedFiles:     out.movedFiles,
+			RemovedSources: out.removedSources,
 		})
 		return
 	}
 
-	fmt.Fprintln(stdout, "Codex project relocation")
-	fmt.Fprintf(stdout, "Old path: %s\n", oldPath)
-	fmt.Fprintf(stdout, "New path: %s\n", newPath)
-	fmt.Fprintf(stdout, "Sessions: %d\n", len(result.Manifest.Sessions))
-	fmt.Fprintf(stdout, "Session cwd rewrites: %d\n", result.Mapped)
+	fmt.Fprintf(stdout, "%s project relocation\n", kind.Label())
+	fmt.Fprintf(stdout, "Old path: %s\n", out.oldPath)
+	fmt.Fprintf(stdout, "New path: %s\n", out.newPath)
+	fmt.Fprintf(stdout, "Sessions: %d\n", len(out.result.Manifest.Sessions))
+	fmt.Fprintf(stdout, "Session cwd rewrites: %d\n", out.result.Mapped)
+	if kind == agent.Claude {
+		verb := "Transcripts moved to the new project folder"
+		if f.dryRun {
+			verb = "Transcripts that would move to the new project folder"
+		}
+		fmt.Fprintf(stdout, "%s: %d\n", verb, out.movedFiles)
+	}
 	switch action {
 	case "would-move":
 		fmt.Fprintln(stdout, "Project directory: would move")
@@ -472,8 +561,15 @@ func printRelocateResult(stdout io.Writer, f relocateFlags, oldPath, newPath str
 		fmt.Fprintln(stdout, "No files were changed because --dry-run was used.")
 		return
 	}
-	fmt.Fprintf(stdout, "Session backups kept: %d\n", len(backups))
-	fmt.Fprintln(stdout, "Relocation complete. Restart Codex, then run `codex resume` from the new folder.")
+	if kind == agent.Claude && out.removedSources > 0 {
+		fmt.Fprintf(stdout, "Originals removed from the old project folder: %d\n", out.removedSources)
+	}
+	fmt.Fprintf(stdout, "Session backups kept: %d\n", len(out.backups))
+	if kind == agent.Claude {
+		fmt.Fprintln(stdout, "Relocation complete. Restart Claude Code, then resume the conversation from the new folder.")
+	} else {
+		fmt.Fprintln(stdout, "Relocation complete. Restart Codex, then run `codex resume` from the new folder.")
+	}
 	if f.moveProject {
 		fmt.Fprintln(stdout, "Note: `cct undo` restores session files only; move the project directory back separately.")
 	}

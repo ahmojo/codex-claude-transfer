@@ -1577,10 +1577,12 @@ Commands:
   import    Import a .codexbundle into your Codex home (never overwrites).
 		    Filter with --session/--project/--since/--match; use --reconcile
 		    to ask Codex to discover and verify changed rollouts immediately
-  relocate  Rewrite a Codex project's session cwd after its folder moves;
-		    --move-project also renames the project directory
-  undo      Reverse the most recent import (delete created files, restore
-            backups); --list shows recent imports, --dry-run previews
+  relocate  Rewrite a project's session cwd after its folder moves;
+		    --move-project also renames the project directory. With
+		    --tool claude the transcripts move to the new project folder
+  undo      Reverse the most recent import or relocation (delete created files,
+            restore backups and removed transcripts); --list shows recent
+            imports, --dry-run previews
   repair-times  Reset imported session files' modification time to their real
             last-activity time, so the agent stops re-parsing them on every open
             (a one-time fix; only changes mtimes, never content or the index)
@@ -1607,6 +1609,7 @@ Flags:
   --claude-home <path>  Use a specific Claude Code home instead of ~/.claude
                         (also honors $CLAUDE_HOME)
   --include-archived    list, export, relocate: also consider archived sessions
+                        (Codex only; Claude Code has no separate archive)
   --json                doctor/list/inspect/export/import/relocate: print a
                         machine-readable JSON summary on stdout instead of text
   --port <n>            app: serve the desktop GUI on this port (default: a free
@@ -1749,6 +1752,7 @@ Examples:
   cct relocate /old/project /new/project --dry-run
   cct relocate /old/project /new/project --move-project
   cct relocate /old/project /new/project --include-archived
+  cct relocate /old/project /new/project --tool claude
   cct import ./my-project.codexbundle --to claude   # Codex bundle -> Claude Code
   cct import ./claude.codexbundle      --to codex    # Claude bundle -> Codex
   cct import ./my-project.codexbundle --clone ~/dev/project

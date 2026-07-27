@@ -94,9 +94,9 @@ recipient/identity key files.
 
 ## Common workflows
 
-### Relocate a Codex project
+### Relocate a project
 
-When a Codex project moves to a different folder on the same machine, `relocate`
+When a project moves to a different folder on the same machine, `relocate`
 packages the matching sessions into a private temporary bundle and feeds it back
 through the normal checked import path. Preview first:
 
@@ -119,30 +119,63 @@ copy-and-delete operation:
 cct relocate /old/project /new/project --move-project
 ```
 
-Archived sessions are excluded by default. Add `--include-archived` to relocate
-matching rollouts under `archived_sessions/` through the same backup and undo
-path:
+Archived Codex sessions are excluded by default. Add `--include-archived` to
+relocate matching rollouts under `archived_sessions/` through the same backup and
+undo path:
 
 ```bash
 cct relocate /old/project /new/project --include-archived
 ```
 
-Stop Codex before the real run so it cannot append to a session during
-relocation. CCT checks that every selected rollout still matches the temporary
-bundle, backs up each original session, records the standard undo journal, and
-checks the real import result before reporting success. An import error or
-incomplete result restores session backups and rolls the project directory back.
-`cct undo` restores session files only; if `--move-project` succeeded, move the
-project directory back separately.
+Stop the agent before the real run so it cannot append to a session during
+relocation. CCT checks that every selected session still matches the temporary
+bundle, backs up each original, records the standard undo journal, and checks the
+real import result before reporting success. An import error or incomplete result
+restores session backups and rolls the project directory back. `cct undo`
+restores session files only; if `--move-project` succeeded, move the project
+directory back separately.
 
 If any compressed rollout has unknown cwd metadata, relocation stops before
 changing files. Install [`zstd`](https://github.com/facebook/zstd) and retry so
 CCT can verify whether every compressed session belongs to the project.
 
-Relocate currently supports Codex only. Claude Code also encodes cwd into its
-transcript directory layout, which requires a separate source-removal and undo
-design. Claude support, including `--claude-home`, is tracked in
-[#13](https://github.com/ahmojo/codex-claude-transfer/issues/13).
+#### Claude Code projects
+
+Claude Code stores a project's transcripts in `projects/<encoded-cwd>/`, so
+relocating also moves each transcript into the folder that encodes the new path:
+
+```bash
+cct relocate /old/project /new/project --tool claude --dry-run
+cct relocate /old/project /new/project --tool claude
+```
+
+`--move-project` and `--claude-home` work the same way as for Codex:
+
+```bash
+cct relocate /old/project /new/project --tool claude --move-project
+cct relocate /old/project /new/project --tool claude --claude-home /path/to/.claude
+```
+
+CCT writes every remapped transcript under the new project folder first, and only
+then backs up and deletes each original, so a session id is never present twice.
+If the new folder already holds a transcript with the same session id, relocation
+stops before writing anything. A failure while the originals are being removed
+restores them from their backups, deletes the copies, and rolls back a
+`--move-project` rename.
+
+`cct undo` reverses both halves: it restores each original transcript first and
+then removes the relocated copy — and if an original cannot be restored, the copy
+is deliberately kept so the session still exists somewhere. `~/.claude.json` is
+never touched; restart Claude Code so it re-scans the transcripts.
+
+`--include-archived` is refused with `--tool claude`, because Claude Code keeps no
+separate archive location — every transcript recorded under `OLD` is already
+included.
+
+Because Claude's folder encoding is lossy, two different project paths can map to
+the same folder name. When `OLD` and `NEW` do, the transcripts stay where they
+are and only their `cwd` fields are rewritten — the same in-place rewrite Codex
+uses, with no originals to remove.
 
 ### Remap a project during import
 
@@ -237,6 +270,9 @@ cct undo --list       # show recent imports
 
 Undo only removes or restores a file that still matches what the import wrote, so
 anything you edited afterward is never lost — it is reported as skipped instead.
+Undoing a Claude Code relocation also puts back the transcripts it removed from
+the old project folder, and it restores those before deleting the relocated
+copies, so a session is never left with no copy on disk.
 
 ### Incremental sync
 
