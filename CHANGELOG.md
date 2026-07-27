@@ -2,7 +2,7 @@
 
 All notable changes to codex-claude-transfer are documented here.
 
-## [Unreleased]
+## [1.6.0] - 2026-07-27
 
 ### Added
 - **`cct relocate --tool claude` relocates a Claude Code project.** Claude records
