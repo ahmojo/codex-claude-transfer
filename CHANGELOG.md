@@ -2,7 +2,7 @@
 
 All notable changes to codex-claude-transfer are documented here.
 
-## [Unreleased]
+## [1.7.1] - 2026-08-02
 
 ### Security / hardening
 - **Saved config values can no longer carry terminal escape sequences.**
