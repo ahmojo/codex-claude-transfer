@@ -46,7 +46,8 @@ const configUsage = `usage: cct config <list | get <key> | set <key> <value> | p
   set <key> <value> save a default (empty value clears it)
   path              print the config file location
 
-keys: tool (codex|claude), codex-home, claude-home, port
+keys: tool (codex|claude), codex-home, claude-home, port,
+      repo-sync (plain|encrypted), repo-sync-recipient (age1...)
 These are just defaults; an explicit flag always wins.`
 
 // runConfig manages cct's small set of saved user defaults.
@@ -69,7 +70,7 @@ func runConfig(args []string, stdout, stderr io.Writer) int {
 			return 0
 		}
 		for _, e := range entries {
-			fmt.Fprintf(stdout, "%-12s %s\n", e[0], safeTerminal(e[1]))
+			fmt.Fprintf(stdout, "%-20s %s\n", e[0], safeTerminal(e[1]))
 		}
 		return 0
 	case "path":

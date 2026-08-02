@@ -129,6 +129,45 @@ duplicated; `cct undo` reverses both halves. See the
 [usage guide](docs/usage.md#relocate-a-project) for rollback behavior and
 same-filesystem moves.
 
+### Let your agent do it: sessions through git
+
+`cct skill install` writes a skill into your Claude Code home that teaches the
+agent one workflow: save this project's sessions into git when you stop, restore
+them after a clone on the other machine.
+
+```bash
+cct skill install                       # ~/.claude/skills/cct-session-sync/
+cct skill print --plain >> ~/.codex/AGENTS.md   # the same for Codex
+```
+
+The recommended layout keeps chat history **out** of the code repo: one private
+session-store repo holds every project's bundles, and each project commits only
+a small reference file pointing at it.
+
+```bash
+cct config set repo-sync-repo git@github.com:you/cct-sessions.git
+cct skill init     # writes .cct/sessions.json + .cct/README.md — commit them
+cct skill show     # where the history lives and the exact commands
+```
+
+```text
+~/cct-sessions/projects/my-app/
+  claude/claude-all.codexbundle      # every session for this project
+  claude/groups/auth-refactor.codexbundle   # optional: one topic per file
+  codex/codex-all.codexbundle
+```
+
+Without any agent, it is still just two commands — save with `cct export -o <that
+path>` and commit, restore with `cct import <that path> --merge --map-cwd-here`.
+Keeping the bundle in the project's own repo under `.cct/` stays supported for
+private repos.
+
+A bundle is readable by everyone with repo access, forever, so the skill asks
+once whether to commit it plainly (private repos only) or `age`-encrypted, and
+stores the answer in `cct config`. It never pushes or passes `--allow-secrets`
+on its own, and treats a reference file it did not write as untrusted. See the
+[usage guide](docs/usage.md#carry-sessions-through-git).
+
 ## Compatibility
 
 Codex's and Claude Code's on-disk formats are their own internals and can change

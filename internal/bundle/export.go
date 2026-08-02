@@ -359,6 +359,12 @@ func newManifest(home codexhome.Home, opts ExportOptions) Manifest {
 func writeBundle(opts ExportOptions, selected []sessions.Session, manifest *Manifest, kind agent.Kind, result *ExportResult) error {
 	outputPath := opts.OutputPath
 	dir := filepath.Dir(outputPath)
+	// The caller named this path explicitly, so create its parent directories
+	// rather than failing: exporting straight into a new folder (`-o
+	// .cct/project.codexbundle`) is a normal thing to ask for.
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create bundle directory %s: %w", dir, err)
+	}
 	tmp, err := os.CreateTemp(dir, ".codexbundle-*.tmp")
 	if err != nil {
 		return fmt.Errorf("create temp bundle: %w", err)

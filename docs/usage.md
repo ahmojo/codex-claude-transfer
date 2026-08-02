@@ -94,6 +94,145 @@ recipient/identity key files.
 
 ## Common workflows
 
+### Carry sessions through git
+
+Instead of moving a bundle by hand each time, keep it in git. `cct skill install`
+writes a skill into your Claude Code home that teaches the agent the whole loop:
+
+```bash
+cct skill install
+# -> ~/.claude/skills/cct-session-sync/SKILL.md
+```
+
+Restart Claude Code and ask it to sync this project's sessions (or invoke
+`/cct-session-sync`). For Codex, append the same instructions to your `AGENTS.md`:
+
+```bash
+cct skill print --plain >> ~/.codex/AGENTS.md
+```
+
+There are two places the bundle can live. Both work without any agent — the
+skill only automates them.
+
+#### A. A separate private session store (recommended)
+
+One private repo holds the history for **all** your projects; each project repo
+carries only a small reference file. Chat history never enters the code repo,
+which is what you want when the code repo is public or has other contributors.
+
+Set the store up once per machine:
+
+```bash
+# create a PRIVATE repo (e.g. you/cct-sessions) first, then:
+cct config set repo-sync-repo git@github.com:you/cct-sessions.git
+cct config set repo-sync-dir ~/cct-sessions     # optional; this is the default
+git clone git@github.com:you/cct-sessions.git ~/cct-sessions
+```
+
+And once per project:
+
+```bash
+cct skill init                  # writes .cct/sessions.json + .cct/README.md
+git add .cct && git commit -m "Point at the session store"
+cct skill show                  # what it points at, and the resolved paths
+```
+
+The store is organized so a human and an agent can both navigate it:
+
+```text
+~/cct-sessions/
+  projects/
+    my-app/
+      claude/
+        claude-all.codexbundle        # every Claude Code session for my-app
+        groups/
+          auth-refactor.codexbundle   # optional: one topic, one file
+      codex/
+        codex-all.codexbundle
+        groups/
+    other-project/
+```
+
+Save and restore are the ordinary commands, pointed at that path:
+
+```bash
+# Save (from the project)
+cd ~/cct-sessions && git pull
+cct export --project /path/to/my-app --tool claude \
+  -o ~/cct-sessions/projects/my-app/claude/claude-all.codexbundle
+cd ~/cct-sessions && git add -A && git commit -m "Update my-app sessions"
+
+# Restore (on the other machine, from the project directory)
+git clone git@github.com:you/cct-sessions.git ~/cct-sessions
+cd /path/to/my-app
+cct import ~/cct-sessions/projects/my-app/claude/claude-all.codexbundle \
+  --merge --map-cwd-here
+```
+
+A **group** is just another export with a filter, written into `groups/`. The
+full bundle stays the source of truth; groups overlap with it on purpose:
+
+```bash
+cct export --project . --tool claude --match "auth refactor" \
+  -o ~/cct-sessions/projects/my-app/claude/groups/auth-refactor.codexbundle
+cct export --project . --tool claude --session 9f3c \
+  -o ~/cct-sessions/projects/my-app/claude/groups/that-one-chat.codexbundle
+```
+
+`.cct/sessions.json` records only the store URL, the project's folder, the
+encryption mode, and (in encrypted mode) the age **recipient** — a public key.
+It contains no local paths and no private key, so committing it reveals nothing
+about your machine. Where the store is cloned is per-machine config.
+
+Because that file lives in the repo, anyone who can commit can change where it
+points. `cct skill show` prints the URL with the reminder to confirm it, refuses
+remote-helper transports (`ext::`, which can execute a command) and control
+characters, and the skill tells the agent to ask before cloning a store the user
+did not set up.
+
+#### B. In the project's own repo
+
+Simplest, and only acceptable when the project repo itself is private:
+
+```bash
+cct export --project . --tool claude -o .cct/claude.codexbundle
+git add .cct && git commit -m "Update .cct session bundle"
+
+# after cloning on the other machine
+cct import .cct/claude.codexbundle --merge --map-cwd-here
+```
+
+#### Both layouts
+
+`--map-cwd-here` rewrites the recorded project path to the current directory
+(so run the import from the project), and `--merge` keeps repeat restores
+incremental. Restart the agent afterwards so it rescans, then
+`cct resume <thread-id>`.
+
+**A bundle in a repo is the repo's history.** It holds prompts, code, and command
+output for everyone with access, permanently. So the skill asks once how you want
+it stored and remembers the answer:
+
+```bash
+cct config set repo-sync plain        # only for a private repo
+# or
+cct config set repo-sync encrypted
+cct config set repo-sync-recipient age1...
+```
+
+In `encrypted` mode every committed bundle gains `.age` and the export leaves no
+plaintext behind; restoring needs `--identity` (or `--passphrase`). The export
+secret gate still applies in both modes: a likely credential stops the export
+instead of committing it.
+
+The skill also tells the agent what not to do on its own — never pass
+`--allow-secrets`, never `git push` without asking, never touch `~/.claude.json`
+or Codex's SQLite index. Read the whole document with `cct skill print`.
+
+One caveat worth knowing: each save commits a full new copy of the bundle, and
+git cannot delta compressed archives, so the repo grows with every commit. If
+that becomes a problem, export a window instead: `--since 30d`.
+
 ### Relocate a project
 
 When a project moves to a different folder on the same machine, `relocate`

@@ -1,3 +1,7 @@
 # Shell scripts must keep LF endings so they run on Linux/macOS runners even when
 # checked out on a machine with core.autocrlf=true.
 *.sh text eol=lf
+
+# The skill document is embedded in the binary and installed verbatim, so keep
+# its bytes identical on every platform.
+internal/skill/SKILL.md text eol=lf
