@@ -145,8 +145,16 @@ mkdir -p "$uniproj"
   "$BINABS" export --tool claude --claude-home "$ROOT/$work/uni-claude" --project . \
     -o "$ROOT/$work/uni-back.codexbundle" > /dev/null
 )
-run "$BIN" inspect "$work/uni-back.codexbundle" | grep -q "bbbb2222" \
-  || fail "a unicode project path did not round trip"
+if ! "$BIN" inspect "$work/uni-back.codexbundle" | grep -q "bbbb2222"; then
+  # A unicode path can differ between what the shell created and what the
+  # kernel reports (macOS normalizes to NFD), so show both before failing.
+  echo "--- diagnostics ---" >&2
+  ( cd "$uniproj" && pwd | od -c | head -4 ) >&2
+  printf '%s' "$uniproj" | od -c | head -4 >&2
+  ls "$work/uni-claude/projects" >&2 || true
+  "$BIN" inspect "$work/uni-back.codexbundle" >&2 || true
+  fail "a unicode project path did not round trip"
+fi
 
 echo "== project under \$TMPDIR (a symlinked path on macOS) =="
 tmpbase="$(mktemp -d)"
