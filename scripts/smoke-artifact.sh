@@ -16,6 +16,12 @@
 # The portable parts use only relative paths (never a leading-slash path) so the
 # Windows binary under Git Bash gets the same, un-mangled arguments as on Linux.
 # Sections that need a real absolute path run on POSIX only.
+#
+# One rule this script learned the hard way: never write `cct ... | grep -q`.
+# `grep -q` exits at the first match, so the producer can die of SIGPIPE, and
+# with `pipefail` that turns a successful match into a failed pipeline —
+# intermittently, depending on how much output cct had already written. Every
+# check below writes to a file first and greps the file.
 set -euo pipefail
 
 BIN="${1:-}"
@@ -107,8 +113,8 @@ mkdir -p "$proj"
 run "$BIN" skill init --project "$proj" --repo "https://example.invalid/sessions.git" > /dev/null
 test -f "$proj/.cct/sessions.json" || fail "skill init wrote no reference"
 test -f "$proj/.cct/README.md" || fail "skill init wrote no README"
-run "$BIN" skill show --project "$proj" --json | grep -q "example.invalid" \
-  || fail "skill show did not report the store repo"
+run "$BIN" skill show --project "$proj" --json > "$work/show.json"
+grep -q "example.invalid" "$work/show.json" || fail "skill show did not report the store repo"
 # A reference naming a command-executing transport must stop the command.
 sed 's#https://example.invalid/sessions.git#ext::sh -c evil#' "$proj/.cct/sessions.json" > "$work/ref.json"
 mv "$work/ref.json" "$proj/.cct/sessions.json"
@@ -126,7 +132,8 @@ run "$BIN" export --all --tool claude --claude-home "$work/rt-src" -o "$work/rt.
   ../../"$BIN" import ../rt.codexbundle --claude-home ../rt-claude --merge --map-cwd-here > /dev/null
   ../../"$BIN" export --tool claude --claude-home ../rt-claude --project . -o ../rt-back.codexbundle > /dev/null
 )
-run "$BIN" inspect "$work/rt-back.codexbundle" | grep -q "bbbb2222" \
+run "$BIN" inspect "$work/rt-back.codexbundle" > "$work/rt-back.txt"
+grep -q "bbbb2222" "$work/rt-back.txt" \
   || fail "a session imported with --map-cwd-here is not found again by --project ."
 
 if [ "$posix" -eq 0 ]; then
@@ -152,7 +159,8 @@ round_trip() {
       --merge --map-cwd-here
     "$BINABS" export --tool claude --claude-home "$home" --project . -o "$out"
   ) > "$log" 2>&1
-  if "$BIN" inspect "$out" | grep -q "bbbb2222"; then
+  "$BIN" inspect "$out" > "$ROOT/$work/inspect.txt"
+  if grep -q "bbbb2222" "$ROOT/$work/inspect.txt"; then
     return 0
   fi
   {
