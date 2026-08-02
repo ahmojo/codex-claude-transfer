@@ -135,40 +135,51 @@ if [ "$posix" -eq 0 ]; then
   exit 0
 fi
 
+# round_trip <label> <project dir> <claude home> <out bundle>
+# Import the reference bundle while standing in the project directory, then ask
+# for that project by name. Both halves resolve the current directory
+# independently, so this fails whenever the path cct records is not the path it
+# resolves "." to. On failure it prints what each layer thought the path was —
+# the shell's, the kernel's, and the folder name cct derived — because that is
+# the only way to tell a normalization problem from a symlink problem.
+round_trip() {
+  local label="$1" projdir="$2" home="$3" out="$4" log
+  log="$ROOT/$work/roundtrip.log"
+  mkdir -p "$projdir"
+  (
+    cd "$projdir"
+    "$BINABS" import "$ROOT/$work/rt.codexbundle" --claude-home "$home" \
+      --merge --map-cwd-here
+    "$BINABS" export --tool claude --claude-home "$home" --project . -o "$out"
+  ) > "$log" 2>&1
+  if "$BIN" inspect "$out" | grep -q "bbbb2222"; then
+    return 0
+  fi
+  {
+    echo "--- $label diagnostics ---"
+    echo "shell path:"
+    printf '%s' "$projdir" | od -c | head -4
+    echo "kernel path:"
+    ( cd "$projdir" && pwd -P | od -c | head -4 )
+    echo "project folders cct wrote:"
+    ls "$home/projects" || true
+    echo "recorded cwd:"
+    grep -o '"cwd":"[^"]*"' "$home"/projects/*/*.jsonl | head -4 || true
+    echo "import/export output:"
+    cat "$log" || true
+  } >&2
+  fail "$label did not round trip"
+}
+
 echo "== unicode project path =="
-uniproj="$ROOT/$work/pröjekt-日本語"
-mkdir -p "$uniproj"
-(
-  cd "$uniproj"
-  "$BINABS" import "$ROOT/$work/rt.codexbundle" --claude-home "$ROOT/$work/uni-claude" \
-    --merge --map-cwd-here > /dev/null
-  "$BINABS" export --tool claude --claude-home "$ROOT/$work/uni-claude" --project . \
-    -o "$ROOT/$work/uni-back.codexbundle" > /dev/null
-)
-if ! "$BIN" inspect "$work/uni-back.codexbundle" | grep -q "bbbb2222"; then
-  # A unicode path can differ between what the shell created and what the
-  # kernel reports (macOS normalizes to NFD), so show both before failing.
-  echo "--- diagnostics ---" >&2
-  ( cd "$uniproj" && pwd | od -c | head -4 ) >&2
-  printf '%s' "$uniproj" | od -c | head -4 >&2
-  ls "$work/uni-claude/projects" >&2 || true
-  "$BIN" inspect "$work/uni-back.codexbundle" >&2 || true
-  fail "a unicode project path did not round trip"
-fi
+round_trip "a unicode project path" "$ROOT/$work/pröjekt-日本語" \
+  "$ROOT/$work/uni-claude" "$ROOT/$work/uni-back.codexbundle"
 
 echo "== project under \$TMPDIR (a symlinked path on macOS) =="
 tmpbase="$(mktemp -d)"
 trap 'rm -rf "$tmpbase"' EXIT
-mkdir -p "$tmpbase/proj"
-(
-  cd "$tmpbase/proj"
-  "$BINABS" import "$ROOT/$work/rt.codexbundle" --claude-home "$tmpbase/claude" \
-    --merge --map-cwd-here > /dev/null
-  "$BINABS" export --tool claude --claude-home "$tmpbase/claude" --project . \
-    -o "$tmpbase/back.codexbundle" > /dev/null
-)
-run "$BIN" inspect "$tmpbase/back.codexbundle" | grep -q "bbbb2222" \
-  || fail "a project under \$TMPDIR did not round trip (symlinked path?)"
+round_trip "a project under \$TMPDIR" "$tmpbase/proj" \
+  "$tmpbase/claude" "$tmpbase/back.codexbundle"
 
 echo "== file permissions =="
 test -x "$BIN" || fail "the packaged binary is not executable"
