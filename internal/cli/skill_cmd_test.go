@@ -193,7 +193,14 @@ func TestSkillShowRejectsHostileReference(t *testing.T) {
 // into .cct/, then restore into another machine's home from another path — so
 // the instructions cannot silently drift away from the CLI.
 func TestSkillFlow(t *testing.T) {
+	// On macOS the temp dir is behind a symlink (/var -> /private/var), so the
+	// path os.Getwd reports after chdir differs from t.TempDir's. This test
+	// compares a session's recorded cwd against the current directory, so
+	// resolve once up front and both sides agree.
 	tmp := t.TempDir()
+	if resolved, err := filepath.EvalSymlinks(tmp); err == nil {
+		tmp = resolved
+	}
 	t.Setenv("CCT_CONFIG_DIR", filepath.Join(tmp, "cfg"))
 
 	// Machine A: a project with one Claude Code session.
