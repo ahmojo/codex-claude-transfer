@@ -32,12 +32,13 @@ All notable changes to codex-claude-transfer are documented here.
   world-writable entries.
 
 ### Added
-- A recording tape for the `cct-session-sync` workflow
-  (`demo/recording/16-skill.tape` plus its `skill` scenario in `prep.sh`):
-  install the skill, point the project at a private session store, commit the
-  reference, export into the store, then clone on a second machine and restore
-  with `import --merge --map-cwd-here`. It uses synthetic sessions and local
-  bare repositories only. The GIF itself is not rendered yet.
+- A demo clip for the `cct-session-sync` workflow
+  (`demo/clips/16-skill.gif`, recorded from `demo/recording/16-skill.tape` and
+  its `skill` scenario in `prep.sh`): install the skill, point the project at a
+  private session store, commit the reference, export into the store, then clone
+  on a second machine and restore with `import --merge --map-cwd-here`, ending
+  with the same three chats under the clone's own path. Synthetic sessions and
+  local bare repositories only — no real `~/.codex` or `~/.claude`.
 
 ## [1.7.1] - 2026-08-02
 

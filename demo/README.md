@@ -18,6 +18,14 @@ and moves new/grown sessions both ways. Peer-to-peer, no server, opt-in.
 
 ![LAN sync front door](clips/15-sync.gif)
 
+### Carry the history in git, without putting it in the code repo
+
+`cct skill install` teaches your agent the workflow; the project commits only a
+reference to a private session store, and a clone on the second machine restores
+the chats with `import --merge --map-cwd-here`.
+
+![The cct-session-sync workflow end to end](clips/16-skill.gif)
+
 ### Find a past conversation
 
 Full-text search across your sessions, then export just what matches.

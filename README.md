@@ -135,6 +135,8 @@ same-filesystem moves.
 agent one workflow: save this project's sessions into git when you stop, restore
 them after a clone on the other machine.
 
+![Install the skill, point the project at a private session store, restore it on a second machine](demo/clips/16-skill.gif)
+
 ```bash
 cct skill install                       # ~/.claude/skills/cct-session-sync/
 cct skill print --plain >> ~/.codex/AGENTS.md   # the same for Codex
