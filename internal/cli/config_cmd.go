@@ -47,7 +47,8 @@ const configUsage = `usage: cct config <list | get <key> | set <key> <value> | p
   path              print the config file location
 
 keys: tool (codex|claude), codex-home, claude-home, port,
-      repo-sync (plain|encrypted), repo-sync-recipient (age1...)
+      repo-sync (plain|encrypted), repo-sync-recipient (age1...),
+      repo-sync-repo (<git-url>), repo-sync-dir (<path>)
 These are just defaults; an explicit flag always wins.`
 
 // runConfig manages cct's small set of saved user defaults.

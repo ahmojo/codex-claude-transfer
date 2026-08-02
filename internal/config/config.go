@@ -137,6 +137,9 @@ func (c *Config) Set(key, value string) error {
 		}
 		c.RepoSyncRepo = value
 	case "repo-sync-dir":
+		if i := strings.IndexFunc(value, isControl); i >= 0 {
+			return fmt.Errorf("the path contains a control character at byte %d", i)
+		}
 		c.RepoSyncDir = value
 	default:
 		return fmt.Errorf("unknown config key %q (known: %v)", key, Keys)
@@ -171,6 +174,13 @@ func (c Config) Get(key string) (string, error) {
 	}
 }
 
+// isControl reports the C0/C1 control characters. A saved value can end up in
+// terminal output, so a config file is not allowed to carry escape sequences —
+// no legitimate path or key contains one.
+func isControl(r rune) bool {
+	return r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f)
+}
+
 // validRecipient rejects anything that is obviously not an age recipient, so a
 // typo (or a pasted private key) is caught here rather than by age much later.
 // It deliberately does not try to validate the key material itself.
@@ -184,10 +194,8 @@ func validRecipient(value string) error {
 	if len(value) > 1024 {
 		return fmt.Errorf("recipient is too long (%d bytes)", len(value))
 	}
-	for _, r := range value {
-		if r == '\n' || r == '\r' || r == 0 {
-			return fmt.Errorf("recipient contains a line break or NUL byte")
-		}
+	if i := strings.IndexFunc(value, isControl); i >= 0 {
+		return fmt.Errorf("recipient contains a control character at byte %d", i)
 	}
 	return nil
 }

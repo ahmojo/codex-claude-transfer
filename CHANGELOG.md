@@ -2,6 +2,21 @@
 
 All notable changes to codex-claude-transfer are documented here.
 
+## [Unreleased]
+
+### Security / hardening
+- **Saved config values can no longer carry terminal escape sequences.**
+  `cct skill show` printed the configured store directory — and the bundle
+  paths built from it — without the scrubbing every other value gets, so a
+  hand-edited or generated `config.json` could inject ANSI/OSC sequences into
+  that output (SEC-10). It is scrubbed now, and `cct config set` rejects
+  control characters in `repo-sync-dir` and `repo-sync-recipient` outright, so
+  the value never gets stored in the first place.
+
+### Fixed
+- `cct config` help now lists `repo-sync-repo` and `repo-sync-dir`, which
+  v1.7.0 added to the settable keys but not to the usage text.
+
 ## [1.7.0] - 2026-08-02
 
 ### Added
