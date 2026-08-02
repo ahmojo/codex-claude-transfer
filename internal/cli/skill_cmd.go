@@ -181,7 +181,10 @@ func runSkillShow(f commonFlags, stdout, stderr io.Writer) int {
 	if ref.Recipient != "" {
 		fmt.Fprintf(stdout, "  recipient   %s\n", safeTerminal(ref.Recipient))
 	}
-	fmt.Fprintf(stdout, "  clone       %s", storeDir)
+	// storeDir comes from local config rather than the repo, but a config file
+	// can be hand-edited or generated, and every other printer here scrubs, so
+	// it is scrubbed too. os.Stat still uses the unmodified path.
+	fmt.Fprintf(stdout, "  clone       %s", safeTerminal(storeDir))
 	if _, serr := os.Stat(storeDir); serr == nil {
 		fmt.Fprintln(stdout, "  (present)")
 	} else {
@@ -189,7 +192,7 @@ func runSkillShow(f commonFlags, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintln(stdout)
 	for _, tool := range []string{"claude", "codex"} {
-		fmt.Fprintf(stdout, "  %-6s bundle  %s\n", tool, skill.BundlePathIn(storeDir, ref, tool))
+		fmt.Fprintf(stdout, "  %-6s bundle  %s\n", tool, safeTerminal(skill.BundlePathIn(storeDir, ref, tool)))
 	}
 	fmt.Fprintln(stdout)
 	fmt.Fprintln(stdout, "That repo URL comes from this repository, not from you. If you did not set it")

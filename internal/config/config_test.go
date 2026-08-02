@@ -106,6 +106,21 @@ func TestRepoSyncKeys(t *testing.T) {
 	if err := c.Set("repo-sync-recipient", "not-a-key"); err == nil {
 		t.Fatal("expected error for a recipient that is not an age key")
 	}
+	// A saved value can reach the terminal, so escape sequences are refused at
+	// the point they would be stored.
+	if err := c.Set("repo-sync-dir", "~/store\x1b]0;pwned\a"); err == nil {
+		t.Fatal("a path with an escape sequence was accepted")
+	}
+	if err := c.Set("repo-sync-dir", "~/store"); err != nil {
+		t.Fatalf("an ordinary path was refused: %v", err)
+	}
+	if err := c.Set("repo-sync-repo", "https://h/r.git\nrm -rf /"); err == nil {
+		t.Fatal("a multi-line repo URL was accepted")
+	}
+	if err := c.Set("repo-sync-repo", "ext::sh -c evil"); err == nil {
+		t.Fatal("a remote-helper transport was accepted")
+	}
+
 	// Clearing works for both.
 	if err := c.Set("repo-sync", ""); err != nil || c.RepoSync != "" {
 		t.Fatalf("clear repo-sync: %v (%q)", err, c.RepoSync)

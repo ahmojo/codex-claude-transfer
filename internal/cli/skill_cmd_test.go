@@ -189,6 +189,44 @@ func TestSkillShowRejectsHostileReference(t *testing.T) {
 	}
 }
 
+// `cct config set` refuses control characters, but a config file can also be
+// hand-edited or written by another tool, so nothing it holds may reach the
+// terminal unscrubbed.
+func TestSkillShowScrubsTheConfiguredStoreDir(t *testing.T) {
+	tmp := t.TempDir()
+	cfgDir := filepath.Join(tmp, "cfg")
+	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// A raw control byte is invalid JSON, so the file carries the escapes that
+	// Load decodes back into real ones.
+	cfg := `{"repo_sync_dir":"/tmp/store\u001b]0;pwned\u0007"}`
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.json"), []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CCT_CONFIG_DIR", cfgDir)
+
+	proj := filepath.Join(tmp, "proj")
+	if err := os.MkdirAll(filepath.Join(proj, skill.RefSubdir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ref := `{"version":1,"repo":"git@github.com:me/s.git","project":"proj","path":"projects/proj","encryption":"plain"}`
+	if err := os.WriteFile(skill.RefPath(proj), []byte(ref), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, e, code := run("skill", "show", "--project", proj)
+	if code != 0 {
+		t.Fatalf("show exit=%d %s", code, e)
+	}
+	if strings.ContainsAny(out, "\x1b\a") {
+		t.Fatalf("an escape sequence from the config reached stdout:\n%q", out)
+	}
+	if !strings.Contains(out, "/tmp/store") {
+		t.Fatalf("the path itself should still be shown:\n%s", out)
+	}
+}
+
 // TestSkillFlow runs the exact command sequence the skill documents — export
 // into .cct/, then restore into another machine's home from another path — so
 // the instructions cannot silently drift away from the CLI.
