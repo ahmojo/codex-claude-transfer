@@ -3,26 +3,75 @@ name: Release
 # Builds cross-platform binaries and attaches them to a GitHub Release when you
 # push a version tag like v0.1.0. This does not publish anywhere else, does not
 # touch any server, and does not run automatically on normal pushes.
+#
+# It can also be started by hand (workflow_dispatch) as a DRY RUN: everything up
+# to and including the release assembly runs — build, packaged-artifact smoke
+# tests, the offline dependency-archive proof, SBOM, checksums, archive layout
+# and permission checks — but no GitHub Release is created. That is how changes
+# to this file get tested without burning a version number. Signing and
+# attestation are skipped by default in a dry run because both publish a public
+# record; tick `sign` to exercise them too.
+#
+# Third-party actions are pinned to a commit SHA (the tag is in the trailing
+# comment) so a moved tag cannot change what runs in a release build.
 
 on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      sign:
+        description: "Dry run: also run Sigstore signing and build attestation (publishes a public transparency-log record)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
+  meta:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      is_release: ${{ steps.v.outputs.is_release }}
+      sign: ${{ steps.v.outputs.sign }}
+    steps:
+      # A tag push releases under its own name; a manual run builds a clearly
+      # marked dry-run version so no artifact can be mistaken for a release.
+      - name: Decide version and mode
+        id: v
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME#v}" != "${GITHUB_REF_NAME}" ]; then
+            echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "is_release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=v0.0.0-dryrun-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+            echo "is_release=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "sign=${{ inputs.sign == true }}" >> "$GITHUB_OUTPUT"
+
+      - name: Summarize
+        shell: bash
+        run: |
+          echo "version=${{ steps.v.outputs.version }}"
+          echo "is_release=${{ steps.v.outputs.is_release }}"
+
   dependencies:
     name: Package Go dependencies
+    needs: meta
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 45
     steps:
       - name: Check out code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
           check-latest: true
@@ -32,7 +81,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
+          version="${{ needs.meta.outputs.version }}"
+          version="${version#v}"
           export GOMODCACHE="${PWD}/go-mod"
           go mod download -modcacherw
           go mod verify
@@ -41,30 +91,56 @@ jobs:
             -I 'xz -T0 -9' -cf \
             "dist/codex-claude-transfer-${version}-deps.tar.xz" go-mod
 
+      # Prove the archive is usable, not merely present: unpack it somewhere
+      # else, point Go at it, and build with the network refused. GOPROXY=off
+      # makes any attempt to fetch a module a hard error, and GOTOOLCHAIN=local
+      # stops Go from downloading a different toolchain instead.
+      - name: Build offline from the packaged dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ needs.meta.outputs.version }}"
+          version="${version#v}"
+          offline="$(mktemp -d)"
+          tar -xf "dist/codex-claude-transfer-${version}-deps.tar.xz" -C "$offline"
+          test -d "$offline/go-mod" || { echo "the archive has no go-mod root" >&2; exit 1; }
+          rm -rf "${PWD}/go-mod"
+          env -i PATH="$PATH" HOME="$HOME" \
+            GOMODCACHE="$offline/go-mod" \
+            GOFLAGS=-mod=mod \
+            GOPROXY=off \
+            GOSUMDB=off \
+            GOTOOLCHAIN=local \
+            go build -o "$offline/cct" ./cmd/cct
+          "$offline/cct" version
+          rm -rf "$offline"
+
       - name: Upload dependency artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: codex-claude-transfer-go-dependencies
           path: dist/*-deps.tar.xz
 
   build:
     name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    needs: meta
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { goos: linux,   goarch: amd64 }
-          - { goos: linux,   goarch: arm64 }
-          - { goos: darwin,  goarch: amd64 }
-          - { goos: darwin,  goarch: arm64 }
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
           - { goos: windows, goarch: amd64 }
     steps:
       - name: Check out code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
           check-latest: true
@@ -76,7 +152,7 @@ jobs:
           CGO_ENABLED: "0"
         shell: bash
         run: |
-          version="${GITHUB_REF_NAME}"
+          version="${{ needs.meta.outputs.version }}"
           name="cct"
           ext=""
           if [ "$GOOS" = "windows" ]; then ext=".exe"; fi
@@ -86,8 +162,39 @@ jobs:
           cp README.md docs/safety.md "$outdir/" 2>/dev/null || true
           ( cd dist && tar -czf "${name}_${version}_${GOOS}_${GOARCH}.tar.gz" "$(basename "$outdir")" )
 
+      # The archive is what users download, so check its shape here rather than
+      # discovering a missing doc or a non-executable binary after publishing.
+      - name: Check the archive's contents and permissions
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ needs.meta.outputs.version }}"
+          dir="cct_${version}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          archive="dist/${dir}.tar.gz"
+          bin="cct"
+          if [ "${{ matrix.goos }}" = "windows" ]; then bin="cct.exe"; fi
+          listing="$(tar -tzf "$archive")"
+          echo "$listing"
+          for want in "$dir/$bin" "$dir/README.md" "$dir/safety.md"; do
+            printf '%s\n' "$listing" | grep -qx "$want" || { echo "missing from the archive: $want" >&2; exit 1; }
+          done
+          # Nothing outside the single top-level directory, so unpacking cannot
+          # scatter files into the current folder.
+          bad="$(printf '%s\n' "$listing" | grep -v "^${dir}\(/\|$\)" || true)"
+          if [ -n "$bad" ]; then echo "entries outside ${dir}/:" >&2; echo "$bad" >&2; exit 1; fi
+          modes="$(tar -tvzf "$archive")"
+          echo "$modes"
+          binmode="$(printf '%s\n' "$modes" | awk -v f="$dir/$bin" '$NF == f {print $1}')"
+          case "$binmode" in
+            -rwxr-xr-x) ;;
+            *) echo "unexpected mode for $bin: $binmode (want -rwxr-xr-x)" >&2; exit 1 ;;
+          esac
+          if printf '%s\n' "$modes" | awk '{print $1}' | grep -q '^.....w\|^........w'; then
+            echo "an archive entry is group- or world-writable" >&2; exit 1
+          fi
+
       - name: Upload build artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: cct_${{ matrix.goos }}_${{ matrix.goarch }}
           path: dist/*.tar.gz
@@ -95,19 +202,21 @@ jobs:
   smoke:
     name: Smoke-test ${{ matrix.goos }}/${{ matrix.goarch }} artifact
     needs: build
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         include:
           - { goos: linux, goarch: amd64, os: ubuntu-latest }
+          - { goos: darwin, goarch: arm64, os: macos-latest }
           - { goos: windows, goarch: amd64, os: windows-latest }
     runs-on: ${{ matrix.os }}
     steps:
       - name: Check out code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Download the built artifact
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: cct_${{ matrix.goos }}_${{ matrix.goarch }}
           path: dist
@@ -123,33 +232,31 @@ jobs:
           echo "Testing packaged binary: $bin"
           bash scripts/smoke-artifact.sh "$bin"
 
-  release:
-    name: Publish release
-    needs: [build, smoke, dependencies]
+  assemble:
+    name: Assemble release files
+    needs: [meta, build, smoke, dependencies]
     runs-on: ubuntu-latest
-    # Provenance: checksums + SBOM + GitHub artifact attestation + a
-    # Sigstore-signed checksum file, so every release asset is verifiable.
-    # See "Verifying a release" in docs/internals.md.
+    timeout-minutes: 30
     permissions:
-      contents: write      # create the release and upload assets
-      id-token: write      # keyless (OIDC) signing via Sigstore
-      attestations: write  # GitHub artifact attestations
+      contents: read
+      id-token: write # keyless (OIDC) Sigstore signing
+      attestations: write # GitHub artifact attestations
     steps:
       - name: Check out code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Download artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           path: dist
           merge-multiple: true
 
       - name: Generate SBOM (SPDX)
-        uses: anchore/sbom-action@v0
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
         with:
           path: .
           format: spdx-json
-          output-file: dist/cct_${{ github.ref_name }}_sbom.spdx.json
+          output-file: dist/cct_${{ needs.meta.outputs.version }}_sbom.spdx.json
           upload-artifact: false
           upload-release-assets: false
 
@@ -160,31 +267,94 @@ jobs:
           sha256sum *.tar.gz *.tar.xz *_sbom.spdx.json > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
+      - name: Check the release file set
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ needs.meta.outputs.version }}"
+          cd dist
+          for want in \
+            "cct_${version}_linux_amd64.tar.gz" \
+            "cct_${version}_linux_arm64.tar.gz" \
+            "cct_${version}_darwin_amd64.tar.gz" \
+            "cct_${version}_darwin_arm64.tar.gz" \
+            "cct_${version}_windows_amd64.tar.gz" \
+            "cct_${version}_sbom.spdx.json" \
+            "SHA256SUMS.txt"; do
+            test -f "$want" || { echo "missing release file: $want" >&2; exit 1; }
+          done
+          ls -1 codex-claude-transfer-*-deps.tar.xz > /dev/null
+          sha256sum -c SHA256SUMS.txt
+
+      # Provenance: a Sigstore-signed checksum file plus a GitHub artifact
+      # attestation, so every published asset is verifiable. Both write a public
+      # record, so a dry run only does it when explicitly asked.
       - name: Install cosign
-        uses: sigstore/cosign-installer@v3
+        if: needs.meta.outputs.is_release == 'true' || needs.meta.outputs.sign == 'true'
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
 
       - name: Sign checksum file (Sigstore keyless)
+        if: needs.meta.outputs.is_release == 'true' || needs.meta.outputs.sign == 'true'
         shell: bash
         run: |
           cosign sign-blob --yes \
             --bundle dist/SHA256SUMS.txt.sigstore.json \
             dist/SHA256SUMS.txt
+          cosign verify-blob \
+            --bundle dist/SHA256SUMS.txt.sigstore.json \
+            --certificate-identity-regexp "^https://github.com/${GITHUB_REPOSITORY}/" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            dist/SHA256SUMS.txt
 
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v4
+        if: needs.meta.outputs.is_release == 'true' || needs.meta.outputs.sign == 'true'
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4
         with:
           subject-path: |
             dist/*.tar.gz
             dist/*.tar.xz
             dist/SHA256SUMS.txt
 
+      - name: Upload the assembled release files
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-files
+          path: dist/*
+
+      - name: Dry-run summary
+        if: needs.meta.outputs.is_release != 'true'
+        shell: bash
+        run: |
+          {
+            echo "### Release dry run"
+            echo
+            echo "Built, smoke-tested and assembled \`${{ needs.meta.outputs.version }}\`."
+            echo "No GitHub Release was created. Signing/attestation: \`${{ needs.meta.outputs.sign }}\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    name: Publish release
+    needs: [meta, assemble]
+    # Only a real version tag publishes. A manual dry run stops after assemble.
+    if: needs.meta.outputs.is_release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write # create the release and upload assets
+    steps:
+      - name: Download the assembled release files
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: release-files
+          path: dist
+
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
           files: |
             dist/*.tar.gz
             dist/*.tar.xz
             dist/SHA256SUMS.txt
             dist/SHA256SUMS.txt.sigstore.json
-            dist/cct_${{ github.ref_name }}_sbom.spdx.json
+            dist/cct_${{ needs.meta.outputs.version }}_sbom.spdx.json
           generate_release_notes: true

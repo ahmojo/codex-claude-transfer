@@ -2,6 +2,43 @@
 
 All notable changes to codex-claude-transfer are documented here.
 
+## [Unreleased]
+
+### Changed
+- **The release workflow can be rehearsed.** It now also runs on
+  `workflow_dispatch` as a dry run: build, packaged-artifact smoke tests, the
+  dependency-archive check, SBOM, checksums and the release-file check all run
+  under a `v0.0.0-dryrun-<sha>` version, and the assembled files are uploaded as
+  a workflow artifact — but no GitHub Release is created. Publishing is a
+  separate job gated on a real version tag. Signing and attestation are skipped
+  in a dry run unless the `sign` input is set, because both write to a public
+  transparency log; when they do run, the signature is verified in place with
+  `cosign verify-blob`.
+- **The packaged binary is now smoke-tested on macOS too** (darwin/arm64),
+  alongside Linux and Windows, and the smoke test itself covers much more: the
+  `skill` commands including a refused `ext::` reference, a cwd round trip
+  (import with `--map-cwd-here`, then find the session again with
+  `--project .`), unicode project paths, a project under `$TMPDIR` — the
+  symlinked `/var` → `/private/var` path that broke a test on macOS earlier —
+  file permissions, and relocate + undo.
+- **The Gentoo dependency archive is proven offline, not just produced.** After
+  packaging, the release unpacks it elsewhere and builds `cct` from it with
+  `GOPROXY=off`, `GOSUMDB=off` and `GOTOOLCHAIN=local`, so a missing module
+  fails the release instead of the packager.
+- **Release workflow hardening**: third-party actions are pinned to commit SHAs
+  (the tag stays in a comment), the 360-minute job timeout is replaced by 10–45
+  minutes per job, and each archive is checked for its expected contents, a
+  single top-level directory, an executable binary, and no group- or
+  world-writable entries.
+
+### Added
+- A recording tape for the `cct-session-sync` workflow
+  (`demo/recording/16-skill.tape` plus its `skill` scenario in `prep.sh`):
+  install the skill, point the project at a private session store, commit the
+  reference, export into the store, then clone on a second machine and restore
+  with `import --merge --map-cwd-here`. It uses synthetic sessions and local
+  bare repositories only. The GIF itself is not rendered yet.
+
 ## [1.7.1] - 2026-08-02
 
 ### Security / hardening
