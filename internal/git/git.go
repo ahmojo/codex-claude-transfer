@@ -27,6 +27,11 @@ var helperTransportRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.-]*::`)
 // (ext::/fd::/…), which are the command-execution vector. Ordinary transports
 // (https/http/ssh/git, scp-style user@host:path, file://, and local paths) are
 // allowed, since they cannot execute commands. See SEC-1 in docs/security/audit.md.
+// ValidateRemoteURL is the exported form of validateRemoteURL, so callers that
+// accept a git remote from somewhere other than a bundle — a reference file
+// committed to a project repo, for example — apply exactly the same rule.
+func ValidateRemoteURL(remote string) error { return validateRemoteURL(remote) }
+
 func validateRemoteURL(remote string) error {
 	if remote == "" {
 		return fmt.Errorf("empty git remote")

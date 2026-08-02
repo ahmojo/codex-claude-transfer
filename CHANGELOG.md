@@ -5,23 +5,42 @@ All notable changes to codex-claude-transfer are documented here.
 ## [Unreleased]
 
 ### Added
-- **`cct skill` teaches an agent to carry sessions in the project's repo.**
+- **`cct skill` teaches an agent to carry sessions through git.**
   `cct skill install` writes the `cct-session-sync` skill into your Claude Code
   home (`~/.claude/skills/cct-session-sync/SKILL.md`); `cct skill print --plain`
   emits the same instructions without frontmatter for Codex's `AGENTS.md`, and
   `cct skill path` shows where the file goes. The workflow it documents is the
-  existing commands: `cct export --project . -o .cct/<tool>.codexbundle` before
-  you stop, commit it with the code, and `cct import … --merge --map-cwd-here`
+  existing commands: `cct export --project . -o <bundle path>` before you stop,
+  commit it, and `cct import … --merge --map-cwd-here`
   after a clone on the other machine. Installing writes that one file and
   nothing else — no session file, no agent index. An installed file that differs
   from the shipped one is never replaced without `--force`, which keeps a
   `.cct-bak-*` copy.
-- **Two config keys for that workflow.** `repo-sync` (`plain` or `encrypted`)
-  records whether the committed bundle is `age`-encrypted, and
+- **A separate private session store, so chat history stays out of the code
+  repo.** `cct skill init` writes `.cct/sessions.json` and a generated
+  `.cct/README.md` into a project: a reference naming one private repo that
+  holds the bundles for every project, laid out as
+  `projects/<project>/<tool>/<tool>-all.codexbundle` plus optional
+  `groups/<name>.codexbundle` for a single topic or chat. `cct skill show`
+  explains that reference — store URL, project folder, encryption, the local
+  clone, and each tool's bundle path — in text or `--json`. The reference
+  carries no local paths and no private key, so committing it reveals nothing
+  about the machine; where the store is cloned is per-machine config.
+- **Reference files are treated as untrusted input.** They live in a repo, so
+  anyone who can commit can change where they point. Reading one refuses
+  remote-helper transports (`ext::`/`fd::`) and flag-like URLs with the same
+  rule `import --clone` uses, plus control characters, a non-slug project name,
+  a path that disagrees with it, an unknown version, and an age private key.
+  `cct skill show` scrubs what it prints and says the URL came from the
+  repository, and the skill tells the agent to confirm before cloning a store
+  the user did not set up.
+- **Four config keys for that workflow.** `repo-sync` (`plain` or `encrypted`)
+  records whether the committed bundle is `age`-encrypted and
   `repo-sync-recipient` holds the recipient to encrypt to (a private key is
-  refused). The skill asks once and reuses the answer; a bundle in a repo is
-  readable by everyone with access, so the choice is explicit rather than
-  defaulted.
+  refused); `repo-sync-repo` names the private session store and
+  `repo-sync-dir` where it is cloned locally. The skill asks once and reuses the
+  answers; a bundle in a repo is readable by everyone with access, so the choice
+  is explicit rather than defaulted.
 - **`export -o` creates the output's parent directory.** Exporting straight into
   a new folder (`-o .cct/project.codexbundle`) no longer fails.
 

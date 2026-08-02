@@ -151,6 +151,7 @@ type commonFlags struct {
 	list            bool
 	force           bool
 	plain           bool
+	repo            string
 	positional      []string
 }
 
@@ -257,6 +258,14 @@ func parseFlags(args []string) (commonFlags, error) {
 			f.format = arg[len("--format="):]
 		case arg == "--force":
 			f.force = true
+		case arg == "--repo":
+			val, err := takeValue(args, &i, "--repo")
+			if err != nil {
+				return f, err
+			}
+			f.repo = val
+		case hasPrefix(arg, "--repo="):
+			f.repo = arg[len("--repo="):]
 		case arg == "--plain":
 			f.plain = true
 		case arg == "--redact":
@@ -1574,8 +1583,10 @@ Commands:
   name      Give a session a friendly cct-only name
   config    Save user defaults (tool, homes, port) so you stop retyping flags
   skill     Install the agent workflow skill: keep this project's sessions in
-            the project's own git repo (.cct/), restore them after a clone
-            ('skill print --plain' for Codex's AGENTS.md)
+            git — a separate private session store, or the project's own repo —
+            and restore them after a clone. 'skill init' points a project at
+            that store, 'skill show' explains it, 'skill print --plain' emits
+            the instructions for Codex's AGENTS.md
   export    Export sessions for a project into a .codexbundle
             (--format md|html writes a readable document instead of a bundle;
              --match <q> bundles only sessions whose text matches;
@@ -1708,6 +1719,8 @@ Flags:
                         from this cct's (the old one is kept as a .cct-bak-* copy)
   --plain               skill print: drop the skill frontmatter, so the text can
                         be pasted into AGENTS.md or another agent's instructions
+  --repo <git-url>      skill init: the private session store this project's
+                        history lives in (default: config repo-sync-repo)
   --interval <n>        sync daemon: seconds between change checks (default 5)
   --once                sync daemon: run a single discover-and-sync sweep, then exit
 
@@ -1736,7 +1749,9 @@ Examples:
   cct tag add 9f3c wip              # annotate a session (cct-only, never the agent)
   cct name 9f3c "auth refactor"
   cct config set tool claude        # save a default so you can drop --tool
-  cct skill install                 # teach your agent the .cct/-in-your-repo flow
+  cct skill install                 # teach your agent the save/restore-via-git flow
+  cct skill init                    # point this project at your private session store
+  cct skill show                    # …and explain where its history lives
   cct scan                          # check sessions for likely secrets
   cct export --match "rate limiter" # bundle only sessions about a topic
   cct export --session 9f3c --format md -o chat.md   # readable Markdown

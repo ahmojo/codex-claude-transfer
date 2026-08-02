@@ -32,6 +32,12 @@ func TestDocumentIsAWellFormedSkill(t *testing.T) {
 		"--allow-secrets",          // named so the agent knows never to pass it
 		"git push",                 // the ask-first rule
 		"cct config get repo-sync", // setup check
+		"cct skill init",           // writing the reference into a project
+		"cct skill show",           // how it explains itself to user and agent
+		RefSubdir + "/" + RefFileName,
+		"repo-sync-repo", // the separate private store
+		"groups/",        // sorting chats into sub-bundles
+		"--match",        // how a group is built
 	} {
 		if !strings.Contains(doc, want) {
 			t.Errorf("document no longer mentions %q", want)

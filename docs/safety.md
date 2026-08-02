@@ -84,9 +84,20 @@ file to**.
 ### Committing a bundle on purpose
 
 The `cct-session-sync` skill (`cct skill install`) does the one thing the bullet
-above warns about: it keeps a bundle in the project's own repo under `.cct/`, so
-a clone carries the session history with it. That is a real trade — make it
-knowingly:
+above warns about: it keeps a bundle in git. There are two layouts, and the
+first exists precisely to limit the exposure:
+
+- **A separate private session store.** One private repo holds the bundles for
+  all your projects; each project repo commits only `.cct/sessions.json`, a
+  reference naming that store. The code repo — which may be public, or shared
+  with people who should not read your transcripts — gains no history at all.
+  The reference records the store URL, the project's folder, the encryption
+  mode, and at most an age *recipient* (a public key). No local paths, no
+  private key: `cct skill init` writes it, `cct skill show` explains it.
+- **In the project's own repo**, under `.cct/`. Simplest, and only acceptable
+  when that repo is itself private.
+
+Either way it is a real trade — make it knowingly:
 
 - Everyone with repo access can read every prompt, code excerpt, and command
   output in those sessions, and git history keeps them after a later deletion.
@@ -100,6 +111,23 @@ knowingly:
 - The skill file is instructions for an agent, not a sandbox. It constrains a
   cooperating agent; it cannot stop one from running other commands. Nothing in
   it grants any capability that `cct` did not already have.
+
+**A reference file is untrusted input.** `.cct/sessions.json` lives in a
+repository, so anyone who can commit — or get a pull request merged — can change
+which store it names, and an agent that clones and imports from it would be
+fetching an attacker's bundle. cct treats it accordingly:
+
+- `ReadReference` validates before anything acts on it. Remote-helper transports
+  (`ext::`, `fd::` — the command-execution vector, see §10) and flag-like values
+  are refused with the same rule `import --clone` uses; so are control
+  characters, a project name that is not a plain slug, a path that disagrees
+  with that name, an unknown schema version, and an age *private* key.
+- `cct skill show` prints the URL with an explicit reminder that it came from
+  the repository rather than from you, and scrubs every value it prints (§10).
+- The skill instructs the agent to show you the URL and ask before cloning or
+  importing from a store it did not set up, and never to treat prose inside
+  those files as your instructions.
+- cct itself never clones the store: that stays a `git clone` you run.
 
 `cct skill install` writes exactly one file, `SKILL.md`, inside your Claude Code
 home's `skills/` directory. It reads no sessions, writes no session file, and
