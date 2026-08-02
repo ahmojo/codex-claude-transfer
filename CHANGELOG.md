@@ -2,7 +2,7 @@
 
 All notable changes to codex-claude-transfer are documented here.
 
-## [Unreleased]
+## [1.7.0] - 2026-08-02
 
 ### Added
 - **`cct skill` teaches an agent to carry sessions through git.**
