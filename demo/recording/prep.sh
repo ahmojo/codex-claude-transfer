@@ -72,7 +72,7 @@ case "$scenario" in
       git -c user.email=demo@example.com -c user.name=demo add -A
       git -c user.email=demo@example.com -c user.name=demo commit -qm "initial skeleton"
       git remote add origin "$REC/gitdemo/bare-remote"
-      git push -q origin HEAD:main
+      git push -q -u origin HEAD:main
     )
     mkdir -p "$REC/gitsrc/codex-home"
     python3 - "$REC/gitsrc/codex-home" "$REC/gitdemo/work" <<'PY'
@@ -121,6 +121,70 @@ PY
     # time runs days ahead of its newest content timestamp.
     f=$(find "$REC/laptop/codex-home/sessions" -name '*b2c3d4e5*.jsonl' | head -1)
     touch -d "2026-06-20T23:00:00" "$f"
+    ;;
+  skill)
+    # The cct-session-sync scenario: a project repo, fake Claude Code sessions
+    # for it, and a "private session store" that is just another local repo.
+    # Every repository here is a local bare repo — nothing leaves this machine.
+    gitcfg=(-c user.email=demo@example.com -c user.name=demo)
+    rm -rf "$REC/skill" "$HOME/cct-store" "$HOME/cct-store-b" "$HOME/projects/todo-api-clone"
+    mkdir -p "$REC/skill"
+
+    # The project itself, with a bare remote so the second machine can clone it.
+    rm -rf "$HOME/projects/todo-api"; mkdir -p "$HOME/projects/todo-api"
+    (
+      cd "$REC/skill" && git init -q --bare todo-api.git
+      # The bare repos default to a master HEAD; point them at the branch that
+      # is actually pushed, so a clone checks something out.
+      git -C "$REC/skill/todo-api.git" symbolic-ref HEAD refs/heads/main
+      cd "$HOME/projects/todo-api"
+      git init -q && git symbolic-ref HEAD refs/heads/main
+      echo "# todo-api — a small REST service" > README.md
+      git "${gitcfg[@]}" add -A && git "${gitcfg[@]}" commit -qm "initial skeleton"
+      git remote add origin "$REC/skill/todo-api.git"
+      git push -q -u origin HEAD:main
+    )
+
+    # The private session store: a bare repo, already cloned on this machine.
+    ( cd "$REC/skill" && git init -q --bare sessions.git )
+    git -C "$REC/skill/sessions.git" symbolic-ref HEAD refs/heads/main
+    git clone -q "$REC/skill/sessions.git" "$HOME/cct-store"
+    (
+      cd "$HOME/cct-store"
+      git symbolic-ref HEAD refs/heads/main
+      echo "# Private session store (demo)" > README.md
+      git "${gitcfg[@]}" add -A && git "${gitcfg[@]}" commit -qm "start the store"
+      git push -q -u origin HEAD:main
+    )
+
+    # Fake Claude Code transcripts for the project — synthetic text only.
+    python3 - "$REC/skill/claude-a" "$HOME/projects/todo-api" <<'PY'
+import json, os, sys
+home, cwd = sys.argv[1], sys.argv[2]
+encoded = "".join(c if (c.isascii() and (c.isalnum() or c == "-")) else "-" for c in cwd)
+d = os.path.join(home, "projects", encoded)
+os.makedirs(d, exist_ok=True)
+chats = [
+    ("11111111-2222-3333-4444-555555555555", "2026-06-14T09:12:00Z",
+     "Sketch the REST handlers for the todo endpoints."),
+    ("22222222-3333-4444-5555-666666666666", "2026-06-15T16:40:00Z",
+     "The list endpoint should paginate — 20 per page, cursor based."),
+    ("33333333-4444-5555-6666-777777777777", "2026-06-16T11:05:00Z",
+     "Add a migration for the due_date column and backfill it."),
+]
+for sid, ts, first in chats:
+    p = os.path.join(d, sid + ".jsonl")
+    with open(p, "w") as fh:
+        fh.write(json.dumps({"type": "user", "uuid": sid, "sessionId": sid, "cwd": cwd,
+                             "timestamp": ts,
+                             "message": {"role": "user", "content": first}}) + "\n")
+        fh.write(json.dumps({"type": "assistant", "uuid": sid + "-a", "sessionId": sid,
+                             "cwd": cwd, "timestamp": ts,
+                             "message": {"role": "assistant",
+                                         "content": "Sure — here is the plan."}}) + "\n")
+PY
+    # The second machine starts with an empty Claude home.
+    mkdir -p "$REC/skill/claude-b"
     ;;
   *)
     echo "unknown scenario: $scenario" >&2; exit 2;;
