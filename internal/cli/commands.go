@@ -65,6 +65,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runName(rest, stdout, stderr)
 	case "config":
 		return runConfig(rest, stdout, stderr)
+	case "skill":
+		return runSkill(rest, stdout, stderr)
 	case "export":
 		return runExport(rest, stdout, stderr)
 	case "inspect":
@@ -147,6 +149,8 @@ type commonFlags struct {
 	port            int
 	noBrowser       bool
 	list            bool
+	force           bool
+	plain           bool
 	positional      []string
 }
 
@@ -251,6 +255,10 @@ func parseFlags(args []string) (commonFlags, error) {
 			f.format = val
 		case hasPrefix(arg, "--format="):
 			f.format = arg[len("--format="):]
+		case arg == "--force":
+			f.force = true
+		case arg == "--plain":
+			f.plain = true
 		case arg == "--redact":
 			f.redact = true
 		case arg == "--remember":
@@ -1565,6 +1573,9 @@ Commands:
   tag       Add/remove/list cct-only tags on a session (tag add|rm|ls)
   name      Give a session a friendly cct-only name
   config    Save user defaults (tool, homes, port) so you stop retyping flags
+  skill     Install the agent workflow skill: keep this project's sessions in
+            the project's own git repo (.cct/), restore them after a clone
+            ('skill print --plain' for Codex's AGENTS.md)
   export    Export sessions for a project into a .codexbundle
             (--format md|html writes a readable document instead of a bundle;
              --match <q> bundles only sessions whose text matches;
@@ -1693,6 +1704,10 @@ Flags:
                         in a session (the default refuses; --redact masks instead)
   --run                 resume: launch the agent on the chosen session now,
                         instead of just printing the command
+  --force               skill install: replace an installed SKILL.md that differs
+                        from this cct's (the old one is kept as a .cct-bak-* copy)
+  --plain               skill print: drop the skill frontmatter, so the text can
+                        be pasted into AGENTS.md or another agent's instructions
   --interval <n>        sync daemon: seconds between change checks (default 5)
   --once                sync daemon: run a single discover-and-sync sweep, then exit
 
@@ -1721,6 +1736,7 @@ Examples:
   cct tag add 9f3c wip              # annotate a session (cct-only, never the agent)
   cct name 9f3c "auth refactor"
   cct config set tool claude        # save a default so you can drop --tool
+  cct skill install                 # teach your agent the .cct/-in-your-repo flow
   cct scan                          # check sessions for likely secrets
   cct export --match "rate limiter" # bundle only sessions about a topic
   cct export --session 9f3c --format md -o chat.md   # readable Markdown

@@ -25,6 +25,7 @@ var completionCommands = []completionCommand{
 	{"tag", "Add/remove/list cct-only tags on a session"},
 	{"name", "Give a session a friendly cct-only name"},
 	{"config", "Save user defaults (tool, homes, port)"},
+	{"skill", "Install the agent workflow skill (sessions in your repo)"},
 	{"export", "Export sessions into a .codexbundle"},
 	{"inspect", "Show a bundle's contents (read-only)"},
 	{"diff", "Preview what importing a bundle would do (read-only)"},
@@ -50,7 +51,7 @@ var completionFlags = []string{
 	"--match", "--format", "--redact", "--allow-secrets", "--regex",
 	"--case-sensitive", "--run", "--remember", "--i-understand", "--allow-public",
 	"--pull-only", "--push-only", "--code", "--once", "--interval",
-	"--list", "--version", "--help",
+	"--list", "--force", "--plain", "--version", "--help",
 }
 
 // runCompletion prints a completion script for the requested shell.

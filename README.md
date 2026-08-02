@@ -129,6 +129,30 @@ duplicated; `cct undo` reverses both halves. See the
 [usage guide](docs/usage.md#relocate-a-project) for rollback behavior and
 same-filesystem moves.
 
+### Let your agent do it: sessions in your repo
+
+`cct skill install` writes a skill into your Claude Code home that teaches the
+agent one workflow: keep this project's sessions in the project's own git repo
+under `.cct/`, and restore them after a clone on the other machine.
+
+```bash
+cct skill install                       # ~/.claude/skills/cct-session-sync/
+cct skill print --plain >> ~/.codex/AGENTS.md   # the same for Codex
+```
+
+Without any agent, that workflow is just two commands:
+
+```bash
+cct export --project . --tool claude -o .cct/claude.codexbundle   # save, then commit
+cct import .cct/claude.codexbundle --merge --map-cwd-here         # restore after a clone
+```
+
+A bundle in a repo is readable by everyone with access, forever, so the skill
+asks once whether to commit it plainly (private repos only) or `age`-encrypted,
+and stores the answer in `cct config`. It never pushes or passes
+`--allow-secrets` on its own. See the
+[usage guide](docs/usage.md#carry-sessions-in-the-projects-own-repo).
+
 ## Compatibility
 
 Codex's and Claude Code's on-disk formats are their own internals and can change

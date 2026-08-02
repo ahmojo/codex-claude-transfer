@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/ahmojo/codex-claude-transfer/internal/agent"
 )
@@ -25,10 +26,23 @@ type Config struct {
 	CodexHome  string `json:"codex_home,omitempty"`  // default --codex-home
 	ClaudeHome string `json:"claude_home,omitempty"` // default --claude-home
 	Port       int    `json:"port,omitempty"`        // default app port
+	// RepoSync records how the cct-session-sync workflow commits a bundle into
+	// a project's own repository: as plaintext or age-encrypted. It is the
+	// answer to a one-time setup question, not a secret.
+	RepoSync string `json:"repo_sync,omitempty"` // plain | encrypted
+	// RepoSyncRecipient is the age recipient that workflow encrypts to. A
+	// recipient is a public key: it can encrypt, never decrypt.
+	RepoSyncRecipient string `json:"repo_sync_recipient,omitempty"`
 }
 
 // Keys lists the settable keys in a stable, display order.
-var Keys = []string{"tool", "codex-home", "claude-home", "port"}
+var Keys = []string{"tool", "codex-home", "claude-home", "port", "repo-sync", "repo-sync-recipient"}
+
+// RepoSync modes.
+const (
+	RepoSyncPlain     = "plain"
+	RepoSyncEncrypted = "encrypted"
+)
 
 // FilePath returns the config file path within dir.
 func FilePath(dir string) string { return filepath.Join(dir, FileName) }
@@ -89,6 +103,18 @@ func (c *Config) Set(key, value string) error {
 			return fmt.Errorf("invalid port %q (want 0-65535)", value)
 		}
 		c.Port = n
+	case "repo-sync":
+		if value != "" && value != RepoSyncPlain && value != RepoSyncEncrypted {
+			return fmt.Errorf("invalid repo-sync %q (want %s or %s)", value, RepoSyncPlain, RepoSyncEncrypted)
+		}
+		c.RepoSync = value
+	case "repo-sync-recipient":
+		if value != "" {
+			if err := validRecipient(value); err != nil {
+				return err
+			}
+		}
+		c.RepoSyncRecipient = value
 	default:
 		return fmt.Errorf("unknown config key %q (known: %v)", key, Keys)
 	}
@@ -109,9 +135,34 @@ func (c Config) Get(key string) (string, error) {
 			return "", nil
 		}
 		return strconv.Itoa(c.Port), nil
+	case "repo-sync":
+		return c.RepoSync, nil
+	case "repo-sync-recipient":
+		return c.RepoSyncRecipient, nil
 	default:
 		return "", fmt.Errorf("unknown config key %q (known: %v)", key, Keys)
 	}
+}
+
+// validRecipient rejects anything that is obviously not an age recipient, so a
+// typo (or a pasted private key) is caught here rather than by age much later.
+// It deliberately does not try to validate the key material itself.
+func validRecipient(value string) error {
+	if strings.HasPrefix(value, "AGE-SECRET-KEY-") {
+		return fmt.Errorf("that is an age private key; repo-sync-recipient takes the public recipient (age1...)")
+	}
+	if !strings.HasPrefix(value, "age1") && !strings.HasPrefix(value, "ssh-") {
+		return fmt.Errorf("invalid recipient %q (want an age recipient: age1... or ssh-ed25519 ...)", value)
+	}
+	if len(value) > 1024 {
+		return fmt.Errorf("recipient is too long (%d bytes)", len(value))
+	}
+	for _, r := range value {
+		if r == '\n' || r == '\r' || r == 0 {
+			return fmt.Errorf("recipient contains a line break or NUL byte")
+		}
+	}
+	return nil
 }
 
 // Entries returns the configured key/value pairs in Keys order, omitting unset

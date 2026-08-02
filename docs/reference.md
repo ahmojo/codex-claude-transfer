@@ -17,7 +17,8 @@ Use this page when you need exact commands and flags. For guided workflows, see
 | `cct resume [query]` | Find the best matching session and print the agent command that continues it; `--run` launches it. |
 | `cct browse` | Interactive session browser: search, pick one, then resume, export, tag, or name it. |
 | `cct tag add\|rm\|ls` / `cct name` | Add cct-only tags and friendly names. These are stored in cct config, never in agent session files. |
-| `cct config list\|get\|set\|path` | Save defaults such as tool, homes, and port. Explicit flags always win. |
+| `cct config list\|get\|set\|path` | Save defaults such as tool, homes, port, and the `repo-sync` mode. Explicit flags always win. |
+| `cct skill install\|print\|path` | Install the `cct-session-sync` skill into your Claude Code home (`~/.claude/skills/`), so an agent knows how to keep a project's sessions in the project's own repo. `print --plain` emits the same instructions without frontmatter for Codex's `AGENTS.md`. Writes one file; no session file or agent index is touched. |
 | `cct export [--project <path> \| --all \| --session <id>]` | Package matching sessions into a `.codexbundle`, or render readable Markdown/HTML with `--format`. By default it refuses likely secrets unless `--redact` or `--allow-secrets` is set. |
 | `cct inspect <bundle>` | Show a bundle's manifest and contents, read-only, and flag missing recorded project folders. |
 | `cct diff <bundle>` | Preview what importing the bundle would do — new, would-grow (with line counts), already-present, and conflicting sessions — read-only, nothing is written. Honors the same selection/remap flags as `import`. |
@@ -70,3 +71,19 @@ Use this page when you need exact commands and flags. For guided workflows, see
 | `--recipients-file <file>` | export | Encrypt to every `age` recipient listed in `<file>`. |
 | `--passphrase` | export, import, inspect | Export with a passphrase, or decrypt a passphrase-encrypted bundle. |
 | `--identity <file>` | import, inspect | `age` identity/private key file used to decrypt a `.age` bundle. |
+| `--force` | skill install | Replace an installed `SKILL.md` whose contents differ from this cct's. The current file is kept as a `.cct-bak-<nanos>` copy next to it. |
+| `--plain` | skill print | Drop the YAML frontmatter, so the instructions can be pasted into `AGENTS.md` or another agent's instruction file. |
+
+## Config keys
+
+`cct config set <key> <value>` saves a default; an explicit flag always wins. The
+file is plain JSON under cct's config dir (`cct config path`) and holds no
+secrets.
+
+| Key | Values | Meaning |
+| --- | ------ | ------- |
+| `tool` | `codex`, `claude` | Which agent commands act on by default. |
+| `codex-home` / `claude-home` | path | Default agent home, below `$CODEX_HOME` / `$CLAUDE_HOME` in precedence. |
+| `port` | 0-65535 | Default port for `cct app`. |
+| `repo-sync` | `plain`, `encrypted` | How the `cct-session-sync` skill commits a bundle into a project's repo: as-is, or `age`-encrypted. Answered once, during that skill's setup. |
+| `repo-sync-recipient` | `age1...`, `ssh-...` | The `age` recipient that workflow encrypts to. A recipient is a public key; a private key is refused. |

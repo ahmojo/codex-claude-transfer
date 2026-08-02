@@ -2,6 +2,33 @@
 
 All notable changes to codex-claude-transfer are documented here.
 
+## [Unreleased]
+
+### Added
+- **`cct skill` teaches an agent to carry sessions in the project's repo.**
+  `cct skill install` writes the `cct-session-sync` skill into your Claude Code
+  home (`~/.claude/skills/cct-session-sync/SKILL.md`); `cct skill print --plain`
+  emits the same instructions without frontmatter for Codex's `AGENTS.md`, and
+  `cct skill path` shows where the file goes. The workflow it documents is the
+  existing commands: `cct export --project . -o .cct/<tool>.codexbundle` before
+  you stop, commit it with the code, and `cct import … --merge --map-cwd-here`
+  after a clone on the other machine. Installing writes that one file and
+  nothing else — no session file, no agent index. An installed file that differs
+  from the shipped one is never replaced without `--force`, which keeps a
+  `.cct-bak-*` copy.
+- **Two config keys for that workflow.** `repo-sync` (`plain` or `encrypted`)
+  records whether the committed bundle is `age`-encrypted, and
+  `repo-sync-recipient` holds the recipient to encrypt to (a private key is
+  refused). The skill asks once and reuses the answer; a bundle in a repo is
+  readable by everyone with access, so the choice is explicit rather than
+  defaulted.
+- **`export -o` creates the output's parent directory.** Exporting straight into
+  a new folder (`-o .cct/project.codexbundle`) no longer fails.
+
+### Changed
+- The safety notes no longer say "never commit a bundle" without qualification;
+  they now describe committing one deliberately, and what that costs.
+
 ## [1.6.0] - 2026-07-27
 
 ### Added

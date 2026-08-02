@@ -94,6 +94,63 @@ recipient/identity key files.
 
 ## Common workflows
 
+### Carry sessions in the project's own repo
+
+Instead of moving a bundle by hand each time, keep it in the repo you already
+push. `cct skill install` writes a skill into your Claude Code home that teaches
+the agent the whole loop:
+
+```bash
+cct skill install
+# -> ~/.claude/skills/cct-session-sync/SKILL.md
+```
+
+Restart Claude Code and ask it to sync this project's sessions (or invoke
+`/cct-session-sync`). For Codex, append the same instructions to your `AGENTS.md`:
+
+```bash
+cct skill print --plain >> ~/.codex/AGENTS.md
+```
+
+The workflow itself is two commands, and you can run them without any agent:
+
+```bash
+# Save, at the end of a working session
+cct export --project . --tool claude -o .cct/claude.codexbundle
+git add .cct && git commit -m "Update .cct session bundle"
+
+# Restore, after cloning the repo on the other machine
+cct import .cct/claude.codexbundle --merge --map-cwd-here
+```
+
+`--map-cwd-here` rewrites the recorded project path to the clone's path, and
+`--merge` keeps repeat restores incremental. Restart the agent afterwards so it
+rescans, then `cct resume <thread-id>`.
+
+**A bundle in a repo is the repo's history.** It holds prompts, code, and command
+output for everyone with access, permanently. So the skill asks once how you want
+it stored and remembers the answer:
+
+```bash
+cct config set repo-sync plain        # only for a private repo
+# or
+cct config set repo-sync encrypted
+cct config set repo-sync-recipient age1...
+```
+
+In `encrypted` mode the committed file is `.cct/claude.codexbundle.age` and the
+export leaves no plaintext bundle behind; restoring needs `--identity` (or
+`--passphrase`). The export secret gate still applies in both modes: a likely
+credential stops the export instead of committing it.
+
+The skill also tells the agent what not to do on its own — never pass
+`--allow-secrets`, never `git push` without asking, never touch `~/.claude.json`
+or Codex's SQLite index. Read the whole document with `cct skill print`.
+
+One caveat worth knowing: each save commits a full new copy of the bundle, and
+git cannot delta compressed archives, so the repo grows with every commit. If
+that becomes a problem, export a window instead: `--since 30d`.
+
 ### Relocate a project
 
 When a project moves to a different folder on the same machine, `relocate`

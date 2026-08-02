@@ -63,7 +63,9 @@ free of sensitive material.
 ### Practical guidance
 
 - **Do not post bundles publicly** — not in GitHub issues, gists, pastebins, or chat.
-- **Do not commit bundles to a repository.** Add `*.codexbundle` to your `.gitignore`.
+- **Do not commit a bundle to a repository by default.** Add `*.codexbundle` to
+  your `.gitignore` unless you have deliberately chosen otherwise (see
+  "Committing a bundle on purpose" below).
 - Move bundles over channels you trust (USB stick, `scp`/`rsync` over SSH,
   Syncthing, an encrypted drive).
 - **Encrypt the bundle** if it must travel over a channel you do not fully
@@ -78,6 +80,32 @@ free of sensitive material.
 `cct` does **not** upload anything anywhere. The only data movement is you
 copying the file by hand. The privacy risk is entirely about **who you hand the
 file to**.
+
+### Committing a bundle on purpose
+
+The `cct-session-sync` skill (`cct skill install`) does the one thing the bullet
+above warns about: it keeps a bundle in the project's own repo under `.cct/`, so
+a clone carries the session history with it. That is a real trade — make it
+knowingly:
+
+- Everyone with repo access can read every prompt, code excerpt, and command
+  output in those sessions, and git history keeps them after a later deletion.
+- The skill therefore requires an explicit answer up front, stored as
+  `cct config set repo-sync plain|encrypted`. In `plain` mode it must confirm
+  with you that the remote is private before the first commit; in `encrypted`
+  mode the committed file is `age`-encrypted (§11) and the plaintext bundle is
+  removed, so a mistakenly public repo leaks nothing.
+- The export secret gate (§1) applies unchanged. The skill is instructed never
+  to pass `--allow-secrets` itself and never to `git push` without asking you.
+- The skill file is instructions for an agent, not a sandbox. It constrains a
+  cooperating agent; it cannot stop one from running other commands. Nothing in
+  it grants any capability that `cct` did not already have.
+
+`cct skill install` writes exactly one file, `SKILL.md`, inside your Claude Code
+home's `skills/` directory. It reads no sessions, writes no session file, and
+touches neither `~/.claude.json` nor Codex's SQLite index (§5). An existing file
+with different contents is never replaced without `--force`, which keeps a
+backup.
 
 ---
 
