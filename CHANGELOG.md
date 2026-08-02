@@ -2,7 +2,7 @@
 
 All notable changes to codex-claude-transfer are documented here.
 
-## [Unreleased]
+## [1.8.0] - 2026-08-02
 
 ### Changed
 - **The release workflow can be rehearsed.** It now also runs on
