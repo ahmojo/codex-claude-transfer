@@ -198,6 +198,42 @@ synthetic session data only, never a real bundle (see
 - [Roadmap](docs/roadmap.md): shipped features, never-planned features, and
   project notes.
 
+## Repository traffic metrics
+
+The daily `Repository traffic metrics` workflow stores a public snapshot at
+`metrics/traffic.json` on the separate `metrics` branch. It records GitHub's
+14-day clone totals and merges the daily counts into an idempotent history.
+The cumulative clone count is complete only from `tracked_since`; GitHub does
+not expose older clone traffic. Daily unique-cloner counts are retained for
+auditability, but they are never summed into an all-time unique value.
+
+The workflow needs one repository secret named `CCT_TRAFFIC_TOKEN`. Create it
+once as follows:
+
+1. Open GitHub **Settings → Developer settings → Personal access tokens →
+   Fine-grained tokens** and choose **Generate new token**.
+2. Select the `ahmojo` resource owner, choose **Only select repositories**,
+   and select only `ahmojo/codex-claude-transfer`.
+3. Under **Repository permissions**, set **Administration** to
+   **Read-only**. Do not grant write access or access to other repositories.
+4. Generate the token and copy it immediately. GitHub shows it only once.
+5. In `ahmojo/codex-claude-transfer`, open **Settings → Secrets and
+   variables → Actions → New repository secret**.
+6. Name the secret exactly `CCT_TRAFFIC_TOKEN`, paste the token, and save it.
+7. Run **Actions → Repository traffic metrics → Run workflow** once. The normal
+   `GITHUB_TOKEN` writes only the generated file to the `metrics` branch.
+
+The token is sent only to GitHub's protected traffic endpoint. It is never
+written to the metrics file, commits, workflow logs, or a browser response.
+The generated file is publicly available at:
+
+```text
+https://raw.githubusercontent.com/ahmojo/codex-claude-transfer/metrics/metrics/traffic.json
+```
+
+Clone traffic can include automated access from CI systems, scanners, bots, and
+other services. No attempt is made to estimate or subtract that traffic.
+
 ## Contributing
 
 PRs welcome. Keep changes small, preserve the no-cloud / no-SQLite-writes
