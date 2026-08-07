@@ -85,3 +85,16 @@ jobs:
         uses: golang/govulncheck-action@v1
         with:
           go-version-file: go.mod
+
+  traffic-metrics:
+    name: traffic metrics merge
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v7
+
+      - name: Test traffic metrics merge
+        run: python -m unittest discover -s scripts -p 'test_*.py' -v
+
+      - name: Compile traffic metrics scripts
+        run: python -m compileall -q scripts

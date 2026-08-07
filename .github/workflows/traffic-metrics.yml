@@ -1,0 +1,75 @@
+name: Repository traffic metrics
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: repository-traffic-metrics
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Update clone history
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TRAFFIC_TOKEN: ${{ secrets.CCT_TRAFFIC_TOKEN }}
+    steps:
+      - name: Check out workflow source
+        uses: actions/checkout@v7
+
+      - name: Fetch the 14-day clone window
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$TRAFFIC_TOKEN" ]; then
+            echo "CCT_TRAFFIC_TOKEN is not configured." >&2
+            exit 1
+          fi
+          curl --silent --show-error --fail \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer $TRAFFIC_TOKEN" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --output "$RUNNER_TEMP/clones.json" \
+            "https://api.github.com/repos/ahmojo/codex-claude-transfer/traffic/clones?per=day"
+
+      - name: Prepare the metrics branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          metrics_dir="$RUNNER_TEMP/metrics-branch"
+          if git ls-remote --exit-code --heads origin metrics >/dev/null; then
+            git fetch --no-tags origin metrics:refs/remotes/origin/metrics
+            git worktree add --detach "$metrics_dir" refs/remotes/origin/metrics
+          else
+            git worktree add --detach "$metrics_dir" HEAD
+            git -C "$metrics_dir" switch --orphan metrics
+          fi
+          echo "METRICS_DIR=$metrics_dir" >> "$GITHUB_ENV"
+
+      - name: Merge the latest window
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/update_traffic_metrics.py \
+            --input "$RUNNER_TEMP/clones.json" \
+            --output "$METRICS_DIR/metrics/traffic.json"
+
+      - name: Commit changed metrics
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$(git -C "$METRICS_DIR" status --porcelain -- metrics/traffic.json)" ]; then
+            echo "Traffic metrics are unchanged."
+            exit 0
+          fi
+          git -C "$METRICS_DIR" config user.name "github-actions[bot]"
+          git -C "$METRICS_DIR" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C "$METRICS_DIR" add metrics/traffic.json
+          git -C "$METRICS_DIR" commit -m "chore(metrics): update repository traffic [skip ci]"
+          git -C "$METRICS_DIR" push origin HEAD:metrics
