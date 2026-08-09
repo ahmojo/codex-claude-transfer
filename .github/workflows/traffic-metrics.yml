@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   update:
-    name: Update clone history
+    name: Update usage history
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -52,10 +52,12 @@ jobs:
           fi
           echo "METRICS_DIR=$metrics_dir" >> "$GITHUB_ENV"
 
-      - name: Merge the latest window
+      - name: Merge the latest window and snapshot downloads
         shell: bash
         run: |
           set -euo pipefail
+          # The script reads public release metadata without a token. The
+          # protected token remains scoped to the traffic request above.
           python scripts/update_traffic_metrics.py \
             --input "$RUNNER_TEMP/clones.json" \
             --output "$METRICS_DIR/metrics/traffic.json"

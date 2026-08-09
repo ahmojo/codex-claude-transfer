@@ -203,6 +203,10 @@ synthetic session data only, never a real bundle (see
 The daily `Repository traffic metrics` workflow stores a public snapshot at
 `metrics/traffic.json` on the separate `metrics` branch. It records GitHub's
 14-day clone totals and merges the daily counts into an idempotent history.
+It also records the cumulative download count of installable release binaries
+and one daily snapshot of the displayed metrics. The current release total
+still covers every published release; download deltas and charts are complete
+only from the first stored daily snapshot.
 The cumulative clone count is complete only from `tracked_since`; GitHub does
 not expose older clone traffic. Daily unique-cloner counts are retained for
 auditability, but they are never summed into an all-time unique value.
