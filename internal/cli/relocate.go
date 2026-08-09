@@ -65,6 +65,7 @@ type relocateJSON struct {
 	Backups        []string `json:"backups,omitempty"`
 	MovedFiles     int      `json:"moved_files,omitempty"`
 	RemovedSources int      `json:"removed_sources,omitempty"`
+	MemoryFiles    int      `json:"memory_files,omitempty"`
 }
 
 // relocateOutcome carries what the summary printer reports after either agent's
@@ -79,6 +80,8 @@ type relocateOutcome struct {
 	// and removedSources the originals deleted from the old one.
 	movedFiles     int
 	removedSources int
+	// memoryFiles counts the project's auto-memory files that move with it.
+	memoryFiles int
 }
 
 // runRelocate safely rewrites a project's recorded working directory after its
@@ -533,6 +536,7 @@ func printRelocateResult(stdout io.Writer, f relocateFlags, out relocateOutcome)
 			Backups:        out.backups,
 			MovedFiles:     out.movedFiles,
 			RemovedSources: out.removedSources,
+			MemoryFiles:    out.memoryFiles,
 		})
 		return
 	}
@@ -548,6 +552,13 @@ func printRelocateResult(stdout io.Writer, f relocateFlags, out relocateOutcome)
 			verb = "Transcripts that would move to the new project folder"
 		}
 		fmt.Fprintf(stdout, "%s: %d\n", verb, out.movedFiles)
+		if out.memoryFiles > 0 {
+			memVerb := "Auto-memory files moved with the project"
+			if f.dryRun {
+				memVerb = "Auto-memory files that would move with the project"
+			}
+			fmt.Fprintf(stdout, "%s: %d\n", memVerb, out.memoryFiles)
+		}
 	}
 	switch action {
 	case "would-move":

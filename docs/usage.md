@@ -295,6 +295,16 @@ cct relocate /old/project /new/project --tool claude --move-project
 cct relocate /old/project /new/project --tool claude --claude-home /path/to/.claude
 ```
 
+A project's **auto memory** moves with it. Claude Code keeps it in
+`projects/<encoded-cwd>/memory/`, keyed by the same encoded path as the
+transcripts, so a relocation that moved only the transcripts would leave the
+project with its conversations but without anything the agent had learned about
+it. Memory files get the same treatment: copied and verified first, originals
+removed afterwards, both halves in the undo journal. If the new project folder
+already holds a memory file of the same name with **different** content, the
+whole relocation stops before anything is written — memory is never overwritten.
+An identical file is left as it is and its original is still moved out.
+
 CCT writes every remapped transcript under the new project folder first, and only
 then backs up and deletes each original, so a session id is never present twice.
 If the new folder already holds a transcript with the same session id, relocation

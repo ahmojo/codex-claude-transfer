@@ -31,6 +31,13 @@ const (
 
 	// SessionExt is the transcript file extension.
 	SessionExt = ".jsonl"
+
+	// MemorySubdir is the per-project directory Claude Code keeps its auto
+	// memory in, alongside that project's transcripts:
+	// ~/.claude/projects/<encoded-cwd>/memory/. It is keyed by the same encoded
+	// path as the transcripts, so a project that moves leaves its memory behind
+	// unless that directory moves with it.
+	MemorySubdir = "memory"
 )
 
 // Home describes a resolved Claude Code home directory and its session store.
@@ -90,6 +97,21 @@ func (h Home) RootExists() bool { return dirExists(h.Root) }
 
 // ProjectsDirExists reports whether the projects directory exists.
 func (h Home) ProjectsDirExists() bool { return dirExists(h.ProjectsDir) }
+
+// ProjectDir returns the folder Claude Code keeps a project's files in:
+// <home>/projects/<encoded-cwd>.
+func (h Home) ProjectDir(cwd string) string {
+	return filepath.Join(h.ProjectsDir, EncodeCWD(cwd))
+}
+
+// MemoryDir returns a project's auto-memory directory inside its project folder.
+// It need not exist: a project only gets one once Claude Code has something to
+// remember about it. Because it is keyed by the same encoded path as the
+// transcripts, a project that moves leaves its memory behind unless this
+// directory moves too.
+func (h Home) MemoryDir(cwd string) string {
+	return filepath.Join(h.ProjectDir(cwd), MemorySubdir)
+}
 
 func dirExists(path string) bool {
 	info, err := os.Stat(path)
