@@ -99,10 +99,19 @@ func runRelocateClaude(f relocateFlags, claudeHome claudehome.Home, home codexho
 		return 1
 	}
 
+	// A project's auto memory lives beside its transcripts and is keyed by the
+	// same encoded path, so it has to move with them or it is stranded under the
+	// old key. Planning it here keeps --dry-run honest about the whole change.
+	memory, err := planClaudeMemoryMove(claudeHome, oldPath, newPath, inPlace)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 1
+	}
+
 	if f.dryRun {
 		printRelocateResult(stdout, f, relocateOutcome{
 			kind: agent.Claude, oldPath: oldPath, newPath: newPath, result: preview,
-			movedFiles: claudeMovedCount(preview, inPlace),
+			movedFiles: claudeMovedCount(preview, inPlace), memoryFiles: memoryMovedCount(memory),
 		})
 		return 0
 	}
@@ -140,6 +149,15 @@ func runRelocateClaude(f relocateFlags, claudeHome claudehome.Home, home codexho
 		return 1
 	}
 
+	// The transcripts are in place, so the memory can be copied across. A failure
+	// here removes the copies again and unwinds the import.
+	memoryCopied, err := copyClaudeMemory(memory)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		reportRelocateRollback(stderr, rollbackRelocateImport(result), rollbackClaudeMemoryCopies(memoryCopied), rollbackProjectMove(ops, projectMoved, oldPath, newPath))
+		return 1
+	}
+
 	// Every destination is written and verified, so the originals can go. A
 	// failure here restores what was already removed and unwinds the import.
 	var removed []relocatedSource
@@ -147,19 +165,52 @@ func runRelocateClaude(f relocateFlags, claudeHome claudehome.Home, home codexho
 		removed, err = removeRelocatedSources(exported.Manifest, result, claudeHome, ops)
 		if err != nil {
 			fmt.Fprintf(stderr, "error: %v\n", err)
-			reportRelocateRollback(stderr, rollbackRelocateImport(result), restoreRelocatedSources(removed), rollbackProjectMove(ops, projectMoved, oldPath, newPath))
+			reportRelocateRollback(stderr, rollbackRelocateImport(result),
+				errors.Join(restoreRelocatedSources(removed), rollbackClaudeMemoryCopies(memoryCopied)),
+				rollbackProjectMove(ops, projectMoved, oldPath, newPath))
 			return 1
 		}
 	}
 
-	recordClaudeRelocateJournal(home, relocateLabel(oldPath, newPath), result, removed, stderr)
+	memoryRemoved, err := removeClaudeMemorySources(memory, claudeHome, ops)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		reportRelocateRollback(stderr, rollbackRelocateImport(result),
+			errors.Join(restoreRelocatedSources(memoryRemoved), restoreRelocatedSources(removed), rollbackClaudeMemoryCopies(memoryCopied)),
+			rollbackProjectMove(ops, projectMoved, oldPath, newPath))
+		return 1
+	}
+
+	recordClaudeRelocateJournal(home, relocateLabel(oldPath, newPath), result,
+		append(removed, memoryRemoved...), memoryPairs(memory), stderr)
 	printRelocateResult(stdout, f, relocateOutcome{
 		kind: agent.Claude, oldPath: oldPath, newPath: newPath, result: result,
-		backups:        append(backupPaths(result), sourceBackupPaths(removed)...),
+		backups: append(backupPaths(result),
+			append(sourceBackupPaths(removed), sourceBackupPaths(memoryRemoved)...)...),
 		movedFiles:     claudeMovedCount(result, inPlace),
-		removedSources: len(removed),
+		removedSources: len(removed) + len(memoryRemoved),
+		memoryFiles:    memoryMovedCount(memory),
 	})
 	return 0
+}
+
+// memoryPairs lists the memory copies this relocation wrote, each naming the
+// original it replaces, so the journal can link the two halves the way it does
+// for transcripts.
+func memoryPairs(files []memoryFile) []undo.Entry {
+	var entries []undo.Entry
+	for _, f := range files {
+		if f.AlreadyThere {
+			// Nothing was written, so there is nothing to undo at the destination;
+			// the removal entry for the original stands on its own.
+			continue
+		}
+		entries = append(entries, undo.Entry{
+			Action: "relocate-memory", Dest: f.Dest, WroteSHA: f.SHA, Created: true, Pair: f.Src,
+			Preview: "memory: " + f.Rel,
+		})
+	}
+	return entries
 }
 
 // claudeMovedCount reports how many transcripts land in a different project
@@ -349,7 +400,7 @@ func sourceBackupPaths(removed []relocatedSource) []string {
 // so `cct undo` restores the original first and never deletes the copy while the
 // original is still missing. Journaling is best-effort — the files are already
 // safely written, so a failure here only means this relocation cannot be undone.
-func recordClaudeRelocateJournal(home codexhome.Home, label string, res bundle.ImportResult, removed []relocatedSource, stderr io.Writer) {
+func recordClaudeRelocateJournal(home codexhome.Home, label string, res bundle.ImportResult, removed []relocatedSource, extra []undo.Entry, stderr io.Writer) {
 	// The original a given destination came from, so copies can be paired with the
 	// removal record for the same session.
 	originalOf := map[string]string{}
@@ -405,6 +456,9 @@ func recordClaudeRelocateJournal(home codexhome.Home, label string, res bundle.I
 			})
 		}
 	}
+	// The memory copies come last so that, like the transcripts, each one is
+	// preceded by the removal record it is paired with.
+	entries = append(entries, extra...)
 	if len(entries) == 0 {
 		return
 	}

@@ -2,6 +2,20 @@
 
 All notable changes to codex-claude-transfer are documented here.
 
+## [Unreleased]
+
+### Fixed
+- **`cct relocate --tool claude` now moves the project's auto memory.** Claude
+  Code keeps it in `projects/<encoded-cwd>/memory/`, keyed by the same encoded
+  path as the transcripts, so relocation used to leave it behind: the project
+  kept its conversations at the new path and silently lost everything the agent
+  had learned about it. Memory files now follow the transcript discipline —
+  copied and verified first, originals removed afterwards, both halves in the
+  undo journal, and `cct undo` restores them. A destination memory file with
+  different content stops the whole relocation instead of being overwritten; a
+  byte-identical one is left alone and its original still moves out. `--dry-run`
+  and `--json` report the count.
+
 ## [1.8.0] - 2026-08-02
 
 ### Changed

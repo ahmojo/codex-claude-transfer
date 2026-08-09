@@ -191,10 +191,23 @@ after the copies are written restores the removed originals from their backups,
 deletes the copies, and rolls back a `--move-project` rename. `~/.claude.json` is
 never read or written; Claude Code rediscovers the transcripts on its next run.
 
+**A project's auto memory moves too.** Claude Code keeps it in
+`projects/<encoded-cwd>/memory/`, under the same encoded key as the transcripts,
+so relocating only the transcripts would leave the project with its
+conversations and without what the agent had learned about it. Memory files
+follow the transcript discipline: every file is copied and its bytes verified
+first, each original is removed only afterwards (backed up, re-verified
+immediately before the delete, and confined to the projects directory), and both
+halves enter the undo journal. Memory is **never** overwritten — a destination
+file of the same name with different content stops the whole relocation before
+anything is written. A byte-identical file is left alone and its original is
+still moved out, so the old folder does not keep a stale second copy.
+
 `cct undo` reverses both halves of a Claude relocation. It restores each original
 before removing its relocated copy, and if an original cannot be restored — a
 missing or tampered backup, or something occupying its path again — the copy is
-kept, so a session is never left with no copy at all.
+kept, so a session is never left with no copy at all. The same pairing applies to
+memory files.
 
 `--include-archived` is refused with `--tool claude`: Claude Code keeps no
 separate archive location, so every transcript recorded under `OLD` is already
