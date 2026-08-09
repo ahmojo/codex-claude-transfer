@@ -2,7 +2,7 @@
 
 All notable changes to codex-claude-transfer are documented here.
 
-## [Unreleased]
+## [1.9.0] - 2026-08-09
 
 ### Added
 - **`--with-memory` carries a Claude Code project's auto memory in a bundle.**
