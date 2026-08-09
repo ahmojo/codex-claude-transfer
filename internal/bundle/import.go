@@ -56,6 +56,11 @@ type ImportItem struct {
 	// the existing local file (ActionUpdate). It is an approximate, line-based
 	// count for reporting only.
 	LinesAdded int
+	// Memory marks an entry that is a project's auto-memory file rather than a
+	// session, so summaries can report it separately. Memory items reuse the
+	// ordinary import/skip/conflict actions, which keeps them in the undo journal
+	// on the same terms as any other file cct writes.
+	Memory bool
 	// content, when non-nil, is the (cwd-mapped) bytes to write instead of
 	// streaming the entry verbatim from the bundle.
 	content []byte
@@ -137,6 +142,10 @@ type ImportOptions struct {
 	// Merge composes with those two flags: it resolves clean growth first and
 	// hands true divergence to them.
 	Merge bool
+	// WithMemory writes the project auto-memory files a --with-memory export put
+	// in the bundle. Without it they are skipped: Claude Code keeps that data
+	// machine-local by design, so restoring it is a second, deliberate choice.
+	WithMemory bool
 }
 
 // ImportResult summarizes an import.
@@ -171,7 +180,14 @@ type ImportResult struct {
 	MappedCompressedSkipped int
 	ProjectProvided         bool
 	DryRun                  bool
-	Warnings                []string
+	// Memory* count the project auto-memory files a --with-memory import wrote,
+	// found already identical, and refused to overwrite. They are kept apart
+	// from the session counters so a summary — and every invariant built on
+	// those counters — still talks about sessions only.
+	MemoryImported  int
+	MemorySkipped   int
+	MemoryConflicts int
+	Warnings        []string
 }
 
 // Import validates a bundle end-to-end and, unless DryRun is set, copies its
@@ -234,6 +250,13 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 			}
 		}
 	}
+	// Memory entries are described by the manifest, which names the project by
+	// its cwd; that is what lets a remapped import place them under the right
+	// folder rather than the one the source machine encoded.
+	memoryByBundlePath := map[string]ManifestMemory{}
+	for _, mm := range manifest.Memory {
+		memoryByBundlePath[mm.BundlePath] = mm
+	}
 
 	// Resolve the effective cwd mappings. --map-cwd-here is sugar that derives a
 	// single mapping (the bundle's one recorded project cwd -> HereDir) so the
@@ -269,6 +292,15 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 		}
 		// Paths were already validated as safe in verifyBundle.
 		rel := f.Name
+
+		// A project's auto memory rides along only when both sides asked for it.
+		if kind == agent.Claude && safety.IsClaudeMemoryEntry(rel) {
+			if err := importMemoryEntry(&zr.Reader, home, rel, memoryByBundlePath, mappings, opts, &result); err != nil {
+				return result, err
+			}
+			continue
+		}
+
 		if !isImportableEntryForImport(kind, rel, opts.IncludeArchived) {
 			action := ActionSkipNonSession
 			if kind != agent.Claude && isArchivedEntry(rel) {

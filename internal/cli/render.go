@@ -320,6 +320,9 @@ func printExport(w io.Writer, kind agent.Kind, project, session string, result b
 		fmt.Fprintln(w)
 	}
 	fmt.Fprintf(w, "Included sessions: %d\n", result.IncludedCount)
+	if result.MemoryFiles > 0 {
+		fmt.Fprintf(w, "Project memory files: %d\n", result.MemoryFiles)
+	}
 	if result.MatchCompressedSkipped > 0 {
 		fmt.Fprintf(w, "%s skipped by --match because searchable text was unavailable (compressed .jsonl.zst).\n",
 			plural(result.MatchCompressedSkipped, "compressed session"))
@@ -452,6 +455,10 @@ func printImport(w io.Writer, kind agent.Kind, path string, res bundle.ImportRes
 	fmt.Fprintf(w, "Sessions in bundle: %d\n", len(res.Manifest.Sessions))
 	fmt.Fprintf(w, "New sessions: %d\n", res.Imported)
 	fmt.Fprintf(w, "Already existing: %d\n", res.SkippedIdentical)
+	if res.MemoryImported+res.MemorySkipped+res.MemoryConflicts > 0 {
+		fmt.Fprintf(w, "Project memory: %d written, %d already identical, %d kept (not overwritten)\n",
+			res.MemoryImported, res.MemorySkipped, res.MemoryConflicts)
+	}
 	fmt.Fprintf(w, "Conflicts: %d\n", res.Conflicts)
 	if res.Updated > 0 {
 		if res.LinesAdded > 0 {

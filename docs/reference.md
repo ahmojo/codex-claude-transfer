@@ -45,6 +45,7 @@ Use this page when you need exact commands and flags. For guided workflows, see
 | `--session <id>` | export, import, diff | Export exactly one session by thread id prefix. Import/diff: act only on matching sessions. Repeatable on import/diff. |
 | `--since <when>` | export, import, diff | Only sessions updated at or after a date (`YYYY-MM-DD`) or duration (`7d`, `48h`, `90m`). On import/diff it filters which of the bundle's sessions are considered. |
 | `--with-git` | export | Record the project's git remote, branch, commit, and dirty/unpushed status. |
+| `--with-memory` | export, import | Claude Code only. Also carry the selected projects' auto memory (`projects/<encoded-cwd>/memory/`). Opt-in on **both** sides: an export without it puts no memory in the bundle, an import without it skips what a bundle carries. Import writes memory under the project the cwd mapping resolves to, and never overwrites a file that differs. |
 | `--git-push` | export | Opt-in. Push the current branch to its own remote first so the recorded commit is fetchable. Never force-pushes. |
 | `--strip-images` | export | Replace inline base64 images with placeholders to shrink the bundle. Lossy; needs `zstd` for `.jsonl.zst`. |
 | `--output`, `-o <path>` | export | Bundle output path. Defaults are derived from `--project`, `--all`, or `--session`. |
