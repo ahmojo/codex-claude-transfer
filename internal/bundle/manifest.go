@@ -32,6 +32,23 @@ type Manifest struct {
 	Git               *git.Info         `json:"git,omitempty"`
 	CodexVersion      string            `json:"codex_version,omitempty"`
 	Sessions          []ManifestSession `json:"sessions"`
+	// Memory lists the Claude Code auto-memory files carried alongside the
+	// sessions. It is only ever populated by an explicit `--with-memory` export;
+	// a cct that predates the field ignores it and skips the entries, so an older
+	// version can still read the bundle.
+	Memory []ManifestMemory `json:"memory,omitempty"`
+}
+
+// ManifestMemory is one Claude Code auto-memory file recorded in the manifest.
+// The project it belongs to is named by its cwd, not by the encoded folder, so
+// an import that remaps the cwd can place the file under the right project.
+type ManifestMemory struct {
+	ProjectCWD   string `json:"project_cwd"`
+	Rel          string `json:"rel"`
+	OriginalPath string `json:"original_path"`
+	BundlePath   string `json:"bundle_path"`
+	SizeBytes    int64  `json:"size_bytes"`
+	SHA256       string `json:"sha256"`
 }
 
 // ManifestSession is one rollout file recorded in the manifest.

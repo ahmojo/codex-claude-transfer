@@ -74,6 +74,10 @@ type ExportOptions struct {
 	// session with typed placeholders before bundling. Lossy and opt-in, for
 	// sharing/syncing a session without leaking credentials.
 	Redact bool
+	// WithMemory also bundles the selected projects' Claude Code auto memory
+	// (projects/<encoded-cwd>/memory/). Opt-in: Claude keeps that data
+	// machine-local by design, so cct does not move it unless asked.
+	WithMemory bool
 }
 
 // ExportResult summarizes what was exported.
@@ -90,7 +94,9 @@ type ExportResult struct {
 	// could not search (their text is not read here), so the count is visible
 	// rather than a silent gap in the matched set.
 	MatchCompressedSkipped int
-	Warnings               []string
+	// MemoryFiles counts the auto-memory files bundled by --with-memory.
+	MemoryFiles int
+	Warnings    []string
 }
 
 // Export scans the Codex home, selects sessions (optionally filtered to a
@@ -413,6 +419,27 @@ func writeBundle(opts ExportOptions, selected []sessions.Session, manifest *Mani
 		if manifest.CodexVersion == "" && s.CLIVersion != "" {
 			manifest.CodexVersion = s.CLIVersion
 		}
+	}
+
+	// A project's auto memory only travels when it was asked for: Claude Code
+	// keeps it machine-local by design, and it is prose the agent wrote about
+	// the project rather than a conversation.
+	if kind == agent.Claude && opts.WithMemory {
+		memory, warns, err := collectProjectMemory(opts.ClaudeHome, selected)
+		if err != nil {
+			return fmt.Errorf("collect project memory: %w", err)
+		}
+		result.Warnings = append(result.Warnings, warns...)
+		for i := range memory {
+			sum, err := addFileToZip(zw, memory[i].BundlePath, memory[i].OriginalPath)
+			if err != nil {
+				return fmt.Errorf("add %s: %w", memory[i].OriginalPath, err)
+			}
+			memory[i].SHA256 = sum
+			checksums[memory[i].BundlePath] = sum
+		}
+		manifest.Memory = memory
+		result.MemoryFiles = len(memory)
 	}
 
 	manifestBytes, err := json.MarshalIndent(manifest, "", "  ")

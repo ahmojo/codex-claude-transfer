@@ -25,6 +25,12 @@ var archivedSessionEntryRe = regexp.MustCompile(`^archived_sessions/(rollout-[^/
 // the uuid are single path segments (no nested directories, no traversal).
 var claudeEntryRe = regexp.MustCompile(`^projects/[^/]+/[^/]+\.jsonl$`)
 
+// claudeMemoryEntryRe matches a Claude Code auto-memory file inside a project
+// folder: projects/<encoded-cwd>/memory/<path>. Nested directories are allowed
+// because the memory directory has them; traversal is not, since CleanRelPath
+// has already rejected "." and ".." segments before this is consulted.
+var claudeMemoryEntryRe = regexp.MustCompile(`^projects/[^/]+/memory/(?:[^/]+/)*[^/]+$`)
+
 // CleanRelPath validates a ZIP entry name and returns it as a safe, canonical,
 // forward-slash relative path. It rejects anything that could escape the
 // destination: absolute paths, Windows drive/volume prefixes, backslashes,
@@ -69,6 +75,12 @@ func IsArchivedSessionEntry(rel string) bool {
 // Claude Code transcript under projects/<encoded-cwd>/<uuid>.jsonl.
 func IsClaudeSessionEntry(rel string) bool {
 	return claudeEntryRe.MatchString(rel)
+}
+
+// IsClaudeMemoryEntry reports whether a (already cleaned) relative path is a
+// Claude Code auto-memory file under projects/<encoded-cwd>/memory/.
+func IsClaudeMemoryEntry(rel string) bool {
+	return claudeMemoryEntryRe.MatchString(rel)
 }
 
 // DestPath joins a cleaned relative bundle path onto the Codex home root and

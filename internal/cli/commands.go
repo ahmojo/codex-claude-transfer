@@ -151,6 +151,7 @@ type commonFlags struct {
 	list            bool
 	force           bool
 	plain           bool
+	withMemory      bool
 	repo            string
 	positional      []string
 }
@@ -313,6 +314,8 @@ func parseFlags(args []string) (commonFlags, error) {
 			f.sessions = append(f.sessions, val)
 		case hasPrefix(arg, "--session="):
 			f.sessions = append(f.sessions, arg[len("--session="):])
+		case arg == "--with-memory":
+			f.withMemory = true
 		case arg == "--with-git":
 			f.withGit = true
 		case arg == "--git-push":
@@ -826,6 +829,7 @@ func runExport(args []string, stdout, stderr io.Writer) int {
 		Since:              since,
 		SessionID:          session,
 		WithGit:            f.withGit,
+		WithMemory:         f.withMemory,
 		StripImages:        f.stripImages,
 		Redact:             f.redact,
 		Match:              f.match,
@@ -1227,6 +1231,7 @@ func runImport(args []string, stdout, stderr io.Writer) int {
 		ReplaceWithBackup:  f.replaceBackup,
 		ImportAsCopy:       f.importAsCopy,
 		Merge:              f.merge,
+		WithMemory:         f.withMemory,
 		SessionIDs:         f.sessions,
 		RecordUndo:         !f.dryRun,
 	})
@@ -1655,6 +1660,10 @@ Flags:
   --with-git            export: also record the project's git remote/branch/
                         commit (and dirty/unpushed status) in the bundle, even
                         with --all or --session
+  --with-memory         export/import (Claude Code): also carry the projects'
+                        auto memory (projects/<encoded-cwd>/memory/). Opt-in on
+                        both sides — Claude keeps it machine-local by design.
+                        Import never overwrites a memory file that differs
   --git-push            export: push the project's current branch to its git
                         remote first, so the recorded commit is fetchable on the
                         other machine. Uploads your code to your own remote only,

@@ -43,7 +43,7 @@ var completionCommands = []completionCommand{
 
 var completionFlags = []string{
 	"--tool", "--codex-home", "--claude-home", "--project", "--all", "--session",
-	"--since", "--with-git", "--git-push", "--output", "-o", "--include-archived",
+	"--since", "--with-git", "--with-memory", "--git-push", "--output", "-o", "--include-archived",
 	"--json", "--dry-run", "--to", "--map-cwd", "--map-cwd-here", "--merge", "--reconcile",
 	"--move-project",
 	"--replace-with-backup", "--import-as-copy", "--clone", "--encrypt-to",

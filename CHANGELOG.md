@@ -4,6 +4,20 @@ All notable changes to codex-claude-transfer are documented here.
 
 ## [Unreleased]
 
+### Added
+- **`--with-memory` carries a Claude Code project's auto memory in a bundle.**
+  Claude keeps `projects/<encoded-cwd>/memory/` machine-local by design, so cct
+  moves it only when asked on both sides: `export --with-memory` puts it in the
+  bundle, `import --with-memory` writes it out. An import without the flag skips
+  it and says so, and a cct that predates the manifest field ignores the entries
+  entirely, so old versions can still read the bundle. Memory lands under the
+  project the cwd mapping resolves to (`--map-cwd`/`--map-cwd-here`), and a
+  local file that differs is reported and kept rather than overwritten.
+- The pre-egress secret gate now also covers memory files with no extension.
+  Everything under `projects/` was already scanned by prefix, but the
+  "has a file extension" rule would have let a file like `credentials` through —
+  which no transcript ever hits, and a memory file easily could.
+
 ### Fixed
 - **`cct relocate --tool claude` now moves the project's auto memory.** Claude
   Code keeps it in `projects/<encoded-cwd>/memory/`, keyed by the same encoded

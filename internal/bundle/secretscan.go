@@ -8,6 +8,7 @@ import (
 
 	"github.com/ahmojo/codex-claude-transfer/internal/claudehome"
 	"github.com/ahmojo/codex-claude-transfer/internal/codexhome"
+	"github.com/ahmojo/codex-claude-transfer/internal/safety"
 	"github.com/ahmojo/codex-claude-transfer/internal/secrets"
 	"github.com/ahmojo/codex-claude-transfer/internal/zstdcli"
 )
@@ -65,10 +66,17 @@ func ScanBundleSecrets(bundlePath string) (SecretScanResult, error) {
 	return res, nil
 }
 
-// isSessionEntry reports whether a ZIP entry path is a session rollout/transcript
-// (under sessions/, archived_sessions/, or projects/) rather than the manifest
-// or checksums file.
+// isSessionEntry reports whether a ZIP entry path carries session content
+// (under sessions/, archived_sessions/, or projects/ — including a project's
+// auto-memory files) rather than the manifest or checksums file. Everything it
+// accepts is read by the pre-egress secret gate.
 func isSessionEntry(name string) bool {
+	// Memory files are ordinary notes and need not have an extension, so they
+	// are recognized by shape rather than by the "has a file extension" rule the
+	// transcript paths can rely on.
+	if safety.IsClaudeMemoryEntry(name) {
+		return true
+	}
 	top := name
 	if i := strings.IndexByte(name, '/'); i >= 0 {
 		top = name[:i]

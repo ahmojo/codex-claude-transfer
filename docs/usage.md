@@ -233,6 +233,32 @@ One caveat worth knowing: each save commits a full new copy of the bundle, and
 git cannot delta compressed archives, so the repo grows with every commit. If
 that becomes a problem, export a window instead: `--since 30d`.
 
+### Take a project's memory to the other machine
+
+Claude Code keeps what it has learned about a project in
+`projects/<encoded-cwd>/memory/`, and keeps it machine-local by design. `cct`
+therefore only moves it when you say so twice — once when packing, once when
+unpacking:
+
+```bash
+cct export --project . --tool claude --with-memory -o project.codexbundle
+cct import ./project.codexbundle --with-memory --map-cwd-here
+```
+
+Without the flag on export, no memory goes into the bundle. Without it on
+import, memory that is in the bundle is skipped and the import says so. Memory
+lands under the project the cwd mapping resolves to, so `--map-cwd-here` places
+it with the sessions it belongs to.
+
+A memory file that already exists on this machine with **different** content is
+never overwritten — it is reported and kept, the same way a diverged session is.
+Identical files are counted as already present. Memory is prose the agent wrote
+about your project, so it passes through the same pre-egress secret gate as a
+transcript: a likely credential in a memory file stops the export.
+
+`cct relocate --tool claude` moves a project's memory on the same machine
+without any flag; see below.
+
 ### Relocate a project
 
 When a project moves to a different folder on the same machine, `relocate`
