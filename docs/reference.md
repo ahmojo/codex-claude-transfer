@@ -9,7 +9,7 @@ Use this page when you need exact commands and flags. For guided workflows, see
 | ------- | ----------- |
 | `cct app` | Launch the local browser UI. It binds to loopback only and uploads nothing. |
 | `cct ui` | Interactive terminal wizard; builds and runs the commands below. |
-| `cct doctor` | Read-only health check: agent home, session counts, missing cwd, and optional tool status. Use `--tool` to pick Codex or Claude Code. |
+| `cct doctor` | Read-only health check: agent home, session counts, missing cwd, and optional tool status. Use `--tool` to pick Codex or Claude Code. For Claude Code it also reads `cleanupPeriodDays` from `settings.json` and warns which transcripts Claude's own cleanup is about to delete. |
 | `cct list` | List discovered sessions with preview, thread id, cwd, source, and updated time. |
 | `cct search <query>` | Full-text search across session conversation text. Supports `--regex`, `--case-sensitive`, `--project`, `--since`, and `--json`. |
 | `cct scan` | Check sessions for likely secrets before sharing or syncing. Read-only; values are masked. |

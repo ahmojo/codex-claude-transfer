@@ -2,6 +2,22 @@
 
 All notable changes to codex-claude-transfer are documented here.
 
+## [Unreleased]
+
+### Added
+- **`cct doctor --tool claude` warns before Claude Code deletes your
+  transcripts.** Claude removes session files older than `cleanupPeriodDays`
+  (30 by default) silently — no prompt, no trash — and users have lost hundreds
+  of transcripts to it, including with an explicit long period set
+  ([anthropics/claude-code#41458](https://github.com/anthropics/claude-code/issues/41458),
+  [#85466](https://github.com/anthropics/claude-code/issues/85466)). doctor now
+  reads that one setting, projects it onto the transcripts on disk, and reports
+  what is already deletable or falls out of the window within 14 days — naming
+  the first date and the exact `cct export --all --tool claude` command to
+  archive them. cct cannot prevent the cleanup and does not try; it makes it
+  visible while there is still time to act. Nothing but the retention number is
+  read from `settings.json`, which also holds API keys.
+
 ## [1.9.0] - 2026-08-09
 
 ### Added

@@ -233,6 +233,37 @@ One caveat worth knowing: each save commits a full new copy of the bundle, and
 git cannot delta compressed archives, so the repo grows with every commit. If
 that becomes a problem, export a window instead: `--since 30d`.
 
+### Know before Claude Code deletes your transcripts
+
+Claude Code removes session files older than `cleanupPeriodDays` from
+`~/.claude/settings.json` — **30 days when you never set it** — and it does so
+silently: no prompt, no trash. People have lost hundreds of transcripts that way
+([#85466](https://github.com/anthropics/claude-code/issues/85466),
+[#41458](https://github.com/anthropics/claude-code/issues/41458)).
+
+`cct doctor --tool claude` now reads that setting and projects it onto the
+transcripts actually on disk:
+
+```bash
+cct doctor --tool claude
+# warning: 12 transcript(s) fall out of Claude Code's cleanup window
+# (cleanupPeriodDays=30 from settings.json) within 14 days, the first on
+# 2026-08-27; archive them with `cct export --all --tool claude -o claude-archive.codexbundle`
+```
+
+Then the archive is the one command it names:
+
+```bash
+cct export --all --tool claude -o claude-archive.codexbundle
+```
+
+Two honest limits. cct cannot stop the cleanup — it only tells you what is next,
+early enough to act; keeping the sessions is what the export is for. And the
+projection uses each transcript's modification time, which is what an age-based
+cleanup goes by, so a file cct itself re-dated (see `repair-times`) is judged by
+its corrected time. cct reads nothing from `settings.json` except that one
+number: the same file holds API keys, which are none of cct's business.
+
 ### Take a project's memory to the other machine
 
 Claude Code keeps what it has learned about a project in
