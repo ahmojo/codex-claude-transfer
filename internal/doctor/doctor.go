@@ -6,6 +6,7 @@ package doctor
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/ahmojo/codex-claude-transfer/internal/claudehome"
 	"github.com/ahmojo/codex-claude-transfer/internal/claudesessions"
@@ -13,6 +14,7 @@ import (
 	"github.com/ahmojo/codex-claude-transfer/internal/crypt"
 	"github.com/ahmojo/codex-claude-transfer/internal/git"
 	"github.com/ahmojo/codex-claude-transfer/internal/repair"
+	"github.com/ahmojo/codex-claude-transfer/internal/retention"
 	"github.com/ahmojo/codex-claude-transfer/internal/sessions"
 	"github.com/ahmojo/codex-claude-transfer/internal/zstdcli"
 )
@@ -126,6 +128,8 @@ func RunClaude(home claudehome.Home) Report {
 		r.warn(fmt.Sprintf("%d transcript file(s) have a modification time ahead of their content (imported by an older cct); run `cct repair-times --tool claude` to fix the open-lag", stale))
 	}
 
+	r.checkClaudeRetention(home, scan.Sessions)
+
 	// Claude-relevant optional tools (git for handoff, age for encryption; zstd
 	// is Codex-only — Claude Code does not compress transcripts).
 	for _, t := range []struct {
@@ -145,6 +149,44 @@ func RunClaude(home claudehome.Home) Report {
 
 	r.ok("~/.claude.json and the Claude cloud are never modified")
 	return r
+}
+
+// RetentionWarnWithin is how far ahead doctor looks for transcripts about to
+// fall out of Claude Code's retention window. Two weeks is long enough to
+// archive them without nagging about every session every day.
+const RetentionWarnWithin = 14 * 24 * time.Hour
+
+// checkClaudeRetention reports what Claude Code's own cleanup is about to
+// delete. Claude removes transcripts older than `cleanupPeriodDays` silently,
+// which is how people lose hundreds of sessions without noticing; cct cannot
+// prevent that, so the least it can do is say which ones are next, while there
+// is still time to export them.
+func (r *Report) checkClaudeRetention(home claudehome.Home, list []sessions.Session) {
+	policy, err := retention.LoadPolicy(home.Root)
+	if err != nil {
+		r.warn(fmt.Sprintf("cannot read Claude Code's cleanup setting: %v", err))
+		return
+	}
+	rep := retention.Assess(list, policy, time.Now(), RetentionWarnWithin)
+
+	source := fmt.Sprintf("its default of %d days", policy.Days)
+	if policy.Configured {
+		source = fmt.Sprintf("cleanupPeriodDays=%d from settings.json", policy.Days)
+	}
+
+	switch {
+	case len(rep.Expired) > 0:
+		r.warn(fmt.Sprintf("%d transcript(s) are already past Claude Code's cleanup window (%s) and can be deleted at any time; archive them with `cct export --all --tool claude -o claude-archive.codexbundle`",
+			len(rep.Expired), source))
+	case len(rep.Soon) > 0:
+		r.warn(fmt.Sprintf("%d transcript(s) fall out of Claude Code's cleanup window (%s) within %d days, the first on %s; archive them with `cct export --all --tool claude -o claude-archive.codexbundle`",
+			len(rep.Soon), source, int(RetentionWarnWithin.Hours()/24), rep.NextDeadline.Format("2006-01-02")))
+	case !policy.Configured && len(list) > 0:
+		r.info(fmt.Sprintf("Claude Code deletes transcripts older than %d days (its default; settings.json sets no cleanupPeriodDays) — nothing is due in the next %d days",
+			policy.Days, int(RetentionWarnWithin.Hours()/24)))
+	default:
+		r.ok(fmt.Sprintf("No transcript is due for Claude Code's cleanup (%s)", source))
+	}
 }
 
 // checkOptionalTools reports which optional external tools are installed. None of
