@@ -2,7 +2,13 @@
 
 All notable changes to codex-claude-transfer are documented here.
 
-## [Unreleased]
+## [2.0.0] - 2026-08-13
+
+**Nothing in this release breaks anything.** The major version marks the point
+where cct covers the whole round trip — carry sessions, carry a project's
+memory, know before the agent deletes either — not a compatibility break. The
+bundle format is unchanged (`codex-sync-bundle-v1`), every flag and command from
+1.x still works, and a 1.x cct can still read a 2.0.0 bundle.
 
 ### Added
 - **`cct doctor --tool claude` warns before Claude Code deletes your
