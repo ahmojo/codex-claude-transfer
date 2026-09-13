@@ -140,6 +140,47 @@ func TestServesIndex(t *testing.T) {
 	}
 }
 
+func TestServesRussianIndex(t *testing.T) {
+	_, ts := testServer(t)
+	res, page := do(t, ts, "GET", "/?lang=ru&token="+testToken, "", "")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("Russian index: got %d", res.StatusCode)
+	}
+	if !strings.Contains(string(page), "<html lang=\"ru\">") || !strings.Contains(string(page), "app.ru.js") {
+		t.Errorf("Russian index and script not served")
+	}
+	if res, js := do(t, ts, "GET", "/app.ru.js", "", ""); res.StatusCode != http.StatusOK {
+		t.Errorf("app.ru.js: got %d", res.StatusCode)
+	} else if !strings.Contains(string(js), "localizeDoctorMessage") {
+		t.Errorf("Russian doctor messages not localized")
+	}
+	res, english := do(t, ts, "GET", "/?lang=en&token="+testToken, "", "")
+	if res.StatusCode != http.StatusOK || !strings.Contains(string(english), "<html lang=\"en\">") {
+		t.Errorf("English index not retained")
+	}
+}
+
+func TestBrowserLanguage(t *testing.T) {
+	_, ts := testServer(t)
+	req, err := http.NewRequest("GET", ts.URL+"/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Accept-Language", "ru-RU,ru;q=0.9,en;q=0.8")
+	res, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "<html lang=\"ru\">") {
+		t.Errorf("Russian browser preference ignored")
+	}
+}
+
 func TestSessionsEndpoint(t *testing.T) {
 	s, ts := testServer(t)
 	writeSession(t, s.home, "abcd1234-1111-2222-3333-444455556666", "/work/p")

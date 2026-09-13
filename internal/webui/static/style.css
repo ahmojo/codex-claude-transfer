@@ -49,6 +49,7 @@ body {
 .toolpick { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
 .toolpick select { width: auto; padding: 4px 8px; font-size: 13px; }
 .topbar .muted { margin-left: auto; }
+.lang-switch { color: var(--accent); font-size: 13px; white-space: nowrap; }
 
 .layout { display: flex; min-height: calc(100vh - 49px); }
 .sidebar {

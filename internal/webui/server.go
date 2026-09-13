@@ -109,6 +109,7 @@ func (s *Server) routes() http.Handler {
 	sub, _ := fs.Sub(staticFiles, "static")
 	fileServer := http.FileServer(http.FS(sub))
 	index, _ := fs.ReadFile(staticFiles, "static/index.html")
+	indexRU, _ := fs.ReadFile(staticFiles, "static/index.ru.html")
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if !localHost(r) {
 			http.Error(w, "forbidden", http.StatusForbidden)
@@ -118,7 +119,15 @@ func (s *Server) routes() http.Handler {
 		// causing a redirect loop). Other paths go to the embedded file server.
 		if r.URL.Path == "/" {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.Write(index)
+			lang := r.URL.Query().Get("lang")
+			if lang == "" {
+				lang = strings.Split(r.Header.Get("Accept-Language"), ",")[0]
+			}
+			if strings.HasPrefix(strings.ToLower(lang), "ru") {
+				w.Write(indexRU)
+			} else {
+				w.Write(index)
+			}
 			return
 		}
 		fileServer.ServeHTTP(w, r)

@@ -3,6 +3,8 @@
 // The token only arrives via the launch URL's query string; we forward it on
 // every API call so other local processes / web pages cannot drive the server.
 const TOKEN = new URLSearchParams(location.search).get("token") || "";
+const langLink = document.getElementById("lang-link");
+if (langLink) langLink.href = "/?lang=ru&token=" + encodeURIComponent(TOKEN);
 
 async function api(path, body) {
   const opts = {
