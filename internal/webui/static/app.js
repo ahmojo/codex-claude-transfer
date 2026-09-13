@@ -52,6 +52,42 @@ function humanBytes(n) {
 }
 function setError(node, e) { node.innerHTML = '<div class="error">' + esc(e.message || e) + "</div>"; }
 
+// Native Windows file/folder selection. The input remains editable.
+let pathPickerAvailable = false;
+api("/api/pick-path").then(info => {
+  pathPickerAvailable = !!info.available;
+  document.querySelectorAll("button.path-pick").forEach(button => {
+    button.hidden = !pathPickerAvailable;
+  });
+}).catch(() => {
+  document.querySelectorAll("button.path-pick").forEach(button => { button.hidden = true; });
+});
+document.addEventListener("click", async event => {
+  const button = event.target.closest("button.path-pick");
+  if (!button) return;
+  const field = button.dataset.pickMap
+    ? button.parentElement.querySelector("input:last-of-type")
+    : el(button.dataset.pickTarget);
+  if (!field) return;
+  button.disabled = true;
+  try {
+    const result = await api("/api/pick-path", {
+      kind: button.dataset.pickKind,
+      initial: cleanPath(field.value),
+    });
+    if (result.path) {
+      field.value = result.path;
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+      field.dispatchEvent(new Event("change", { bubbles: true }));
+      field.focus();
+    }
+  } catch (e) {
+    window.alert(e.message || e);
+  } finally {
+    button.disabled = false;
+  }
+});
+
 // ---- navigation ----
 document.querySelectorAll(".nav").forEach(btn => {
   btn.addEventListener("click", () => {
@@ -335,7 +371,7 @@ function configureMapHere(d) {
 // so ticking one greys out the other.
 function setMapsDisabled(disabled) {
   el("import-maps").style.opacity = disabled ? "0.4" : "";
-  el("import-maps").querySelectorAll("input").forEach(i => { i.disabled = disabled; });
+  el("import-maps").querySelectorAll("input, button").forEach(i => { i.disabled = disabled; });
   el("import-add-map").disabled = disabled;
 }
 el("import-map-here").addEventListener("change", e => setMapsDisabled(e.target.checked));
@@ -351,7 +387,8 @@ CCTReconcileState.bindTranslationChange(el("import-translate"), () => lastPrevie
 el("import-add-map").addEventListener("click", () => {
   const r = document.createElement("div");
   r.className = "maprow";
-  r.innerHTML = '<input type="text" placeholder="old cwd (from the bundle)" /><input type="text" placeholder="new local folder" />';
+  r.innerHTML = '<input type="text" placeholder="old cwd (from the bundle)" /><input type="text" placeholder="new local folder" /><button type="button" class="path-pick" hidden data-pick-map="true" data-pick-kind="folder">Browse…</button>';
+  r.querySelector(".path-pick").hidden = !pathPickerAvailable;
   el("import-maps").appendChild(r);
 });
 
