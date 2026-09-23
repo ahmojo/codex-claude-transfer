@@ -2,10 +2,10 @@
   "schema_version": 1,
   "repo": "ahmojo/codex-claude-transfer",
   "tracked_since": "2026-07-24",
-  "updated_at": "2026-09-22T08:28:47Z",
-  "clones_14d": 154,
-  "unique_cloners_14d": 110,
-  "tracked_total_clones": 1335,
+  "updated_at": "2026-09-23T08:30:52Z",
+  "clones_14d": 161,
+  "unique_cloners_14d": 116,
+  "tracked_total_clones": 1359,
   "days": {
     "2026-07-24": {
       "clones": 65,
@@ -242,6 +242,14 @@
     "2026-09-20": {
       "clones": 18,
       "unique_cloners": 14
+    },
+    "2026-09-21": {
+      "clones": 13,
+      "unique_cloners": 9
+    },
+    "2026-09-22": {
+      "clones": 11,
+      "unique_cloners": 10
     }
   },
   "snapshots": {
@@ -510,11 +518,17 @@
       "tracked_total_clones": 1335
     },
     "2026-09-22": {
+      "release_downloads": 521,
       "clones_14d": 154,
       "unique_cloners_14d": 110,
-      "tracked_total_clones": 1335,
-      "release_downloads": 521
+      "tracked_total_clones": 1335
+    },
+    "2026-09-23": {
+      "clones_14d": 161,
+      "unique_cloners_14d": 116,
+      "tracked_total_clones": 1359,
+      "release_downloads": 527
     }
   },
-  "release_downloads": 521
+  "release_downloads": 527
 }
