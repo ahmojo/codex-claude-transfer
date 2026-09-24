@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/ahmojo/codex-claude-transfer/internal/claudehome"
 	"github.com/ahmojo/codex-claude-transfer/internal/claudesessions"
 	"github.com/ahmojo/codex-claude-transfer/internal/codexhome"
+	"github.com/ahmojo/codex-claude-transfer/internal/safety"
 	"github.com/ahmojo/codex-claude-transfer/internal/sessions"
 )
 
@@ -354,6 +356,9 @@ func buildManifest(home codexhome.Home, opts Options) (manifestMsg, error) {
 	if err != nil {
 		return manifestMsg{}, fmt.Errorf("scan sessions: %w", err)
 	}
+	if kind == agent.Claude {
+		return buildClaudeManifest(scan.Sessions, opts.ProjectPath)
+	}
 	m := manifestMsg{Tool: string(kind)}
 	for _, s := range scan.Sessions {
 		if s.ThreadID == "" {
@@ -527,4 +532,49 @@ func safe(s string) string {
 		}
 	}
 	return b.String()
+}
+
+// buildClaudeManifest fingerprints an entire conversation, including subagents.
+// A group is one protocol entry so peers cannot overwrite sibling hashes under
+// their shared parent ThreadID. Sort members to make scan order irrelevant.
+func buildClaudeManifest(all []sessions.Session, project string) (manifestMsg, error) {
+	m := manifestMsg{Tool: string(agent.Claude)}
+	groups := map[string][]sessions.Session{}
+	selected := map[string]bool{}
+	for _, s := range all {
+		group, _, _, _ := safety.ClaudeSessionGroup("projects/" + s.RelPath)
+		if group == "" || s.ThreadID == "" {
+			continue
+		}
+		groups[group] = append(groups[group], s)
+		if project == "" || pathEqual(s.CWD, project) {
+			selected[group] = true
+		}
+	}
+	seen := map[string]string{}
+	for group, members := range groups {
+		if !selected[group] {
+			continue
+		}
+		id := members[0].ThreadID
+		if prev, ok := seen[id]; ok && prev != group {
+			return m, fmt.Errorf("Claude session %s occurs in multiple project folders; sync one project at a time", id)
+		}
+		seen[id] = group
+		sort.Slice(members, func(i, j int) bool { return members[i].RelPath < members[j].RelPath })
+		h := sha256.New()
+		var size int64
+		for _, s := range members {
+			_, _, member, _ := safety.ClaudeSessionGroup("projects/" + s.RelPath)
+			sum, err := fileSHA(s.Path)
+			if err != nil {
+				return m, fmt.Errorf("hash Claude conversation %s: %w", id, err)
+			}
+			fmt.Fprintf(h, "%s\x00%s\n", member, sum)
+			size += s.SizeBytes
+		}
+		m.Sessions = append(m.Sessions, syncEntry{ThreadID: id, SHA256: hex.EncodeToString(h.Sum(nil)), Size: size})
+	}
+	sort.Slice(m.Sessions, func(i, j int) bool { return m.Sessions[i].ThreadID < m.Sessions[j].ThreadID })
+	return m, nil
 }

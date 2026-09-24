@@ -21,9 +21,9 @@ var sessionEntryRe = regexp.MustCompile(`^sessions/\d{4}/\d{2}/\d{2}/rollout-[^/
 var archivedSessionEntryRe = regexp.MustCompile(`^archived_sessions/(rollout-[^/]+|\d{4}/\d{2}/\d{2}/rollout-[^/]+)\.jsonl(\.zst)?$`)
 
 // claudeEntryRe matches the only Claude Code bundle paths we will import:
-// transcripts under projects/<encoded-cwd>/<uuid>.jsonl. The encoded folder and
-// the uuid are single path segments (no nested directories, no traversal).
-var claudeEntryRe = regexp.MustCompile(`^projects/[^/]+/[^/]+\.jsonl$`)
+// parent transcripts and their <uuid>/subagents/agent-<id>.jsonl companions.
+// Arbitrary nested directories are not accepted.
+var claudeEntryRe = regexp.MustCompile(`^projects/[^/]+/([^/]+\.jsonl|[^/]+/subagents/agent-[^/]+\.jsonl)$`)
 
 // claudeMemoryEntryRe matches a Claude Code auto-memory file inside a project
 // folder: projects/<encoded-cwd>/memory/<path>. Nested directories are allowed
@@ -72,7 +72,7 @@ func IsArchivedSessionEntry(rel string) bool {
 }
 
 // IsClaudeSessionEntry reports whether a (already cleaned) relative path is a
-// Claude Code transcript under projects/<encoded-cwd>/<uuid>.jsonl.
+// Claude Code parent transcript or a strictly shaped subagent companion.
 func IsClaudeSessionEntry(rel string) bool {
 	return claudeEntryRe.MatchString(rel)
 }
@@ -92,4 +92,24 @@ func DestPath(root, rel string) (string, error) {
 		return "", fmt.Errorf("path %q escapes Codex home", rel)
 	}
 	return dest, nil
+}
+
+// ClaudeSessionGroup identifies a conversation by project folder and parent ID.
+// rel must be a bundle-relative path. Member is independent of the project path,
+// so remapping a project does not change the group's file identities.
+func ClaudeSessionGroup(rel string) (group, parent, member string, child bool) {
+	if _, err := CleanRelPath(rel); err != nil || !IsClaudeSessionEntry(rel) {
+		return
+	}
+	parts := strings.Split(rel, "/")
+	if len(parts) == 3 {
+		parent = strings.TrimSuffix(parts[2], ".jsonl")
+		member = "parent.jsonl"
+	} else {
+		parent = parts[2]
+		member = strings.Join(parts[3:], "/")
+		child = true
+	}
+	group = parts[1] + "/" + parent
+	return
 }

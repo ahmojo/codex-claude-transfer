@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/ahmojo/codex-claude-transfer/internal/claudehome"
+	"github.com/ahmojo/codex-claude-transfer/internal/safety"
 	"github.com/ahmojo/codex-claude-transfer/internal/sessions"
 )
 
@@ -21,8 +22,8 @@ type ScanOptions struct {
 }
 
 // Scan discovers Claude Code transcripts under <home>/projects/<encoded-cwd>/.
-// Every *.jsonl file in a project folder is a session (a logical conversation may
-// also include sidechain lines inside the same file). Results reuse the shared
+// Parent transcripts and <parent>/subagents/agent-*.jsonl companions are
+// discovered as files sharing their parent session ID. Results reuse the shared
 // sessions.Session / sessions.ScanResult types and are sorted most-recent-first.
 //
 // Scan is defensive: an unreadable directory or a single unparseable transcript
@@ -73,6 +74,10 @@ func newSession(root, path string, d fs.DirEntry, result *sessions.ScanResult) (
 		rel = d.Name()
 	}
 
+	group, parent, _, child := safety.ClaudeSessionGroup("projects/" + filepath.ToSlash(rel))
+	if group == "" {
+		return sessions.Session{}, false
+	}
 	s := sessions.Session{
 		Path:      path,
 		RelPath:   filepath.ToSlash(rel),
@@ -90,6 +95,14 @@ func newSession(root, path string, d fs.DirEntry, result *sessions.ScanResult) (
 		return s, true
 	}
 
+	if child {
+		if meta.SessionID != "" && meta.SessionID != parent {
+			result.Invalid++
+			result.Warnings = append(result.Warnings, fmt.Sprintf("subagent %s has a sessionId different from its parent directory; skipped", path))
+			return s, false
+		}
+		meta.SessionID = parent
+	}
 	applyMeta(&s, meta, fallbackIDFromName(d.Name()))
 	if s.Parsed {
 		result.Valid++
