@@ -140,23 +140,50 @@ func TestServesIndex(t *testing.T) {
 	}
 }
 
+// Every language gets the same page; only <html lang> differs, and it selects
+// the dictionary that i18n.js applies.
 func TestServesRussianIndex(t *testing.T) {
 	_, ts := testServer(t)
-	res, page := do(t, ts, "GET", "/?lang=ru&token="+testToken, "", "")
+	res, ru := do(t, ts, "GET", "/?lang=ru&token="+testToken, "", "")
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("Russian index: got %d", res.StatusCode)
 	}
-	if !strings.Contains(string(page), "<html lang=\"ru\">") || !strings.Contains(string(page), "app.ru.js") {
-		t.Errorf("Russian index and script not served")
+	if !strings.Contains(string(ru), `<html lang="ru">`) || !strings.Contains(string(ru), `src="i18n.ru.js"`) {
+		t.Errorf("Russian index not served")
 	}
-	if res, js := do(t, ts, "GET", "/app.ru.js", "", ""); res.StatusCode != http.StatusOK {
-		t.Errorf("app.ru.js: got %d", res.StatusCode)
-	} else if !strings.Contains(string(js), "localizeDoctorMessage") {
-		t.Errorf("Russian doctor messages not localized")
-	}
-	res, english := do(t, ts, "GET", "/?lang=en&token="+testToken, "", "")
-	if res.StatusCode != http.StatusOK || !strings.Contains(string(english), "<html lang=\"en\">") {
+	res, en := do(t, ts, "GET", "/?lang=en&token="+testToken, "", "")
+	if res.StatusCode != http.StatusOK || !strings.Contains(string(en), `<html lang="en">`) {
 		t.Errorf("English index not retained")
+	}
+	if strings.Replace(string(ru), `<html lang="ru">`, `<html lang="en">`, 1) != string(en) {
+		t.Errorf("Russian and English pages differ beyond the lang attribute")
+	}
+	for _, asset := range []string{"/i18n.js", "/i18n.ru.js"} {
+		if res, _ := do(t, ts, "GET", asset, "", ""); res.StatusCode != http.StatusOK {
+			t.Errorf("%s: got %d", asset, res.StatusCode)
+		}
+	}
+}
+
+func TestPageLanguage(t *testing.T) {
+	cases := []struct{ query, accept, want string }{
+		{"", "ru-RU,ru;q=0.9,en;q=0.8", "ru"},
+		{"", "ru;q=0.9", "ru"},
+		{"", "de-DE,ru;q=0.8", "en"},
+		{"", "", "en"},
+		{"en", "ru-RU", "en"},
+		{"ru", "en-US", "ru"},
+		{"RU", "", "ru"},
+		{"de", "ru-RU", "en"},
+	}
+	for _, tc := range cases {
+		r := httptest.NewRequest("GET", "/?lang="+tc.query, nil)
+		if tc.accept != "" {
+			r.Header.Set("Accept-Language", tc.accept)
+		}
+		if got := pageLanguage(r); got != tc.want {
+			t.Errorf("lang=%q Accept-Language=%q: got %s, want %s", tc.query, tc.accept, got, tc.want)
+		}
 	}
 }
 
