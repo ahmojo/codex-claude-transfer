@@ -531,7 +531,7 @@ func printImport(w io.Writer, kind agent.Kind, path string, res bundle.ImportRes
 	// For Claude, always show the project groups the sessions land in (it mirrors
 	// the grouped sidebar). For Codex, only surface the folder list when something
 	// is missing, so a clean import stays quiet.
-	summary := bundle.SummarizeCWDs(res.Manifest.Sessions, bundle.DirExists)
+	summary := bundle.SummarizeCWDs(bundle.ConversationSessions(res.Manifest.Sessions), bundle.DirExists)
 	alwaysShow := kind == agent.Claude
 	if alwaysShow || summary.MissingCount > 0 {
 		fmt.Fprintln(w)

@@ -621,7 +621,7 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 
 	// Project summary + launch dir so the preview can offer "map to current folder"
 	// (--map-cwd-here), which is valid only for a single-project bundle.
-	summary := bundle.SummarizeCWDs(res.Manifest.Sessions, bundle.DirExists)
+	summary := bundle.SummarizeCWDs(bundle.ConversationSessions(res.Manifest.Sessions), bundle.DirExists)
 	projects := make([]projectDTO, 0, len(summary.Dirs))
 	for _, d := range summary.Dirs {
 		projects = append(projects, projectDTO{Path: d.Path, Count: d.Count, ExistsLocal: d.ExistsLocal})

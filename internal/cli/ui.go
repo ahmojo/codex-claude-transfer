@@ -463,7 +463,7 @@ func uiImport(f commonFlags, stdout, stderr io.Writer) {
 	// The bundle records which agent it came from; that determines the
 	// destination home and the wording below (Codex vs Claude Code).
 	bkind := agent.Normalize(agent.Kind(res.Manifest.Tool))
-	summary := bundle.SummarizeCWDs(res.Manifest.Sessions, bundle.DirExists)
+	summary := bundle.SummarizeCWDs(bundle.ConversationSessions(res.Manifest.Sessions), bundle.DirExists)
 
 	fmt.Fprintf(stdout, "\nThis bundle contains %s from %s:\n",
 		plural(len(res.Manifest.Sessions), "session"), plural(len(summary.Dirs), "project folder"))

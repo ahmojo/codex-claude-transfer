@@ -2,6 +2,14 @@
 
 All notable changes to codex-claude-transfer are documented here.
 
+## [Unreleased]
+
+### Fixed
+- **A remapped Claude conversation stays together.** Subagents that worked in a
+  subfolder of the project were left in the old project folder by `--map-cwd`,
+  where Claude Code does not look for them, and `--map-cwd-here` refused such a
+  conversation as spanning several projects. Subagents now follow their parent.
+
 ## [2.1.1] - 2026-09-24
 
 ### Fixed

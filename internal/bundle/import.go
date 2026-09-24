@@ -285,6 +285,22 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 		mappings = m
 	}
 
+	// Claude Code looks for a subagent transcript next to its parent, and a
+	// subagent can record a subfolder as its cwd. So each conversation is placed
+	// by the mapping that moves its parent transcript.
+	parentMapping := map[string]*CWDMapping{}
+	if kind == agent.Claude {
+		for _, ms := range manifest.Sessions {
+			group, _, _, child := safety.ClaudeSessionGroup(ms.BundlePath)
+			if group == "" || child {
+				continue
+			}
+			if m := matchMapping(ms.OriginalCWD, mappings); m != nil {
+				parentMapping[group] = m
+			}
+		}
+	}
+
 	// Resolve the selection filters (--session/--project/--since/--match) to the
 	// exact set of bundle paths to import, erroring before any write if the active
 	// filters select nothing. nil means "no filter — import everything".
@@ -346,6 +362,11 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 		// rewritten bytes (never the stale bundle checksum after a mutation).
 		destRel := rel
 		effectiveSum := checksums[rel]
+		var group string
+		var child bool
+		if kind == agent.Claude {
+			group, _, _, child = safety.ClaudeSessionGroup(rel)
+		}
 		if m := matchMapping(item.OriginalCWD, mappings); m != nil {
 			switch {
 			case kind == agent.Claude:
@@ -407,6 +428,13 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 					result.Warnings = append(result.Warnings,
 						fmt.Sprintf("%s: recorded cwd did not match the mapping; not rewritten", rel))
 				}
+			}
+		}
+		// A subagent goes wherever its parent goes, whatever cwd it recorded.
+		if child {
+			destRel = rel
+			if m := parentMapping[group]; m != nil {
+				destRel = claudeDestRelForCWD(rel, m.New)
 			}
 		}
 

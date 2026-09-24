@@ -101,7 +101,7 @@ func resolveMapHere(manifest Manifest, hereDir string) (mappings []CWDMapping, n
 	}
 	seen := map[string]string{} // normalized key -> original spelling, first seen
 	var order []string
-	for _, ms := range manifest.Sessions {
+	for _, ms := range ConversationSessions(manifest.Sessions) {
 		if ms.OriginalCWD == "" {
 			continue
 		}

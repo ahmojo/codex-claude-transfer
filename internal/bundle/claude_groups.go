@@ -12,6 +12,23 @@ func claudeGroup(s sessions.Session) string {
 	return group
 }
 
+// ConversationSessions returns the entries that name a conversation's project.
+// Claude subagent transcripts are left out: they belong next to their parent
+// and may have recorded a subfolder as their cwd. If that leaves nothing, all
+// entries are returned.
+func ConversationSessions(all []ManifestSession) []ManifestSession {
+	var out []ManifestSession
+	for _, ms := range all {
+		if _, _, _, child := safety.ClaudeSessionGroup(ms.BundlePath); !child {
+			out = append(out, ms)
+		}
+	}
+	if len(out) == 0 {
+		return all
+	}
+	return out
+}
+
 func expandClaudeGroups(all, selected []sessions.Session) []sessions.Session {
 	groups := map[string]bool{}
 	for _, s := range selected {
