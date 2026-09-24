@@ -101,10 +101,13 @@
           <span>Only sessions updated since (optional)</span>
           <input id="export-since" type="text" placeholder="a date (2026-06-01) or a duration (7d, 48h)" />
         </label>
-        <label class="field">
-          <span>Output file (blank = default name)</span>
-          <input id="export-output" type="text" placeholder="e.g. C:\Users\you\project.codexbundle" />
-        </label>
+        <div class="field">
+          <label for="export-output">Output file (blank = default name)</label>
+          <div class="path-input">
+            <input id="export-output" type="text" placeholder="e.g. C:\Users\you\project.codexbundle" />
+            <button type="button" class="path-pick" hidden data-pick-target="export-output" data-pick-kind="save-bundle">Browse…</button>
+          </div>
+        </div>
         <label class="check"><input type="checkbox" id="export-archived" /> Include archived sessions</label>
         <label class="check"><input type="checkbox" id="export-withgit" /> Record the project's git remote, branch &amp; commit (--with-git)</label>
         <p class="hint">Saves a <em>pointer</em> to your code (remote URL + commit id) inside the bundle so the other machine knows what to check out. Reads git locally &mdash; uploads nothing.</p>
@@ -120,10 +123,13 @@
             <span>Recipients (age public keys, one per line or comma-separated)</span>
             <textarea id="export-encrypt-to" rows="2" placeholder="age1... / ssh-ed25519 ..."></textarea>
           </label>
-          <label class="field">
-            <span>…or a recipients file</span>
-            <input id="export-recipients-file" type="text" placeholder="path to a file of age recipients" />
-          </label>
+          <div class="field">
+            <label for="export-recipients-file">…or a recipients file</label>
+            <div class="path-input">
+              <input id="export-recipients-file" type="text" placeholder="path to a file of age recipients" />
+              <button type="button" class="path-pick" hidden data-pick-target="export-recipients-file" data-pick-kind="open-file">Browse…</button>
+            </div>
+          </div>
           <p class="muted small">Passphrase encryption is terminal-only (<code>cct export --passphrase</code>); the browser uses recipient keys, which need no prompt.</p>
         </details>
         <button class="primary" id="export-run">Export</button>
@@ -134,14 +140,20 @@
       <section id="view-inspect" class="view hidden">
         <h1>Inspect a bundle</h1>
         <p class="muted">Read a <code>.codexbundle</code> without extracting anything.</p>
-        <label class="field">
-          <span>Bundle file</span>
-          <input id="inspect-path" type="text" placeholder="path to .codexbundle (or .age)" />
-        </label>
-        <label class="field">
-          <span>Age identity file (only for an encrypted .age bundle)</span>
-          <input id="inspect-identity" type="text" placeholder="path to your age key file" />
-        </label>
+        <div class="field">
+          <label for="inspect-path">Bundle file</label>
+          <div class="path-input">
+            <input id="inspect-path" type="text" placeholder="path to .codexbundle (or .age)" />
+            <button type="button" class="path-pick" hidden data-pick-target="inspect-path" data-pick-kind="open-bundle">Browse…</button>
+          </div>
+        </div>
+        <div class="field">
+          <label for="inspect-identity">Age identity file (only for an encrypted .age bundle)</label>
+          <div class="path-input">
+            <input id="inspect-identity" type="text" placeholder="path to your age key file" />
+            <button type="button" class="path-pick" hidden data-pick-target="inspect-identity" data-pick-kind="open-file">Browse…</button>
+          </div>
+        </div>
         <button class="primary" id="inspect-run">Inspect</button>
         <div id="inspect-out" class="out"></div>
       </section>
@@ -150,14 +162,20 @@
       <section id="view-import" class="view hidden">
         <h1>Import a bundle</h1>
         <p class="muted">Bring sessions from a bundle into the matching agent's home on this machine. Always previewed first.</p>
-        <label class="field">
-          <span>Bundle file</span>
-          <input id="import-path" type="text" placeholder="path to .codexbundle (or .age)" />
-        </label>
-        <label class="field">
-          <span>Age identity file (only for an encrypted .age bundle)</span>
-          <input id="import-identity" type="text" placeholder="path to your age key file" />
-        </label>
+        <div class="field">
+          <label for="import-path">Bundle file</label>
+          <div class="path-input">
+            <input id="import-path" type="text" placeholder="path to .codexbundle (or .age)" />
+            <button type="button" class="path-pick" hidden data-pick-target="import-path" data-pick-kind="open-bundle">Browse…</button>
+          </div>
+        </div>
+        <div class="field">
+          <label for="import-identity">Age identity file (only for an encrypted .age bundle)</label>
+          <div class="path-input">
+            <input id="import-identity" type="text" placeholder="path to your age key file" />
+            <button type="button" class="path-pick" hidden data-pick-target="import-identity" data-pick-kind="open-file">Browse…</button>
+          </div>
+        </div>
         <label class="field">
           <span>Import as</span>
           <select id="import-translate">
@@ -175,10 +193,13 @@
             <span>Only these sessions (thread ids, comma-separated &mdash; blank = all)</span>
             <input id="import-sessions" type="text" placeholder="e.g. 9f3c1a2b, 7d2e…" />
           </label>
-          <label class="field">
-            <span>Project folder to check cwd against (optional, just warns)</span>
-            <input id="import-project" type="text" placeholder="local project path" />
-          </label>
+          <div class="field">
+            <label for="import-project">Project folder to check cwd against (optional, just warns)</label>
+            <div class="path-input">
+              <input id="import-project" type="text" placeholder="local project path" />
+              <button type="button" class="path-pick" hidden data-pick-target="import-project" data-pick-kind="folder">Browse…</button>
+            </div>
+          </div>
           <label class="check" id="import-map-here-row" style="display:none">
             <input type="checkbox" id="import-map-here" />
             <span id="import-map-here-label">Put these sessions under the current folder</span>
@@ -198,10 +219,13 @@
             <span>Ask Codex to discover and verify imported sessions now</span>
           </label>
           <p class="hint" id="import-reconcile-hint" style="display:none">Uses Codex's native app-server. If it is unavailable or incompatible, the imported rollout files remain intact and cct shows safe restart/resume guidance.</p>
-          <label class="field">
-            <span>Also clone the project's code from git into (optional)</span>
-            <input id="import-clone" type="text" placeholder="folder to clone the recorded git remote into" />
-          </label>
+          <div class="field">
+            <label for="import-clone">Also clone the project's code from git into (optional)</label>
+            <div class="path-input">
+              <input id="import-clone" type="text" placeholder="folder to clone the recorded git remote into" />
+              <button type="button" class="path-pick" hidden data-pick-target="import-clone" data-pick-kind="folder">Browse…</button>
+            </div>
+          </div>
           <p class="hint"><strong>Network download.</strong> Runs <code>git clone</code> of the remote recorded in this bundle into the folder above and checks out the recorded commit. Fetches <strong>code only</strong> from that remote; your sessions are imported separately (above). Leave blank to skip.</p>
           <button class="primary danger" id="import-run">Import for real</button>
           <div id="import-out" class="out"></div>
