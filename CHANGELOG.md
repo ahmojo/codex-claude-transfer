@@ -2,6 +2,35 @@
 
 All notable changes to codex-claude-transfer are documented here.
 
+## [2.1.0] - 2026-09-24
+
+### Added
+- **The desktop UI speaks Russian.** `cct app` follows the browser language,
+  and a link in the header switches between English and Russian. Text without
+  a translation stays English
+  ([#29](https://github.com/ahmojo/codex-claude-transfer/pull/29)).
+- **Browse buttons for path fields on Windows.** Bundle, key file and folder
+  fields in `cct app` open the native Windows dialogs. Typing a path still
+  works everywhere
+  ([#30](https://github.com/ahmojo/codex-claude-transfer/pull/30)).
+
+### Changed
+- **Claude Code subagent transcripts travel with their session.** Files under
+  `<session>/subagents/` are now exported, imported, cwd-mapped and synced
+  together with the parent transcript. `--import-as-copy` refuses bundles that
+  contain them for now. For LAN sync, both devices need this version
+  ([#31](https://github.com/ahmojo/codex-claude-transfer/pull/31)).
+- **`cct sync daemon` retries on its own.** It looks for remembered peers at
+  startup and every 30 seconds, not only after a local change, and reports
+  conflicts and errors for inbound syncs too
+  ([#32](https://github.com/ahmojo/codex-claude-transfer/pull/32)).
+
+### Fixed
+- **Encrypted export in `cct app` no longer loses files.** It asks before
+  replacing an existing `.age` bundle, keeps it when encryption fails, and
+  leaves a file at the chosen path alone
+  ([#30](https://github.com/ahmojo/codex-claude-transfer/pull/30)).
+
 ## [2.0.0] - 2026-08-13
 
 **Nothing in this release breaks anything.** The major version marks the point
