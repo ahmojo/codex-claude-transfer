@@ -2,7 +2,7 @@
 
 All notable changes to codex-claude-transfer are documented here.
 
-## [Unreleased]
+## [2.1.1] - 2026-09-24
 
 ### Fixed
 - **Encrypted `cct export` no longer deletes files it did not create.** A file
