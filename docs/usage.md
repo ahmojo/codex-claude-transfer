@@ -573,5 +573,16 @@ and refuses non-private addresses unless you pass `--allow-public`. It is still
 the only feature that sends session data off the machine, so it is opt-in,
 experimental, and gated by `--i-understand`.
 
+For paired devices, `cct sync daemon --i-understand` discovers remembered peers
+on startup, after local session changes, and periodically (every 30 seconds,
+checked at the configured polling interval). This retries missed connections
+even if no new local messages arrive. `--interval` controls change polling;
+`--once` performs a single sweep. Conflicts and transfer errors are reported in
+both directions. A reported conflict still requires explicit resolution.
+
+This remains experimental. Stop writers before importing into their session
+files: periodic discovery does not add coordination with running agents or
+make live transcript replacement safe.
+
 For the threat model and design notes, see
 [docs/design/lan-sync.md](design/lan-sync.md).
