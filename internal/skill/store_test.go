@@ -203,10 +203,11 @@ func TestStoreDirDefaults(t *testing.T) {
 	if got := StoreDir("/tmp/x"); got != "/tmp/x" {
 		t.Fatalf("explicit dir = %q", got)
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Skip("no home directory")
-	}
+	// Pin the home directory (HOME on Unix, USERPROFILE on Windows) so the
+	// expected paths are fixed rather than read from this machine.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	if got := StoreDir(""); got != filepath.Join(home, "cct-sessions") {
 		t.Fatalf("default dir = %q", got)
 	}

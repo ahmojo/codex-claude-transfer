@@ -115,6 +115,13 @@ func TestSkillInitAndShow(t *testing.T) {
 	if _, e, code := run("config", "set", "repo-sync-repo", store); code != 0 {
 		t.Fatalf("restore config: %s", e)
 	}
+	// The clone path is configured explicitly: the default, ~/cct-sessions,
+	// resolves against the real home directory, where a developer may well
+	// have an actual store.
+	storeDir := filepath.Join(tmp, "store")
+	if _, e, code := run("config", "set", "repo-sync-dir", storeDir); code != 0 {
+		t.Fatalf("config set repo-sync-dir: %s", e)
+	}
 
 	if _, e, code := run("skill", "init", "--project", proj, "--dry-run"); code != 0 {
 		t.Fatalf("init --dry-run exit=%d %s", code, e)
@@ -143,22 +150,34 @@ func TestSkillInitAndShow(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("show exit=%d %s", code, e)
 	}
-	for _, want := range []string{store, "projects/my-app", "claude-all.codexbundle", "not from you"} {
+	for _, want := range []string{store, "projects/my-app", "claude-all.codexbundle", "not cloned yet", "not from you"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("show output lacks %q:\n%s", want, out)
 		}
 	}
 
-	out, _, code = run("skill", "show", "--project", proj, "--json")
-	if code != 0 {
-		t.Fatalf("show --json exit=%d", code)
+	showJSON := func() map[string]any {
+		t.Helper()
+		out, _, code := run("skill", "show", "--project", proj, "--json")
+		if code != 0 {
+			t.Fatalf("show --json exit=%d", code)
+		}
+		var got map[string]any
+		if err := json.Unmarshal([]byte(out), &got); err != nil {
+			t.Fatalf("show --json is not JSON: %v\n%s", err, out)
+		}
+		return got
 	}
-	var got map[string]any
-	if err := json.Unmarshal([]byte(out), &got); err != nil {
-		t.Fatalf("show --json is not JSON: %v\n%s", err, out)
-	}
-	if got["repo"] != store || got["store_cloned"] != false {
+	if got := showJSON(); got["repo"] != store || got["store_dir"] != storeDir || got["store_cloned"] != false {
 		t.Fatalf("unexpected JSON: %v", got)
+	}
+
+	// Once the store is cloned, show says so.
+	if err := os.MkdirAll(storeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := showJSON(); got["store_cloned"] != true {
+		t.Fatalf("store_cloned after cloning: %v", got)
 	}
 }
 
