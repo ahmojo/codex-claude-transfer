@@ -9,6 +9,9 @@ All notable changes to codex-claude-transfer are documented here.
   subfolder of the project were left in the old project folder by `--map-cwd`,
   where Claude Code does not look for them, and `--map-cwd-here` refused such a
   conversation as spanning several projects. Subagents now follow their parent.
+- **`--redact` also cleans the bundle manifest.** The manifest kept an
+  unredacted copy of the first user message and its preview, so a secret in
+  that message stayed in the bundle.
 
 ## [2.1.1] - 2026-09-24
 

@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ahmojo/codex-claude-transfer/internal/agent"
 	"github.com/ahmojo/codex-claude-transfer/internal/claudehome"
@@ -422,6 +423,9 @@ func writeBundle(opts ExportOptions, selected []sessions.Session, manifest *Mani
 		checksums[bundlePath] = sum
 		ms := manifestSession(s, bundlePath, sum)
 		ms.SizeBytes = size
+		if opts.Redact {
+			redactManifestText(&ms)
+		}
 		manifest.Sessions = append(manifest.Sessions, ms)
 		if manifest.CodexVersion == "" && s.CLIVersion != "" {
 			manifest.CodexVersion = s.CLIVersion
@@ -501,6 +505,34 @@ func manifestSession(s sessions.Session, bundlePath, sum string) ManifestSession
 		SizeBytes:        s.SizeBytes,
 		SHA256:           sum,
 	}
+}
+
+// redactManifestText removes likely secrets from the manifest's copy of the
+// first user message. The preview is that message cut to 100 characters, where
+// half a secret no longer matches a pattern, so it is rebuilt from the redacted
+// message rather than redacted on its own.
+func redactManifestText(ms *ManifestSession) {
+	if first, n := secrets.Redact([]byte(ms.FirstUserMessage)); n > 0 {
+		ms.FirstUserMessage = string(first)
+		ms.Preview = previewText(ms.FirstUserMessage)
+	}
+	preview, _ := secrets.Redact([]byte(ms.Preview))
+	ms.Preview = string(preview)
+}
+
+// previewText mirrors how the session scanners build a preview: whitespace
+// collapsed, cut to 100 bytes (at a character boundary) with an ellipsis.
+func previewText(msg string) string {
+	const max = 100
+	msg = strings.Join(strings.Fields(msg), " ")
+	if len(msg) <= max {
+		return msg
+	}
+	cut := max
+	for cut > 0 && !utf8.RuneStart(msg[cut]) {
+		cut--
+	}
+	return msg[:cut] + "…"
 }
 
 // bundlePathFor returns the forward-slash path inside the ZIP for a session. For
