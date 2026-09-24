@@ -48,7 +48,7 @@ Use this page when you need exact commands and flags. For guided workflows, see
 | `--with-memory` | export, import | Claude Code only. Also carry the selected projects' auto memory (`projects/<encoded-cwd>/memory/`). Opt-in on **both** sides: an export without it puts no memory in the bundle, an import without it skips what a bundle carries. Import writes memory under the project the cwd mapping resolves to, and never overwrites a file that differs. |
 | `--git-push` | export | Opt-in. Push the current branch to its own remote first so the recorded commit is fetchable. Never force-pushes. |
 | `--strip-images` | export | Replace inline base64 images with placeholders to shrink the bundle. Lossy; needs `zstd` for `.jsonl.zst`. |
-| `--output`, `-o <path>` | export | Bundle output path. Defaults are derived from `--project`, `--all`, or `--session`. |
+| `--output`, `-o <path>` | export | Bundle output path. Defaults are derived from `--project`, `--all`, or `--session`. An existing file there is replaced. |
 | `--include-archived` | list, export, relocate | Include archived sessions. Codex only: Claude Code keeps no separate archive location, so `relocate --tool claude` refuses the flag. |
 | `--json` | doctor, list, inspect, export, import, relocate, diff, sync | Print machine-readable JSON instead of text. |
 | `--dry-run` | import, relocate, undo, sync | Validate and report only; write nothing. |
@@ -70,7 +70,7 @@ Use this page when you need exact commands and flags. For guided workflows, see
 | `--replace-with-backup` | import | On conflict, back up the local file and overwrite it with the bundle's version. |
 | `--import-as-copy` | import | On conflict, import the bundle's version as a new session, leaving yours untouched. Excludes `--replace-with-backup`. |
 | `--clone <dir>` | import | After importing, clone the bundle's recorded git remote into `<dir>` and check out its commit. |
-| `--encrypt-to <recipient>` | export | Encrypt to an `age` recipient (`age1...` or `ssh-ed25519 ...`). Repeatable. Writes `<output>.age`. |
+| `--encrypt-to <recipient>` | export | Encrypt to an `age` recipient (`age1...` or `ssh-ed25519 ...`). Repeatable. Writes only `<output>.age`: a file at `<output>` is left alone, and an existing `<output>.age` is replaced once `age` has succeeded. |
 | `--recipients-file <file>` | export | Encrypt to every `age` recipient listed in `<file>`. |
 | `--passphrase` | export, import, inspect | Export with a passphrase, or decrypt a passphrase-encrypted bundle. |
 | `--identity <file>` | import, inspect | `age` identity/private key file used to decrypt a `.age` bundle. |

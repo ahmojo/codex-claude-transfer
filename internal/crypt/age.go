@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -74,6 +75,29 @@ func Encrypt(in, out string, opts EncryptOptions) error {
 		return err
 	}
 	return runAge(cmd, opts.Passphrase)
+}
+
+// EncryptReplacing encrypts the plaintext file in to target, replacing an
+// existing target only once age has succeeded. age truncates its -o file
+// without asking, so it writes to a temporary file beside target that is
+// renamed over target at the end: a failed run (a mistyped recipient, say)
+// leaves an existing target exactly as it was, and no partial file behind.
+func EncryptReplacing(in, target string, opts EncryptOptions) error {
+	tmp, err := os.CreateTemp(filepath.Dir(target), ".cct-export-*"+Extension)
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	tmpName := tmp.Name()
+	tmp.Close()
+	if err := Encrypt(in, tmpName, opts); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, target); err != nil {
+		os.Remove(tmpName)
+		return fmt.Errorf("replace %s: %w", target, err)
+	}
+	return nil
 }
 
 // Decrypt decrypts the encrypted file in to the file out using age. age may

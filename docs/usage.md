@@ -420,8 +420,13 @@ This uploads code only to your git remote. It never uploads sessions.
 ### Encrypt a bundle
 
 Encryption uses [`age`](https://github.com/FiloSottile/age). `--encrypt-to`
-writes `<output>.age` and removes the plaintext bundle. `import` and `inspect`
-auto-detect encrypted bundles.
+writes `<output>.age` and leaves no plaintext bundle behind. `import` and
+`inspect` auto-detect encrypted bundles.
+
+The plaintext bundle is only an intermediate under a temporary name, so a file
+already at `<output>` is never touched. Like a plain export, an encrypted export
+replaces an existing `<output>.age`, but only once `age` has succeeded: a failed
+run (a mistyped recipient, say) leaves the previous `.age` file as it was.
 
 ```bash
 cct export --project . --encrypt-to age1qz...

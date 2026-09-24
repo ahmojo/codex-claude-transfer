@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -820,11 +821,32 @@ func runExport(args []string, stdout, stderr io.Writer) int {
 		return runExportRendered(f, kind, home, claudeHome, absProject, session, since, stdout, stderr)
 	}
 
+	// When encrypting, the clear bundle is only an intermediate, so it gets a
+	// temporary name of its own: a file already at -o is never replaced or
+	// deleted, and the deferred remove means no clear bundle is left behind
+	// whether or not encryption succeeds.
+	plainPath := output
+	if encryptRequested {
+		dir := filepath.Dir(output)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			fmt.Fprintf(stderr, "error: create bundle directory %s: %v\n", dir, err)
+			return 1
+		}
+		tmp, err := os.CreateTemp(dir, ".cct-export-*.codexbundle")
+		if err != nil {
+			fmt.Fprintf(stderr, "error: create temp bundle: %v\n", err)
+			return 1
+		}
+		plainPath = tmp.Name()
+		tmp.Close()
+		defer os.Remove(plainPath)
+	}
+
 	result, err := bundle.Export(home, bundle.ExportOptions{
 		Tool:               kind,
 		ClaudeHome:         claudeHome,
 		ProjectPath:        absProject,
-		OutputPath:         output,
+		OutputPath:         plainPath,
 		IncludeArchived:    f.includeArchived,
 		Since:              since,
 		SessionID:          session,
@@ -848,9 +870,9 @@ func runExport(args []string, stdout, stderr io.Writer) int {
 	// leave one full of credentials on disk unless the user redacts them or opts
 	// in. Scans the exact bytes that were written (after any --strip-images).
 	if !f.redact && !f.allowSecrets {
-		sres, serr := bundle.ScanBundleSecrets(output)
+		sres, serr := bundle.ScanBundleSecrets(plainPath)
 		if serr == nil && sres.Any() {
-			os.Remove(output)
+			os.Remove(plainPath)
 			fmt.Fprintf(stderr, "error: this bundle would contain %s (in %s).\n",
 				plural(sres.TotalFindings, "likely secret"), plural(sres.SessionsWithSecrets, "session"))
 			fmt.Fprintln(stderr, "Refusing to write it so credentials don't leak. Re-run with --redact to replace")
@@ -860,17 +882,21 @@ func runExport(args []string, stdout, stderr io.Writer) int {
 	}
 
 	if encryptRequested {
+		// Like a plain export over an existing -o file, this replaces an
+		// existing <output>.age, but only once age has succeeded.
 		encPath := output + crypt.Extension
-		err := crypt.Encrypt(output, encPath, crypt.EncryptOptions{
+		// Ctrl-C at age's passphrase prompt reaches cct as well. Catch it while
+		// age runs: age still exits on it and the encrypt fails, but cct lives
+		// on long enough for the deferred remove of the clear intermediate.
+		interrupts := make(chan os.Signal, 1)
+		signal.Notify(interrupts, os.Interrupt)
+		err := crypt.EncryptReplacing(plainPath, encPath, crypt.EncryptOptions{
 			Recipients:     f.encryptTo,
 			RecipientsFile: f.recipientsFile,
 			Passphrase:     f.passphrase,
 		})
-		// The plaintext bundle is intermediate; remove it whether or not
-		// encryption succeeded so a clear bundle is never left behind.
-		os.Remove(output)
+		signal.Stop(interrupts)
 		if err != nil {
-			os.Remove(encPath)
 			fmt.Fprintf(stderr, "error: encrypt failed: %v\n", err)
 			return 1
 		}
@@ -1672,7 +1698,8 @@ Flags:
                         a small placeholder, to shrink an image-heavy bundle.
                         Lossy (the pictures are dropped) and opt-in; the
                         conversation text is kept. Needs zstd for .jsonl.zst
-  --output, -o <path>   export: bundle output path (default <project>.codexbundle)
+  --output, -o <path>   export: bundle output path (default <project>.codexbundle);
+                        an existing file there is replaced
   --dry-run             import: validate and report only, write nothing
                         relocate: preview session rewrites and any directory move
   --move-project        relocate: rename OLD to NEW before rewriting sessions;
@@ -1718,6 +1745,10 @@ Flags:
   --recipients-file <f> export: encrypt to every age recipient listed in <f>
   --passphrase          export: encrypt with an interactive passphrase
                         import/inspect: decrypt a passphrase-encrypted bundle
+                        Encrypting (any of the three above) writes only
+                        <output>.age: a file at <output> is left alone, and an
+                        existing <output>.age is replaced once age succeeds (a
+                        failed encryption leaves it as it was)
   --identity <file>     import/inspect: age identity (private key) file used to
                         decrypt a .age bundle
   --allow-secrets       export/sync: proceed even if a likely secret is detected

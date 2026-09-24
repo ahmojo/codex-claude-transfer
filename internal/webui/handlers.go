@@ -379,7 +379,7 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 
 	bundlePath := res.BundlePath
 	if encryptRequested {
-		err := encryptReplacing(plainPath, encPath, crypt.EncryptOptions{
+		err := crypt.EncryptReplacing(plainPath, encPath, crypt.EncryptOptions{
 			Recipients:     req.EncryptTo,
 			RecipientsFile: req.RecipientsFile,
 		})
@@ -401,27 +401,6 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 		"secrets_redacted": res.SecretsRedacted,
 		"warnings":         res.Warnings,
 	})
-}
-
-// encryptReplacing encrypts plain into a temporary file beside target and
-// renames it over target only after age succeeded, so a failed run (a mistyped
-// recipient, say) leaves an existing target exactly as it was.
-func encryptReplacing(plain, target string, opts crypt.EncryptOptions) error {
-	tmp, err := os.CreateTemp(filepath.Dir(target), ".cct-export-*"+crypt.Extension)
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	tmp.Close()
-	if err := crypt.Encrypt(plain, tmpName, opts); err != nil {
-		os.Remove(tmpName)
-		return err
-	}
-	if err := os.Rename(tmpName, target); err != nil {
-		os.Remove(tmpName)
-		return err
-	}
-	return nil
 }
 
 // ---- inspect ----

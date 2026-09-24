@@ -126,6 +126,84 @@ func TestRoundTripWithRecipientsFile(t *testing.T) {
 	}
 }
 
+// assertNoTemps fails when EncryptReplacing left a temporary file in dir.
+func assertNoTemps(t *testing.T, dir string) {
+	t.Helper()
+	leftovers, _ := filepath.Glob(filepath.Join(dir, ".cct-export-*"))
+	if len(leftovers) > 0 {
+		t.Errorf("temporary files left behind: %v", leftovers)
+	}
+}
+
+// A failed encryption must leave an existing target exactly as it was. It fails
+// in age on a bad recipient, or before age runs when age is not installed, so
+// this runs either way.
+func TestEncryptReplacingFailureKeepsTarget(t *testing.T) {
+	dir := t.TempDir()
+	plain := filepath.Join(dir, "in.bundle")
+	if err := os.WriteFile(plain, []byte("clear bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(dir, "out.age")
+	if err := os.WriteFile(target, []byte("previous encrypted bundle"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	err := EncryptReplacing(plain, target, EncryptOptions{Recipients: []string{"not-an-age-recipient"}})
+	if err == nil {
+		t.Fatal("expected an error for a bad recipient")
+	}
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("existing target was removed: %v", err)
+	}
+	if string(got) != "previous encrypted bundle" {
+		t.Errorf("failed encryption changed the existing target: %q", got)
+	}
+	assertNoTemps(t, dir)
+}
+
+func TestEncryptReplacingReplacesTarget(t *testing.T) {
+	if !Available() {
+		t.Skip("age not installed")
+	}
+	if _, err := exec.LookPath("age-keygen"); err != nil {
+		t.Skip("age-keygen not installed")
+	}
+	dir := t.TempDir()
+	keyFile := filepath.Join(dir, "key.txt")
+	if out, err := exec.Command("age-keygen", "-o", keyFile).CombinedOutput(); err != nil {
+		t.Fatalf("age-keygen failed: %v: %s", err, out)
+	}
+	recipient := recipientFromKeyFile(t, keyFile)
+
+	plain := filepath.Join(dir, "in.bundle")
+	want := "fresh bundle bytes"
+	if err := os.WriteFile(plain, []byte(want), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(dir, "out.age")
+	if err := os.WriteFile(target, []byte("previous encrypted bundle"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := EncryptReplacing(plain, target, EncryptOptions{Recipients: []string{recipient}}); err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+	dec := filepath.Join(dir, "back.bundle")
+	if err := Decrypt(target, dec, DecryptOptions{IdentityFile: keyFile}); err != nil {
+		t.Fatalf("decrypt the replaced target: %v", err)
+	}
+	got, err := os.ReadFile(dec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != want {
+		t.Errorf("target decrypts to %q, want %q", got, want)
+	}
+	assertNoTemps(t, dir)
+}
+
 func recipientFromKeyFile(t *testing.T, keyFile string) string {
 	t.Helper()
 	data, err := os.ReadFile(keyFile)

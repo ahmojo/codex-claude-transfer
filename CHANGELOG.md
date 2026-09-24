@@ -2,6 +2,14 @@
 
 All notable changes to codex-claude-transfer are documented here.
 
+## [Unreleased]
+
+### Fixed
+- **Encrypted `cct export` no longer deletes files it did not create.** A file
+  already at `-o` used to be overwritten and then removed, and a failed `age`
+  run removed an existing `<output>.age`. The clear bundle now gets a temporary
+  name, and `<output>.age` is replaced only after `age` succeeds.
+
 ## [2.1.0] - 2026-09-24
 
 ### Added

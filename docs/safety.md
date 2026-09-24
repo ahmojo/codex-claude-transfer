@@ -522,7 +522,11 @@ single, dependency-free binary.
 
 - **On export**, `--encrypt-to <recipient>` (repeatable), `--recipients-file`,
   or `--passphrase` write the bundle to `<output>.age`. The intermediate
-  plaintext bundle is **removed** afterward, so a clear copy is not left behind.
+  plaintext bundle gets a temporary name beside it and is **removed** whether
+  or not encryption succeeds, so a clear copy is not left behind and a file
+  already at `<output>` is never overwritten or deleted. An existing
+  `<output>.age` is replaced only after `age` has succeeded; a failed
+  encryption leaves it intact.
 - **On import/inspect**, a `.age` input is auto-detected and decrypted to a
   **temporary file** (requiring `--identity <file>` or `--passphrase`). That
   temporary plaintext is deleted when the command finishes.
