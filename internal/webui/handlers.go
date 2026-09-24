@@ -210,6 +210,7 @@ type exportReq struct {
 	AllowSecrets    bool     `json:"allow_secrets"`   // bypass the pre-egress secret gate
 	EncryptTo       []string `json:"encrypt_to"`      // age recipients; encrypts the bundle to <output>.age
 	RecipientsFile  string   `json:"recipients_file"` // file of age recipients
+	Overwrite       bool     `json:"overwrite"`       // confirmed: replace an existing <output>.age
 }
 
 func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
@@ -265,6 +266,37 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	output := req.Output
+	if output == "" {
+		switch {
+		case req.Mode == "session":
+			output = "session.codexbundle"
+		case req.Mode == "all" && kind == agent.Claude:
+			output = "claude-sessions.codexbundle"
+		case req.Mode == "all":
+			output = "codex-sessions.codexbundle"
+		default:
+			output = filepath.Base(absProject) + ".codexbundle"
+		}
+		output, _ = filepath.Abs(output)
+	}
+
+	// Encryption writes <output>.age, not the path that was typed or picked, and
+	// age replaces an existing file without asking. So the .age file is the one
+	// whose replacement must be confirmed, before any side effect like git push.
+	var encPath string
+	if encryptRequested {
+		encPath = output + crypt.Extension
+		if _, err := os.Lstat(encPath); err == nil && !req.Overwrite {
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error":         encPath + " already exists.",
+				"target_exists": true,
+				"target":        encPath,
+			})
+			return
+		}
+	}
+
 	// --git-push is the only outbound action on export: it pushes YOUR code to
 	// YOUR git remote (never sessions, never to any cct service). Capture what was
 	// pushed so the UI can state it plainly.
@@ -290,19 +322,25 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 		pushedRemote, pushedBranch = remote, branch
 	}
 
-	output := req.Output
-	if output == "" {
-		switch {
-		case req.Mode == "session":
-			output = "session.codexbundle"
-		case req.Mode == "all" && kind == agent.Claude:
-			output = "claude-sessions.codexbundle"
-		case req.Mode == "all":
-			output = "codex-sessions.codexbundle"
-		default:
-			output = filepath.Base(absProject) + ".codexbundle"
+	// When encrypting, the clear bundle is only an intermediate, so it gets a
+	// temporary name of its own: a file already at the typed path is never
+	// replaced or deleted, and the deferred remove means no clear bundle is
+	// left behind whether or not encryption succeeds.
+	plainPath := output
+	if encryptRequested {
+		dir := filepath.Dir(output)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			apiError(w, http.StatusUnprocessableEntity, "create bundle directory: "+err.Error())
+			return
 		}
-		output, _ = filepath.Abs(output)
+		tmp, err := os.CreateTemp(dir, ".cct-export-*.codexbundle")
+		if err != nil {
+			apiError(w, http.StatusUnprocessableEntity, "create temp bundle: "+err.Error())
+			return
+		}
+		plainPath = tmp.Name()
+		tmp.Close()
+		defer os.Remove(plainPath)
 	}
 
 	res, err := bundle.Export(s.home, bundle.ExportOptions{
@@ -311,7 +349,7 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 		ProjectPath:     absProject,
 		SessionID:       req.Session,
 		Since:           since,
-		OutputPath:      output,
+		OutputPath:      plainPath,
 		IncludeArchived: req.IncludeArchived,
 		WithGit:         req.WithGit,
 		StripImages:     req.StripImages,
@@ -326,8 +364,8 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	// bundle on disk unless the user redacted or explicitly allowed it. The UI can
 	// re-submit with redact or allow_secrets.
 	if !req.Redact && !req.AllowSecrets {
-		if sres, serr := bundle.ScanBundleSecrets(output); serr == nil && sres.Any() {
-			os.Remove(output)
+		if sres, serr := bundle.ScanBundleSecrets(plainPath); serr == nil && sres.Any() {
+			os.Remove(plainPath)
 			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
 				"error": "This bundle would contain a likely secret. Turn on \"Replace secrets with placeholders\", " +
 					"or confirm \"Export anyway\".",
@@ -341,16 +379,11 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 
 	bundlePath := res.BundlePath
 	if encryptRequested {
-		encPath := output + crypt.Extension
-		err := crypt.Encrypt(output, encPath, crypt.EncryptOptions{
+		err := encryptReplacing(plainPath, encPath, crypt.EncryptOptions{
 			Recipients:     req.EncryptTo,
 			RecipientsFile: req.RecipientsFile,
 		})
-		// The plaintext bundle is intermediate; remove it whether or not
-		// encryption succeeded so a clear bundle is never left behind.
-		os.Remove(output)
 		if err != nil {
-			os.Remove(encPath)
 			apiError(w, http.StatusUnprocessableEntity, "encrypt failed: "+err.Error())
 			return
 		}
@@ -368,6 +401,27 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 		"secrets_redacted": res.SecretsRedacted,
 		"warnings":         res.Warnings,
 	})
+}
+
+// encryptReplacing encrypts plain into a temporary file beside target and
+// renames it over target only after age succeeded, so a failed run (a mistyped
+// recipient, say) leaves an existing target exactly as it was.
+func encryptReplacing(plain, target string, opts crypt.EncryptOptions) error {
+	tmp, err := os.CreateTemp(filepath.Dir(target), ".cct-export-*"+crypt.Extension)
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	tmp.Close()
+	if err := crypt.Encrypt(plain, tmpName, opts); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, target); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	return nil
 }
 
 // ---- inspect ----

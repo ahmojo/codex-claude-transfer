@@ -62,20 +62,47 @@ func (s *Server) handlePickPath(w http.ResponseWriter, r *http.Request) {
 }
 
 func pickWindowsPath(ctx context.Context, kind, initial string) (string, bool, error) {
-	units := utf16.Encode([]rune(strings.TrimPrefix(pathPickerScript, "\ufeff")))
+	defaultDir := ""
+	if executable, err := os.Executable(); err == nil {
+		defaultDir = portableChatsDir(executable)
+	}
+	return runPowerShellPicker(ctx, pathPickerScript,
+		"CCT_PICK_KIND="+kind, "CCT_PICK_INITIAL="+initial, "CCT_PICK_DEFAULT="+defaultDir)
+}
+
+// portableChatsDir returns the CHATS folder beside a portable TOOLS folder that
+// holds the executable, or "" when cct is not laid out that way. Any other
+// install location keeps the normal default so dialogs never open in an
+// unrelated CHATS folder.
+func portableChatsDir(executable string) string {
+	dir := filepath.Dir(executable)
+	if !strings.EqualFold(filepath.Base(dir), "TOOLS") {
+		return ""
+	}
+	candidate := filepath.Join(filepath.Dir(dir), "CHATS")
+	if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+		return candidate
+	}
+	return ""
+}
+
+// encodePowerShellCommand encodes script for -EncodedCommand, which takes
+// base64 of UTF-16LE text. A leading byte-order mark is dropped.
+func encodePowerShellCommand(script string) string {
+	units := utf16.Encode([]rune(strings.TrimPrefix(script, "\ufeff")))
 	data := make([]byte, len(units)*2)
 	for i, unit := range units {
 		binary.LittleEndian.PutUint16(data[i*2:], unit)
 	}
-	cmd := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-STA", "-NonInteractive", "-EncodedCommand", base64.StdEncoding.EncodeToString(data))
-	defaultDir := ""
-	if executable, err := os.Executable(); err == nil {
-		candidate := filepath.Join(filepath.Dir(filepath.Dir(executable)), "CHATS")
-		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-			defaultDir = candidate
-		}
-	}
-	cmd.Env = append(os.Environ(), "CCT_PICK_KIND="+kind, "CCT_PICK_INITIAL="+initial, "CCT_PICK_DEFAULT="+defaultDir)
+	return base64.StdEncoding.EncodeToString(data)
+}
+
+// runPowerShellPicker runs script with env added to the environment, so paths
+// travel as data rather than as script text. The script prints the chosen path
+// and exits 2 when the user cancels; any other failure is an error.
+func runPowerShellPicker(ctx context.Context, script string, env ...string) (string, bool, error) {
+	cmd := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-STA", "-NonInteractive", "-EncodedCommand", encodePowerShellCommand(script))
+	cmd.Env = append(os.Environ(), env...)
 	output, err := cmd.Output()
 	if err != nil {
 		var exit *exec.ExitError
