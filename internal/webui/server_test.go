@@ -140,6 +140,74 @@ func TestServesIndex(t *testing.T) {
 	}
 }
 
+// Every language gets the same page; only <html lang> differs, and it selects
+// the dictionary that i18n.js applies.
+func TestServesRussianIndex(t *testing.T) {
+	_, ts := testServer(t)
+	res, ru := do(t, ts, "GET", "/?lang=ru&token="+testToken, "", "")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("Russian index: got %d", res.StatusCode)
+	}
+	if !strings.Contains(string(ru), `<html lang="ru">`) || !strings.Contains(string(ru), `src="i18n.ru.js"`) {
+		t.Errorf("Russian index not served")
+	}
+	res, en := do(t, ts, "GET", "/?lang=en&token="+testToken, "", "")
+	if res.StatusCode != http.StatusOK || !strings.Contains(string(en), `<html lang="en">`) {
+		t.Errorf("English index not retained")
+	}
+	if strings.Replace(string(ru), `<html lang="ru">`, `<html lang="en">`, 1) != string(en) {
+		t.Errorf("Russian and English pages differ beyond the lang attribute")
+	}
+	for _, asset := range []string{"/i18n.js", "/i18n.ru.js"} {
+		if res, _ := do(t, ts, "GET", asset, "", ""); res.StatusCode != http.StatusOK {
+			t.Errorf("%s: got %d", asset, res.StatusCode)
+		}
+	}
+}
+
+func TestPageLanguage(t *testing.T) {
+	cases := []struct{ query, accept, want string }{
+		{"", "ru-RU,ru;q=0.9,en;q=0.8", "ru"},
+		{"", "ru;q=0.9", "ru"},
+		{"", "de-DE,ru;q=0.8", "en"},
+		{"", "", "en"},
+		{"en", "ru-RU", "en"},
+		{"ru", "en-US", "ru"},
+		{"RU", "", "ru"},
+		{"de", "ru-RU", "en"},
+	}
+	for _, tc := range cases {
+		r := httptest.NewRequest("GET", "/?lang="+tc.query, nil)
+		if tc.accept != "" {
+			r.Header.Set("Accept-Language", tc.accept)
+		}
+		if got := pageLanguage(r); got != tc.want {
+			t.Errorf("lang=%q Accept-Language=%q: got %s, want %s", tc.query, tc.accept, got, tc.want)
+		}
+	}
+}
+
+func TestBrowserLanguage(t *testing.T) {
+	_, ts := testServer(t)
+	req, err := http.NewRequest("GET", ts.URL+"/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Accept-Language", "ru-RU,ru;q=0.9,en;q=0.8")
+	res, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "<html lang=\"ru\">") {
+		t.Errorf("Russian browser preference ignored")
+	}
+}
+
 func TestSessionsEndpoint(t *testing.T) {
 	s, ts := testServer(t)
 	writeSession(t, s.home, "abcd1234-1111-2222-3333-444455556666", "/work/p")

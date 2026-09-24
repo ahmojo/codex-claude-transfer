@@ -11,6 +11,7 @@
 package webui
 
 import (
+	"bytes"
 	"crypto/rand"
 	"embed"
 	"encoding/hex"
@@ -109,6 +110,12 @@ func (s *Server) routes() http.Handler {
 	sub, _ := fs.Sub(staticFiles, "static")
 	fileServer := http.FileServer(http.FS(sub))
 	index, _ := fs.ReadFile(staticFiles, "static/index.html")
+	// Every language gets the same page; its lang attribute selects the
+	// dictionary that i18n.js applies.
+	pages := map[string][]byte{}
+	for _, lang := range uiLanguages {
+		pages[lang] = bytes.Replace(index, []byte(`<html lang="en">`), []byte(`<html lang="`+lang+`">`), 1)
+	}
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if !localHost(r) {
 			http.Error(w, "forbidden", http.StatusForbidden)
@@ -118,7 +125,7 @@ func (s *Server) routes() http.Handler {
 		// causing a redirect loop). Other paths go to the embedded file server.
 		if r.URL.Path == "/" {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.Write(index)
+			w.Write(pages[pageLanguage(r)])
 			return
 		}
 		fileServer.ServeHTTP(w, r)
@@ -137,6 +144,27 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/api/inspect", s.guard(s.handleInspect))
 	mux.HandleFunc("/api/import", s.guard(s.handleImport))
 	return mux
+}
+
+// uiLanguages are the languages the desktop UI has a dictionary for. English
+// is the source text and the default.
+var uiLanguages = []string{"en", "ru"}
+
+// pageLanguage picks the UI language: ?lang= when given, otherwise the
+// browser's first preference. A language without a dictionary gets English.
+func pageLanguage(r *http.Request) string {
+	lang := r.URL.Query().Get("lang")
+	if lang == "" {
+		lang = strings.Split(r.Header.Get("Accept-Language"), ",")[0]
+	}
+	lang = strings.SplitN(strings.SplitN(lang, ";", 2)[0], "-", 2)[0]
+	lang = strings.ToLower(strings.TrimSpace(lang))
+	for _, supported := range uiLanguages {
+		if lang == supported {
+			return lang
+		}
+	}
+	return "en"
 }
 
 // guard enforces the loopback Host check and the per-launch token on /api calls.

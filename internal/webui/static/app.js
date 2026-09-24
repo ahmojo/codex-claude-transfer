@@ -1,8 +1,17 @@
 "use strict";
 
+// User-facing text goes through t() (see i18n.js); server messages through
+// I18N.msg. Both return plain text, so it is still escaped before use as HTML.
+const t = I18N.t;
+
 // The token only arrives via the launch URL's query string; we forward it on
 // every API call so other local processes / web pages cannot drive the server.
 const TOKEN = new URLSearchParams(location.search).get("token") || "";
+
+// The server picks the page language; the header link reloads in the other one.
+I18N.translatePage(document.body);
+const langLink = document.getElementById("lang-link");
+if (langLink) langLink.href = "/?lang=" + (I18N.lang === "ru" ? "en" : "ru") + "&token=" + encodeURIComponent(TOKEN);
 
 async function api(path, body) {
   const opts = {
@@ -17,7 +26,7 @@ async function api(path, body) {
   let data = {};
   try { data = await res.json(); } catch (e) { /* non-JSON */ }
   if (!res.ok) {
-    const err = new Error(data.error || ("request failed (" + res.status + ")"));
+    const err = new Error(data.error ? I18N.msg(data.error) : t("request failed ({status})", { status: res.status }));
     err.data = data; // structured fields (e.g. the secret-gate flags) for callers
     throw err;
   }
@@ -40,7 +49,7 @@ function esc(s) {
   return String(s == null ? "" : s).replace(/[&<>"]/g, c =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }
-function setBusy(node, msg) { node.innerHTML = '<div class="spinner">' + esc(msg || "Working…") + "</div>"; }
+function setBusy(node, msg) { node.innerHTML = '<div class="spinner">' + esc(msg || t("Working…")) + "</div>"; }
 // Approximate human-readable byte size for one-line summaries.
 function humanBytes(n) {
   n = Number(n) || 0;
@@ -99,18 +108,21 @@ document.querySelectorAll(".nav").forEach(btn => {
 });
 
 // ---- doctor ----
+function statusLabel(status) {
+  return t(({ ok: "OK", warn: "WARN", info: "INFO" })[status] || status.toUpperCase());
+}
 async function runDoctor() {
   const out = el("doctor-out");
-  setBusy(out, "Checking…");
+  setBusy(out, t("Checking…"));
   try {
     const d = await api(withTool("/api/doctor"));
     let h = '<div class="card">';
     d.checks.forEach(c => {
-      h += '<div class="row"><span class="pill ' + esc(c.status) + '">' + esc(c.status.toUpperCase()) +
-        '</span><span class="grow">' + esc(c.message) + "</span></div>";
+      h += '<div class="row"><span class="pill ' + esc(c.status) + '">' + esc(statusLabel(c.status)) +
+        '</span><span class="grow">' + esc(I18N.msg(c.message)) + "</span></div>";
     });
     h += "</div>";
-    h += '<div class="card"><div class="row"><strong>' + esc(toolLabel()) + ' home</strong><span class="grow mono">' +
+    h += '<div class="card"><div class="row"><strong>' + esc(t("{tool} home", { tool: toolLabel() })) + '</strong><span class="grow mono">' +
       esc(d.codex_home) + "</span></div></div>";
     out.innerHTML = h;
   } catch (e) { setError(out, e); }
@@ -121,11 +133,11 @@ el("doctor-refresh").addEventListener("click", runDoctor);
 let cachedProjects = [];
 async function runSessions() {
   const out = el("sessions-out");
-  setBusy(out, "Scanning…");
+  setBusy(out, t("Scanning…"));
   try {
     const d = await api(withTool("/api/sessions"));
     cachedProjects = d.projects || [];
-    if (!d.count) { out.innerHTML = '<div class="card muted">No ' + esc(toolLabel()) + ' sessions found.</div>'; return; }
+    if (!d.count) { out.innerHTML = '<div class="card muted">' + esc(t("No {tool} sessions found.", { tool: toolLabel() })) + "</div>"; return; }
 
     // Group by cwd, sort newest first within each group, groups sorted by newest.
     const groups = new Map();
@@ -141,15 +153,16 @@ async function runSessions() {
     // Sort groups by newest session descending.
     const sorted = [...groups.values()].sort((a, b) => b.newest.localeCompare(a.newest));
 
-    let h = '<p class="muted">' + d.count + " session(s)</p>";
+    let h = '<p class="muted">' + esc(t("{n} session(s)", { n: d.count })) + "</p>";
     sorted.forEach(g => {
-      const label = g.cwd || "(no project)";
+      const label = g.cwd || t("(no project)");
+      const n = g.sessions.length;
       h += '<div class="card"><div class="row"><strong class="grow mono">' + esc(label) +
-        '</strong><span class="muted">' + g.sessions.length + " session" + (g.sessions.length === 1 ? "" : "s") + "</span></div>";
+        '</strong><span class="muted">' + esc(t(n === 1 ? "{n} session" : "{n} sessions", { n })) + "</span></div>";
       g.sessions.forEach(s => {
-        h += '<div class="row"><span class="grow">' + esc(s.preview || "(no preview)") + "</span>" +
+        h += '<div class="row"><span class="grow">' + esc(s.preview || t("(no preview)")) + "</span>" +
           (s.compressed ? '<span class="pill info">zst</span>' : "") +
-          (s.archived ? '<span class="pill info">archived</span>' : "") +
+          (s.archived ? '<span class="pill info">' + esc(t("archived")) + "</span>" : "") +
           '<span class="muted">' + esc(s.updated_at) + "</span></div>";
       });
       h += "</div>";
@@ -164,13 +177,13 @@ function refreshExportProjects() {
   const sel = el("export-project");
   sel.innerHTML = "";
   if (!cachedProjects.length) {
-    sel.innerHTML = '<option value="">(scan Sessions first to list folders)</option>';
+    sel.innerHTML = '<option value="">' + esc(t("(scan Sessions first to list folders)")) + "</option>";
     return;
   }
   cachedProjects.forEach(p => {
     const o = document.createElement("option");
     o.value = p.path;
-    o.textContent = p.path + "  (" + p.count + " session" + (p.count === 1 ? "" : "s") + ")";
+    o.textContent = p.path + "  (" + t(p.count === 1 ? "{n} session" : "{n} sessions", { n: p.count }) + ")";
     sel.appendChild(o);
   });
 }
@@ -209,28 +222,29 @@ function exportBody(allowSecrets, overwrite) {
 
 async function runExport(allowSecrets, overwrite) {
   const out = el("export-out");
-  setBusy(out, "Exporting…");
+  setBusy(out, t("Exporting…"));
   try {
     const d = await api("/api/export", exportBody(allowSecrets, overwrite));
-    let h = '<div class="card"><div class="success">Exported ' + d.included + " session(s)." +
-      (d.encrypted ? " Encrypted." : "") + "</div>" +
-      '<div class="row"><strong>Bundle</strong><span class="grow mono">' + esc(d.bundle) + "</span></div>";
+    let h = '<div class="card"><div class="success">' + esc(t("Exported {n} session(s).", { n: d.included }) +
+      (d.encrypted ? " " + t("Encrypted.") : "")) + "</div>" +
+      '<div class="row"><strong>' + esc(t("Bundle")) + '</strong><span class="grow mono">' + esc(d.bundle) + "</span></div>";
     if (d.secrets_redacted) {
-      h += '<div class="row">Secrets redacted<span class="grow"></span><strong>' + d.secrets_redacted + "</strong></div>";
+      h += '<div class="row">' + esc(t("Secrets redacted")) + '<span class="grow"></span><strong>' + d.secrets_redacted + "</strong></div>";
     }
     if (d.images_stripped) {
-      h += '<div class="row">Images stripped<span class="grow"></span><strong>' + d.images_stripped +
-        " (saved ~" + humanBytes(d.bytes_saved) + ")</strong></div>";
-      h += '<div class="row warn">A stripped bundle isn\'t merge-friendly — import it fresh, ' +
-        "not with incremental sync (it reads as diverged from an unstripped copy).</div>";
+      h += '<div class="row">' + esc(t("Images stripped")) + '<span class="grow"></span><strong>' + d.images_stripped +
+        " " + esc(t("(saved ~{size})", { size: humanBytes(d.bytes_saved) })) + "</strong></div>";
+      h += '<div class="row warn">' +
+        esc(t("A stripped bundle isn't merge-friendly — import it fresh, not with incremental sync (it reads as diverged from an unstripped copy).")) +
+        "</div>";
     }
     if (d.pushed_remote) {
-      h += '<div class="row success">Pushed branch ' + esc(d.pushed_branch) + " to your git remote " +
-        esc(d.pushed_remote) + " (code only — no sessions).</div>";
+      h += '<div class="row success">' + esc(t("Pushed branch {branch} to your git remote {remote} (code only — no sessions).",
+        { branch: d.pushed_branch, remote: d.pushed_remote })) + "</div>";
     }
     h += "</div>";
     if (d.warnings && d.warnings.length) {
-      h += '<div class="card">' + d.warnings.map(w => '<div class="row warn">' + esc(w) + "</div>").join("") + "</div>";
+      h += '<div class="card">' + d.warnings.map(w => '<div class="row warn">' + esc(I18N.msg(w)) + "</div>").join("") + "</div>";
     }
     out.innerHTML = h;
   } catch (e) {
@@ -238,10 +252,10 @@ async function runExport(allowSecrets, overwrite) {
     const data = e.data || {};
     if (data.secrets_blocked) {
       out.innerHTML = '<div class="card"><div class="error">' + esc(e.message) + "</div>" +
-        '<div class="row warn">Found ' + (data.secret_count || 0) + " likely secret(s) in " +
-        (data.sessions_with_secrets || 0) + " session(s).</div>" +
-        '<div class="row"><button class="primary" id="export-redact-go">Replace secrets &amp; export</button>' +
-        '<button class="ghost danger" id="export-anyway">Export anyway</button></div></div>';
+        '<div class="row warn">' + esc(t("Found {secrets} likely secret(s) in {sessions} session(s).",
+          { secrets: data.secret_count || 0, sessions: data.sessions_with_secrets || 0 })) + "</div>" +
+        '<div class="row"><button class="primary" id="export-redact-go">' + esc(t("Replace secrets & export")) + "</button>" +
+        '<button class="ghost danger" id="export-anyway">' + esc(t("Export anyway")) + "</button></div></div>";
       el("export-redact-go").addEventListener("click", () => { el("export-redact").checked = true; runExport(false, overwrite); });
       el("export-anyway").addEventListener("click", () => runExport(true, overwrite));
       return;
@@ -249,8 +263,8 @@ async function runExport(allowSecrets, overwrite) {
     // Encryption writes <output>.age; replacing an existing one needs a yes.
     if (data.target_exists) {
       out.innerHTML = '<div class="card"><div class="error">' + esc(e.message) + "</div>" +
-        '<div class="row warn">Encrypting would replace this encrypted bundle. Choose another output file, or replace it.</div>' +
-        '<div class="row"><button class="ghost danger" id="export-overwrite">Replace it</button></div></div>';
+        '<div class="row warn">' + esc(t("Encrypting would replace this encrypted bundle. Choose another output file, or replace it.")) + "</div>" +
+        '<div class="row"><button class="ghost danger" id="export-overwrite">' + esc(t("Replace it")) + "</button></div></div>";
       el("export-overwrite").addEventListener("click", () => runExport(allowSecrets, true));
       return;
     }
@@ -262,26 +276,26 @@ el("export-run").addEventListener("click", () => runExport(false));
 // ---- inspect ----
 function projectsCard(projects) {
   if (!projects || !projects.length) return "";
-  let h = '<div class="card"><strong>Project folders (recorded cwd)</strong>';
+  let h = '<div class="card"><strong>' + esc(t("Project folders (recorded cwd)")) + "</strong>";
   projects.forEach(p => {
     h += '<div class="row"><span class="pill ' + (p.exists_local ? "ok" : "missing") + '">' +
-      (p.exists_local ? "here" : "missing") + '</span><span class="grow mono">' + esc(p.path) +
+      esc(p.exists_local ? t("here") : t("missing")) + '</span><span class="grow mono">' + esc(p.path) +
       "</span><span class='muted'>" + p.count + "</span></div>";
   });
   return h + "</div>";
 }
 el("inspect-run").addEventListener("click", async () => {
   const out = el("inspect-out");
-  setBusy(out, "Reading…");
+  setBusy(out, t("Reading…"));
   try {
     const d = await api("/api/inspect", { path: cleanPath(el("inspect-path").value), identity: cleanPath(el("inspect-identity").value) });
-    let h = '<div class="card"><div class="row"><strong>Sessions</strong><span class="grow">' + d.sessions + "</span></div>" +
-      '<div class="row"><strong>Format</strong><span class="grow mono">' + esc(d.format) + "</span></div>" +
-      (d.created ? '<div class="row"><strong>Created</strong><span class="grow">' + esc(d.created) +
-        (d.device ? " by " + esc(d.device) : "") + "</span></div>" : "") + "</div>";
+    let h = '<div class="card"><div class="row"><strong>' + esc(t("Sessions")) + '</strong><span class="grow">' + d.sessions + "</span></div>" +
+      '<div class="row"><strong>' + esc(t("Format")) + '</strong><span class="grow mono">' + esc(d.format) + "</span></div>" +
+      (d.created ? '<div class="row"><strong>' + esc(t("Created")) + '</strong><span class="grow">' + esc(d.created) +
+        (d.device ? " " + esc(t("by {device}", { device: d.device })) : "") + "</span></div>" : "") + "</div>";
     h += projectsCard(d.projects);
     if (d.git && d.git.remote_url) {
-      h += '<div class="card"><div class="row"><strong>git remote</strong><span class="grow mono">' +
+      h += '<div class="card"><div class="row"><strong>' + esc(t("git remote")) + '</strong><span class="grow mono">' +
         esc(d.git.remote_url) + "</span></div></div>";
     }
     out.innerHTML = h;
@@ -328,26 +342,26 @@ let lastPreview = null;
 el("import-preview").addEventListener("click", async () => {
   const out = el("import-preview-out");
   el("import-options").classList.add("hidden");
-  setBusy(out, "Reading bundle…");
+  setBusy(out, t("Reading bundle…"));
   try {
     // Preview never clones or writes; force dry-run and drop the clone target.
     const body = importBody(true);
     body.clone_dir = "";
     const d = await api("/api/import", body);
     lastPreview = d;
-    let h = '<div class="card"><strong>Preview</strong>';
+    let h = '<div class="card"><strong>' + esc(t("Preview")) + "</strong>";
     if (d.translated) {
-      h += row("Cross-agent handoff", d.source_tool + " → " + d.target_tool) +
-        row("Sessions to write", d.written) +
-        row("Already translated", d.skipped_identical) +
-        row("Skipped", d.skipped || 0) + "</div>";
+      h += row(t("Cross-agent handoff"), d.source_tool + " → " + d.target_tool) +
+        row(t("Sessions to write"), d.written) +
+        row(t("Already translated"), d.skipped_identical) +
+        row(t("Skipped"), d.skipped || 0) + "</div>";
     } else {
-      h += row("New sessions to add", d.imported) +
-        row("Already here", d.skipped_identical) +
-        row("Differ from a local copy", d.conflicts) + "</div>";
+      h += row(t("New sessions to add"), d.imported) +
+        row(t("Already here"), d.skipped_identical) +
+        row(t("Differ from a local copy"), d.conflicts) + "</div>";
     }
     if (d.warnings && d.warnings.length) {
-      h += '<div class="card">' + d.warnings.slice(0, 12).map(w => '<div class="row muted">' + esc(w) + "</div>").join("") + "</div>";
+      h += '<div class="card">' + d.warnings.slice(0, 12).map(w => '<div class="row muted">' + esc(I18N.msg(w)) + "</div>").join("") + "</div>";
     }
     out.innerHTML = h;
     el("import-options").classList.remove("hidden");
@@ -371,7 +385,7 @@ function configureMapHere(d) {
     box.checked = false; setMapsDisabled(false);
     return;
   }
-  el("import-map-here-label").textContent = "Put these sessions under the current folder (" + d.here_dir + ")";
+  el("import-map-here-label").textContent = t("Put these sessions under the current folder ({dir})", { dir: d.here_dir });
   row.style.display = "flex"; hint.style.display = "block";
   setMapsDisabled(box.checked);
 }
@@ -396,61 +410,64 @@ CCTReconcileState.bindTranslationChange(el("import-translate"), () => lastPrevie
 el("import-add-map").addEventListener("click", () => {
   const r = document.createElement("div");
   r.className = "maprow";
-  r.innerHTML = '<input type="text" placeholder="old cwd (from the bundle)" /><input type="text" placeholder="new local folder" /><button type="button" class="path-pick" hidden data-pick-map="true" data-pick-kind="folder">Browse…</button>';
+  r.innerHTML = '<input type="text" placeholder="' + esc(t("old cwd (from the bundle)")) + '" />' +
+    '<input type="text" placeholder="' + esc(t("new local folder")) + '" />' +
+    '<button type="button" class="path-pick" hidden data-pick-map="true" data-pick-kind="folder">' + esc(t("Browse…")) + "</button>";
   r.querySelector(".path-pick").hidden = !pathPickerAvailable;
   el("import-maps").appendChild(r);
 });
 
 el("import-run").addEventListener("click", async () => {
   const out = el("import-out");
-  setBusy(out, "Importing…");
+  setBusy(out, t("Importing…"));
   try {
     const d = await api("/api/import", importBody(false));
     let summary;
     if (d.translated) {
-      summary = "Translated " + d.source_tool + " → " + d.target_tool + ": wrote " + d.written + " session(s)";
+      summary = t("Translated {source} → {target}: wrote {n} session(s)", { source: d.source_tool, target: d.target_tool, n: d.written });
     } else {
-      const parts = [d.imported + " new"];
-      if (d.updated) parts.push(d.updated + " updated (+" + d.lines_added + " lines)");
-      if (d.already_ahead) parts.push(d.already_ahead + " already up to date");
-      if (d.remapped) parts.push(d.remapped + " remapped");
-      if (d.replaced) parts.push(d.replaced + " replaced");
-      if (d.imported_copies) parts.push(d.imported_copies + " as copies");
-      summary = "Imported " + parts.join(", ");
+      const parts = [t("{n} new", { n: d.imported })];
+      if (d.updated) parts.push(t("{n} updated (+{lines} lines)", { n: d.updated, lines: d.lines_added }));
+      if (d.already_ahead) parts.push(t("{n} already up to date", { n: d.already_ahead }));
+      if (d.remapped) parts.push(t("{n} remapped", { n: d.remapped }));
+      if (d.replaced) parts.push(t("{n} replaced", { n: d.replaced }));
+      if (d.imported_copies) parts.push(t("{n} as copies", { n: d.imported_copies }));
+      summary = t("Imported {parts}", { parts: parts.join(", ") });
     }
     let h = '<div class="card"><div class="success">' + esc(summary) + ".</div>";
-    if (d.cloned) h += '<div class="row success">Cloned the project code into ' + esc(d.cloned) + " (code only).</div>";
-    if (d.clone_error) h += '<div class="row warn">Clone: ' + esc(d.clone_error) + "</div>";
-    if (d.cwd_mismatch) h += '<div class="row warn">' + d.cwd_mismatch + " session(s) had a cwd different from the project you named.</div>";
+    if (d.cloned) h += '<div class="row success">' + esc(t("Cloned the project code into {dir} (code only).", { dir: d.cloned })) + "</div>";
+    if (d.clone_error) h += '<div class="row warn">' + esc(t("Clone: {error}", { error: I18N.msg(d.clone_error) })) + "</div>";
+    if (d.cwd_mismatch) h += '<div class="row warn">' + esc(t("{n} session(s) had a cwd different from the project you named.", { n: d.cwd_mismatch })) + "</div>";
     if (d.reconcile) {
       if (d.reconcile.error) {
-        h += '<div class="row warn">The rollout import is complete, but Codex discovery could not be verified: ' + esc(d.reconcile.error) + "</div>";
-        (d.reconcile.warnings || []).forEach(w => { h += '<div class="row warn">' + esc(w) + "</div>"; });
+        h += '<div class="row warn">' + esc(t("The rollout import is complete, but Codex discovery could not be verified: {error}",
+          { error: I18N.msg(d.reconcile.error) })) + "</div>";
+        (d.reconcile.warnings || []).forEach(w => { h += '<div class="row warn">' + esc(I18N.msg(w)) + "</div>"; });
         const fallbackCommands = d.reconcile.fallback_commands || [];
-        h += '<div class="preview-tip">Restart the Codex App.</div>';
+        h += '<div class="preview-tip">' + esc(t("Restart the Codex App.")) + "</div>";
         if (fallbackCommands.length) {
-          h += '<div class="preview-tip">To force Codex to read a specific imported thread now, run:</div>';
+          h += '<div class="preview-tip">' + esc(t("To force Codex to read a specific imported thread now, run:")) + "</div>";
           fallbackCommands.forEach(cmd => {
             h += '<div class="row mono cmd">' + esc(cmd) + "</div>";
           });
         }
       } else if (d.reconcile.requested === 0) {
-        h += '<div class="row success">No changed Codex threads required discovery reconciliation.</div>';
+        h += '<div class="row success">' + esc(t("No changed Codex threads required discovery reconciliation.")) + "</div>";
       } else {
-        let detail = "Codex discovery verified " + d.reconcile.verified + "/" + d.reconcile.requested + " thread(s)";
-        if (d.reconcile.verification_method) detail += " via " + d.reconcile.verification_method;
-        if (d.reconcile.codex_version) detail += " (app-server " + d.reconcile.codex_version + ")";
+        let detail = t("Codex discovery verified {verified}/{requested} thread(s)", { verified: d.reconcile.verified, requested: d.reconcile.requested });
+        if (d.reconcile.verification_method) detail += t(" via {method}", { method: d.reconcile.verification_method });
+        if (d.reconcile.codex_version) detail += t(" (app-server {version})", { version: d.reconcile.codex_version });
         h += '<div class="row success">' + esc(detail) + ".</div>";
         if (d.reconcile.read_for_repair) {
-          h += '<div class="row success">Codex natively repaired discovery metadata for ' + d.reconcile.read_for_repair + " thread(s).</div>";
+          h += '<div class="row success">' + esc(t("Codex natively repaired discovery metadata for {n} thread(s).", { n: d.reconcile.read_for_repair })) + "</div>";
         }
-        (d.reconcile.warnings || []).forEach(w => { h += '<div class="row warn">' + esc(w) + "</div>"; });
-        h += '<div class="preview-tip">Verified through Codex itself; cct did not write SQLite or session_index.jsonl.</div>';
+        (d.reconcile.warnings || []).forEach(w => { h += '<div class="row warn">' + esc(I18N.msg(w)) + "</div>"; });
+        h += '<div class="preview-tip">' + esc(t("Verified through Codex itself; cct did not write SQLite or session_index.jsonl.")) + "</div>";
       }
     } else if (d.translated) {
-      h += '<div class="preview-tip">Relaunch the target agent so it picks up the imported sessions.</div>';
+      h += '<div class="preview-tip">' + esc(t("Relaunch the target agent so it picks up the imported sessions.")) + "</div>";
     } else {
-      h += '<div class="preview-tip">Restart Codex (or run Codex again) so it discovers the imported sessions.</div>';
+      h += '<div class="preview-tip">' + esc(t("Restart Codex (or run Codex again) so it discovers the imported sessions.")) + "</div>";
     }
     h += "</div>";
     out.innerHTML = h;
@@ -461,34 +478,34 @@ el("import-run").addEventListener("click", async () => {
 async function runSearch() {
   const out = el("search-out");
   const q = el("search-query").value.trim();
-  if (!q) { out.innerHTML = '<div class="card muted">Type something to search for.</div>'; return; }
-  setBusy(out, "Searching…");
+  if (!q) { out.innerHTML = '<div class="card muted">' + esc(t("Type something to search for.")) + "</div>"; return; }
+  setBusy(out, t("Searching…"));
   try {
     const d = await api(withTool("/api/search"), {
       query: q, regex: el("search-regex").checked, case_sensitive: el("search-case").checked,
     });
-    if (!d.count) { out.innerHTML = '<div class="card muted">No ' + esc(toolLabel()) + " sessions matched " + esc(q) + ".</div>"; return; }
-    out.innerHTML = '<p class="muted">' + d.count + " match(es)</p>" + d.matches.map(searchCard).join("");
+    if (!d.count) { out.innerHTML = '<div class="card muted">' + esc(t("No {tool} sessions matched {query}.", { tool: toolLabel(), query: q })) + "</div>"; return; }
+    out.innerHTML = '<p class="muted">' + esc(t("{n} match(es)", { n: d.count })) + "</p>" + d.matches.map(searchCard).join("");
     d.matches.forEach(wireSearchCard);
   } catch (e) { setError(out, e); }
 }
 
 function searchCard(m) {
   const id = esc(m.thread_id);
-  const tags = (m.tags || []).map(t => '<span class="pill info">' + esc(t) + "</span>").join("");
+  const tags = (m.tags || []).map(tag => '<span class="pill info">' + esc(tag) + "</span>").join("");
   return '<div class="card" data-id="' + id + '">' +
-    '<div class="row"><strong class="grow">' + esc(m.name || m.preview || "(no preview)") + "</strong>" +
-    '<span class="muted">' + esc(m.updated_at) + " · " + (m.hits || 0) + " hit(s)</span></div>" +
+    '<div class="row"><strong class="grow">' + esc(m.name || m.preview || t("(no preview)")) + "</strong>" +
+    '<span class="muted">' + esc(m.updated_at) + " · " + esc(t("{n} hit(s)", { n: m.hits || 0 })) + "</span></div>" +
     (m.cwd ? '<div class="row mono muted">' + esc(m.cwd) + "</div>" : "") +
     (m.snippet ? '<div class="row snippet">… ' + esc(m.snippet) + "</div>" : "") +
     '<div class="row"><span class="muted mono">' + id + "</span></div>" +
     '<div class="row tagrow">' + tags + "</div>" +
     '<div class="row actions">' +
-    '<button class="ghost act-resume">Resume…</button>' +
-    '<input class="act-tag" type="text" placeholder="add a tag" />' +
-    '<button class="ghost act-tag-add">Tag</button>' +
-    '<input class="act-name" type="text" placeholder="set a name" />' +
-    '<button class="ghost act-name-set">Name</button>' +
+    '<button class="ghost act-resume">' + esc(t("Resume…")) + "</button>" +
+    '<input class="act-tag" type="text" placeholder="' + esc(t("add a tag")) + '" />' +
+    '<button class="ghost act-tag-add">' + esc(t("Tag")) + "</button>" +
+    '<input class="act-name" type="text" placeholder="' + esc(t("set a name")) + '" />' +
+    '<button class="ghost act-name-set">' + esc(t("Name")) + "</button>" +
     '</div><div class="act-out"></div></div>';
 }
 
@@ -499,15 +516,15 @@ function wireSearchCard(m) {
   card.querySelector(".act-resume").addEventListener("click", async () => {
     try {
       const d = await api(withTool("/api/resume"), { session: m.thread_id });
-      actOut.innerHTML = '<div class="row">To continue this session, run:</div>' +
+      actOut.innerHTML = '<div class="row">' + esc(t("To continue this session, run:")) + "</div>" +
         '<div class="row mono cmd">' + esc(d.command) + "</div>";
     } catch (e) { setError(actOut, e); }
   });
   card.querySelector(".act-tag-add").addEventListener("click", async () => {
-    const inp = card.querySelector(".act-tag"); const t = inp.value.trim();
-    if (!t) return;
+    const inp = card.querySelector(".act-tag"); const tag = inp.value.trim();
+    if (!tag) return;
     try {
-      const d = await api("/api/tags", { session: m.thread_id, add_tags: [t] });
+      const d = await api("/api/tags", { session: m.thread_id, add_tags: [tag] });
       inp.value = ""; card.querySelector(".tagrow").innerHTML = (d.tags || []).map(x => '<span class="pill info">' + esc(x) + "</span>").join("");
     } catch (e) { setError(actOut, e); }
   });
@@ -515,7 +532,7 @@ function wireSearchCard(m) {
     const inp = card.querySelector(".act-name"); const n = inp.value.trim();
     try {
       await api("/api/tags", { session: m.thread_id, set_name: n });
-      actOut.innerHTML = '<div class="row success">Saved name.</div>';
+      actOut.innerHTML = '<div class="row success">' + esc(t("Saved name.")) + "</div>";
     } catch (e) { setError(actOut, e); }
   });
 }
@@ -527,33 +544,34 @@ el("search-query").addEventListener("keydown", e => { if (e.key === "Enter") run
 // ---- stats ----
 async function runStats() {
   const out = el("stats-out");
-  setBusy(out, "Computing…");
+  setBusy(out, t("Computing…"));
   try {
     const d = await api(withTool("/api/stats"));
-    if (!d.total) { out.innerHTML = '<div class="card muted">No ' + esc(toolLabel()) + " sessions found.</div>"; return; }
-    let h = '<div class="card"><div class="row"><strong class="grow">Sessions</strong><strong>' + d.total + "</strong></div>";
-    if (d.compressed) h += row("Compressed", d.compressed);
-    if (d.archived) h += row("Archived", d.archived);
-    h += row("On disk", humanBytes(d.total_bytes));
-    if (d.first_day) h += row("Activity", d.first_day + " → " + d.last_day);
+    if (!d.total) { out.innerHTML = '<div class="card muted">' + esc(t("No {tool} sessions found.", { tool: toolLabel() })) + "</div>"; return; }
+    let h = '<div class="card"><div class="row"><strong class="grow">' + esc(t("Sessions")) + "</strong><strong>" + d.total + "</strong></div>";
+    if (d.compressed) h += row(t("Compressed"), d.compressed);
+    if (d.archived) h += row(t("Archived"), d.archived);
+    h += row(t("On disk"), humanBytes(d.total_bytes));
+    if (d.first_day) h += row(t("Activity"), d.first_day + " → " + d.last_day);
     h += "</div>";
     if (d.projects && d.projects.length) {
-      h += '<div class="card"><strong>Busiest projects</strong>';
+      h += '<div class="card"><strong>' + esc(t("Busiest projects")) + "</strong>";
       d.projects.slice(0, 10).forEach(p => {
         h += '<div class="row"><span class="grow mono">' + esc(p.path) + '</span><strong>' + p.count + "</strong></div>";
       });
-      if (d.no_cwd) h += '<div class="row"><span class="grow muted">(no recorded project)</span><strong>' + d.no_cwd + "</strong></div>";
+      if (d.no_cwd) h += '<div class="row"><span class="grow muted">' + esc(t("(no recorded project)")) + "</span><strong>" + d.no_cwd + "</strong></div>";
       h += "</div>";
     }
     if (d.days && d.days.length) {
       const recent = d.days.slice(-14);
       const peak = Math.max.apply(null, recent.map(x => x.count));
-      h += '<div class="card"><strong>Recent activity</strong><div class="spark">';
+      h += '<div class="card"><strong>' + esc(t("Recent activity")) + '</strong><div class="spark">';
       recent.forEach(x => {
         const pct = peak ? Math.max(8, Math.round((x.count / peak) * 100)) : 8;
         h += '<span class="bar" style="height:' + pct + '%" title="' + esc(x.day) + ": " + x.count + '"></span>';
       });
-      h += "</div><div class='row muted'>" + esc(recent[0].day) + " … " + esc(recent[recent.length - 1].day) + " (peak " + peak + "/day)</div></div>";
+      h += "</div><div class='row muted'>" + esc(recent[0].day) + " … " + esc(recent[recent.length - 1].day) + " " +
+        esc(t("(peak {n}/day)", { n: peak })) + "</div></div>";
     }
     out.innerHTML = h;
   } catch (e) { setError(out, e); }
@@ -563,18 +581,19 @@ el("stats-refresh").addEventListener("click", runStats);
 // ---- scan (secrets) ----
 async function runScan() {
   const out = el("scan-out");
-  setBusy(out, "Scanning…");
+  setBusy(out, t("Scanning…"));
   try {
     const d = await api(withTool("/api/scan"));
-    if (!d.secret_count) { out.innerHTML = '<div class="card success">No likely secrets found in your ' + esc(toolLabel()) + " sessions.</div>"; return; }
-    let h = '<div class="card warn">Found ' + d.secret_count + " possible secret(s) across " + d.session_count + " session(s). Heuristic — review before trusting.</div>";
+    if (!d.secret_count) { out.innerHTML = '<div class="card success">' + esc(t("No likely secrets found in your {tool} sessions.", { tool: toolLabel() })) + "</div>"; return; }
+    let h = '<div class="card warn">' + esc(t("Found {secrets} possible secret(s) across {sessions} session(s). Heuristic — review before trusting.",
+      { secrets: d.secret_count, sessions: d.session_count })) + "</div>";
     d.sessions.forEach(s => {
-      h += '<div class="card"><div class="row"><strong class="grow">' + esc(s.preview || "(no preview)") + "</strong></div>" +
+      h += '<div class="card"><div class="row"><strong class="grow">' + esc(s.preview || t("(no preview)")) + "</strong></div>" +
         (s.cwd ? '<div class="row mono muted">' + esc(s.cwd) + "</div>" : "") +
         s.findings.map(f => '<div class="row"><span class="pill missing">' + esc(f.type) + '</span><span class="grow mono">' + esc(f.masked) + "</span></div>").join("") +
         "</div>";
     });
-    h += '<div class="card muted">To share without these, export with "Replace detected secrets with placeholders".</div>';
+    h += '<div class="card muted">' + esc(t("To share without these, export with \"Replace detected secrets with placeholders\".")) + "</div>";
     out.innerHTML = h;
   } catch (e) { setError(out, e); }
 }
