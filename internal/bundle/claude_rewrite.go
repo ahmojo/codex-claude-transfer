@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path"
 	"reflect"
+	"strings"
 
 	"github.com/ahmojo/codex-claude-transfer/internal/claudehome"
 )
@@ -146,8 +147,8 @@ func splitCWD(line []byte) (cwd string, rest map[string]interface{}, ok bool) {
 // transcript after its cwd is remapped to newCWD: the same uuid filename, but
 // under the folder encoding newCWD.
 func claudeDestRelForCWD(rel, newCWD string) string {
-	file := path.Base(rel)
-	return path.Join(claudehome.ProjectsSubdir, claudehome.EncodeCWD(newCWD), file)
+	parts := strings.SplitN(rel, "/", 3)
+	return path.Join(claudehome.ProjectsSubdir, claudehome.EncodeCWD(newCWD), parts[2])
 }
 
 // rewriteClaudeSessionID returns a copy of a Claude transcript with every

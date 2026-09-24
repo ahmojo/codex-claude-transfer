@@ -135,6 +135,7 @@ func (s *Server) routes() http.Handler {
 
 	// API: token-gated, loopback-only.
 	mux.HandleFunc("/api/doctor", s.guard(s.handleDoctor))
+	mux.HandleFunc("/api/pick-path", s.guard(s.handlePickPath))
 	mux.HandleFunc("/api/sessions", s.guard(s.handleSessions))
 	mux.HandleFunc("/api/stats", s.guard(s.handleStats))
 	mux.HandleFunc("/api/search", s.guard(s.handleSearch))

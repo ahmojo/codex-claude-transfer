@@ -234,6 +234,14 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 		return result, err
 	}
 
+	if kind == agent.Claude && opts.ImportAsCopy {
+		for _, ms := range manifest.Sessions {
+			_, _, _, child := safety.ClaudeSessionGroup(ms.BundlePath)
+			if child {
+				return result, fmt.Errorf("--import-as-copy does not yet support Claude conversations with subagent transcripts; import without this flag into a separate home")
+			}
+		}
+	}
 	// 2) Build the per-entry plan.
 	cwdByBundlePath := map[string]string{}
 	// Original modification time per session, so an imported file keeps its source
@@ -433,7 +441,7 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 			action = ActionReplace
 		} else if action == ActionConflict && opts.ImportAsCopy {
 			if kind == agent.Claude {
-				action, err = planImportCopyClaude(&zr.Reader, &item, rel, home.Root, &result)
+				action, err = planImportCopyClaude(&zr.Reader, &item, rel, destRel, home.Root, &result)
 			} else {
 				action, err = planImportCopy(&zr.Reader, &item, rel, home.Root, &result)
 			}
@@ -587,7 +595,7 @@ func isImportableEntryForImport(kind agent.Kind, rel string, includeArchived boo
 // leaving the diverged local transcript untouched. A hard error aborts the whole
 // import before any write; otherwise it returns ActionImportCopy on success or a
 // skipped ActionConflict when the transcript has no sessionId to reassign.
-func planImportCopyClaude(zr *zip.Reader, item *ImportItem, rel, root string, result *ImportResult) (Action, error) {
+func planImportCopyClaude(zr *zip.Reader, item *ImportItem, rel, destRel, root string, result *ImportResult) (Action, error) {
 	base := item.content // may already be cwd-mapped bytes
 	if base == nil {
 		b, err := readEntryBytes(zr, rel)
@@ -610,7 +618,7 @@ func planImportCopyClaude(zr *zip.Reader, item *ImportItem, rel, root string, re
 				fmt.Sprintf("%s: no sessionId to reassign; cannot import as a copy; skipped (conflict)", rel))
 			return ActionConflict, nil
 		}
-		newRel := claudeCopyDestRel(rel, newID)
+		newRel := claudeCopyDestRel(destRel, newID)
 		if !safety.IsClaudeSessionEntry(newRel) {
 			return "", fmt.Errorf("internal: copy destination %q is not a valid session path", newRel)
 		}

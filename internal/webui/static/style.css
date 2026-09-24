@@ -70,7 +70,13 @@ body {
 .hidden { display: none; }
 
 .field { display: block; margin: 14px 0; }
-.field > span { display: block; font-weight: 600; margin-bottom: 5px; font-size: 13px; }
+.field > span, .field > label { display: block; font-weight: 600; margin-bottom: 5px; font-size: 13px; }
+.path-input { display: flex; align-items: stretch; gap: 8px; }
+.path-input input { flex: 1; min-width: 0; }
+button.path-pick { flex: none; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--ink); font: inherit; cursor: pointer; }
+button.path-pick:hover { border-color: var(--accent); color: var(--accent); }
+button.path-pick[hidden] { display: none; }
+@media (max-width: 560px) { .path-input { flex-wrap: wrap; } .path-input input { flex-basis: 100%; } }
 input[type=text], select, textarea {
   width: 100%; padding: 9px 11px; border: 1px solid var(--border);
   border-radius: 8px; background: var(--panel); color: var(--ink); font: inherit;
@@ -109,7 +115,9 @@ code { background: var(--code); padding: 1px 5px; border-radius: 5px; font-size:
 .success { color: var(--ok); font-weight: 600; }
 .spinner { color: var(--muted); }
 .maprow { display: flex; gap: 8px; margin: 8px 0; }
-.maprow input { flex: 1; }
+.maprow input { flex: 1; min-width: 0; }
+.maprow .path-pick { white-space: nowrap; }
+@media (max-width: 560px) { .maprow { flex-wrap: wrap; } .maprow input { flex-basis: 100%; } }
 .preview-tip { font-size: 13px; color: var(--muted); margin-top: 6px; }
 .row.warn { color: var(--warn); }
 .row.success { color: var(--ok); }

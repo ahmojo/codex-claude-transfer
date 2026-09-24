@@ -54,6 +54,42 @@ function humanBytes(n) {
 }
 function setError(node, e) { node.innerHTML = '<div class="error">' + esc(e.message || e) + "</div>"; }
 
+// Native Windows file/folder selection. The input remains editable.
+let pathPickerAvailable = false;
+api("/api/pick-path").then(info => {
+  pathPickerAvailable = !!info.available;
+  document.querySelectorAll("button.path-pick").forEach(button => {
+    button.hidden = !pathPickerAvailable;
+  });
+}).catch(() => {
+  document.querySelectorAll("button.path-pick").forEach(button => { button.hidden = true; });
+});
+document.addEventListener("click", async event => {
+  const button = event.target.closest("button.path-pick");
+  if (!button) return;
+  const field = button.dataset.pickMap
+    ? button.parentElement.querySelector("input:last-of-type")
+    : el(button.dataset.pickTarget);
+  if (!field) return;
+  button.disabled = true;
+  try {
+    const result = await api("/api/pick-path", {
+      kind: button.dataset.pickKind,
+      initial: cleanPath(field.value),
+    });
+    if (result.path) {
+      field.value = result.path;
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+      field.dispatchEvent(new Event("change", { bubbles: true }));
+      field.focus();
+    }
+  } catch (e) {
+    window.alert(e.message || e);
+  } finally {
+    button.disabled = false;
+  }
+});
+
 // ---- navigation ----
 document.querySelectorAll(".nav").forEach(btn => {
   btn.addEventListener("click", () => {
@@ -153,7 +189,7 @@ function splitList(s) {
   return (s || "").split(/[\n,]+/).map(x => x.trim()).filter(Boolean);
 }
 
-function exportBody(allowSecrets) {
+function exportBody(allowSecrets, overwrite) {
   return {
     mode: el("export-mode").value,
     tool: currentTool(),
@@ -169,14 +205,15 @@ function exportBody(allowSecrets) {
     allow_secrets: !!allowSecrets,
     encrypt_to: splitList(el("export-encrypt-to").value),
     recipients_file: cleanPath(el("export-recipients-file").value),
+    overwrite: !!overwrite,
   };
 }
 
-async function runExport(allowSecrets) {
+async function runExport(allowSecrets, overwrite) {
   const out = el("export-out");
   setBusy(out, "Exporting…");
   try {
-    const d = await api("/api/export", exportBody(allowSecrets));
+    const d = await api("/api/export", exportBody(allowSecrets, overwrite));
     let h = '<div class="card"><div class="success">Exported ' + d.included + " session(s)." +
       (d.encrypted ? " Encrypted." : "") + "</div>" +
       '<div class="row"><strong>Bundle</strong><span class="grow mono">' + esc(d.bundle) + "</span></div>";
@@ -207,8 +244,16 @@ async function runExport(allowSecrets) {
         (data.sessions_with_secrets || 0) + " session(s).</div>" +
         '<div class="row"><button class="primary" id="export-redact-go">Replace secrets &amp; export</button>' +
         '<button class="ghost danger" id="export-anyway">Export anyway</button></div></div>';
-      el("export-redact-go").addEventListener("click", () => { el("export-redact").checked = true; runExport(false); });
-      el("export-anyway").addEventListener("click", () => runExport(true));
+      el("export-redact-go").addEventListener("click", () => { el("export-redact").checked = true; runExport(false, overwrite); });
+      el("export-anyway").addEventListener("click", () => runExport(true, overwrite));
+      return;
+    }
+    // Encryption writes <output>.age; replacing an existing one needs a yes.
+    if (data.target_exists) {
+      out.innerHTML = '<div class="card"><div class="error">' + esc(e.message) + "</div>" +
+        '<div class="row warn">Encrypting would replace this encrypted bundle. Choose another output file, or replace it.</div>' +
+        '<div class="row"><button class="ghost danger" id="export-overwrite">Replace it</button></div></div>';
+      el("export-overwrite").addEventListener("click", () => runExport(allowSecrets, true));
       return;
     }
     setError(out, e);
@@ -337,7 +382,7 @@ function configureMapHere(d) {
 // so ticking one greys out the other.
 function setMapsDisabled(disabled) {
   el("import-maps").style.opacity = disabled ? "0.4" : "";
-  el("import-maps").querySelectorAll("input").forEach(i => { i.disabled = disabled; });
+  el("import-maps").querySelectorAll("input, button").forEach(i => { i.disabled = disabled; });
   el("import-add-map").disabled = disabled;
 }
 el("import-map-here").addEventListener("change", e => setMapsDisabled(e.target.checked));
@@ -353,7 +398,8 @@ CCTReconcileState.bindTranslationChange(el("import-translate"), () => lastPrevie
 el("import-add-map").addEventListener("click", () => {
   const r = document.createElement("div");
   r.className = "maprow";
-  r.innerHTML = '<input type="text" placeholder="old cwd (from the bundle)" /><input type="text" placeholder="new local folder" />';
+  r.innerHTML = '<input type="text" placeholder="old cwd (from the bundle)" /><input type="text" placeholder="new local folder" /><button type="button" class="path-pick" hidden data-pick-map="true" data-pick-kind="folder">Browse…</button>';
+  r.querySelector(".path-pick").hidden = !pathPickerAvailable;
   el("import-maps").appendChild(r);
 });
 

@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"io"
 	"net"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/ahmojo/codex-claude-transfer/internal/agent"
@@ -20,9 +22,8 @@ import (
 //
 // Mechanism: it (1) advertises a discovery beacon and runs a persistent listener
 // that accepts code-less syncs from remembered peers, and (2) polls the sessions
-// directory; when something changes it discovers peers and connects to each
-// remembered one to sync. Both peers running the daemon therefore converge after
-// either side changes. Each sync reuses the exact same Serve/Connect path as a
+// directory; it discovers remembered peers on startup, after local changes,
+// and periodically to catch up after a missed connection. Each sync reuses the exact same Serve/Connect path as a
 // manual sync, inheriting every safety property (checksum-verified bundle, merge,
 // conflict handling, mtime preservation, cwd remap).
 
@@ -40,6 +41,7 @@ type DaemonOptions struct {
 const (
 	defaultDaemonInterval = 5 * time.Second
 	defaultDiscoverWindow = 1500 * time.Millisecond
+	defaultResyncInterval = 30 * time.Second
 )
 
 // Daemon runs the ambient sync loop until ctx is cancelled (or, with Once, for a
@@ -65,6 +67,8 @@ func Daemon(ctx context.Context, home codexhome.Home, opts Options, dopts Daemon
 	tool := string(agent.Normalize(opts.Tool))
 
 	roots := sessionRoots(home, opts)
+	// Listener and outbound sweep may report concurrently.
+	opts.Out = &daemonWriter{out: opts.Out}
 
 	if dopts.Once {
 		syncWithDiscoveredPeers(ctx, home, opts, dopts, myFP, tool)
@@ -88,20 +92,68 @@ func Daemon(ctx context.Context, home codexhome.Home, opts Options, dopts Daemon
 	fmt.Fprintf(opts.Out, "cct sync daemon running (tool %s, port %d). Watching for changes; syncing with remembered peers on your LAN.\n", tool, port)
 	fmt.Fprintln(opts.Out, "Press Ctrl-C to stop.")
 
-	last := snapshot(roots)
 	ticker := time.NewTicker(dopts.Interval)
 	defer ticker.Stop()
+	watchAndSync(ctx, roots, ticker.C, time.Now(), func() {
+		syncWithDiscoveredPeers(ctx, home, opts, dopts, myFP, tool)
+	})
+	return nil
+}
+
+// watchAndSync retries discovery even when no file changed: a remembered peer
+// can come online after an earlier attempt missed it. The bounded periodic
+// sweep also retries failed transfers without waiting for another local write.
+func watchAndSync(ctx context.Context, roots []string, ticks <-chan time.Time, started time.Time, sweep func()) {
+	if ctx.Err() != nil {
+		return
+	}
+	last := snapshot(roots)
+	lastSweep := started
+	sweep()
 	for {
 		select {
 		case <-ctx.Done():
-			return nil
-		case <-ticker.C:
+			return
+		case now, ok := <-ticks:
+			if !ok || ctx.Err() != nil {
+				return
+			}
 			cur := snapshot(roots)
-			if snapshotChanged(last, cur) {
+			if snapshotChanged(last, cur) || now.Sub(lastSweep) >= defaultResyncInterval {
 				last = cur
-				syncWithDiscoveredPeers(ctx, home, opts, dopts, myFP, tool)
+				lastSweep = now
+				sweep()
 			}
 		}
+	}
+}
+
+type daemonWriter struct {
+	mu  sync.Mutex
+	out io.Writer
+}
+
+func (w *daemonWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.out == nil {
+		return len(p), nil
+	}
+	return w.out.Write(p)
+}
+
+// Both directions must surface conflicts and errors; successful transport does
+// not mean the histories converged.
+func reportDaemonSync(out io.Writer, peer string, res Result, err error) {
+	if err != nil {
+		fmt.Fprintf(out, "sync with %s failed: %s\n", safe(peer), safe(err.Error()))
+	}
+	if res.Sent > 0 || res.Received.Imported > 0 || res.Received.Updated > 0 || res.Received.Conflicts > 0 {
+		fmt.Fprintf(out, "sync with %s: sent %d, received %d, updated %d, conflicts %d\n",
+			safe(peer), res.Sent, res.Received.Imported, res.Received.Updated, res.Received.Conflicts)
+	}
+	for _, warning := range res.Received.Warnings {
+		fmt.Fprintf(out, "sync with %s: %s\n", safe(peer), safe(warning))
 	}
 }
 
@@ -118,14 +170,7 @@ func syncWithDiscoveredPeers(ctx context.Context, home codexhome.Home, opts Opti
 		copts := opts
 		copts.Code = "" // remembered peer: code-less trusted path
 		res, err := Connect(home, copts, hostport)
-		if err != nil {
-			fmt.Fprintf(opts.Out, "sync with %s failed: %v\n", safe(b.Hostname), err)
-			continue
-		}
-		if res.Sent > 0 || res.Received.Imported > 0 || res.Received.Updated > 0 {
-			fmt.Fprintf(opts.Out, "synced with %s: sent %d, received %d, updated %d\n",
-				safe(b.Hostname), res.Sent, res.Received.Imported, res.Received.Updated)
-		}
+		reportDaemonSync(opts.Out, b.Hostname, res, err)
 	}
 }
 
@@ -147,8 +192,13 @@ func acceptLoop(ctx context.Context, ln net.Listener, home codexhome.Home, opts 
 		go func() {
 			conn := tls.Server(raw, tlsConfigServer(cert))
 			// code "" => only a remembered (Known) peer authenticates.
-			_, _ = handleConn(conn, home, opts, roleServer, "", cert)
+			res, err := handleConn(conn, home, opts, roleServer, "", cert)
 			conn.Close()
+			peer := res.PeerHost
+			if peer == "" {
+				peer = raw.RemoteAddr().String()
+			}
+			reportDaemonSync(opts.Out, peer, res, err)
 		}()
 	}
 }

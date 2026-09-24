@@ -133,7 +133,11 @@ func Export(home codexhome.Home, opts ExportOptions) (ExportResult, error) {
 	if len(opts.OnlyThreadIDs) > 0 {
 		selected = selectByThreadIDSet(candidates, opts.OnlyThreadIDs)
 	} else if opts.SessionID != "" {
-		selected, err = selectByThreadID(candidates, opts.SessionID)
+		if kind == agent.Claude {
+			selected, err = selectClaudeGroup(candidates, opts.SessionID)
+		} else {
+			selected, err = selectByThreadID(candidates, opts.SessionID)
+		}
 		if err != nil {
 			return result, err
 		}
@@ -151,6 +155,9 @@ func Export(home codexhome.Home, opts ExportOptions) (ExportResult, error) {
 			return result, err
 		}
 		result.MatchCompressedSkipped = matchCompressedSkipped
+	}
+	if kind == agent.Claude {
+		selected = expandClaudeGroups(scan.Sessions, selected)
 	}
 	if len(selected) == 0 {
 		if opts.Match != "" {
