@@ -2,7 +2,7 @@
 
 All notable changes to codex-claude-transfer are documented here.
 
-## [Unreleased]
+## [2.1.2] - 2026-09-24
 
 ### Fixed
 - **A remapped Claude conversation stays together.** Subagents that worked in a
