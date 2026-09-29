@@ -2,7 +2,7 @@
   "schema_version": 1,
   "repo": "ahmojo/codex-claude-transfer",
   "tracked_since": "2026-07-24",
-  "updated_at": "2026-09-29T09:45:02Z",
+  "updated_at": "2026-09-29T12:12:18Z",
   "clones_14d": 166,
   "unique_cloners_14d": 117,
   "tracked_total_clones": 1375,
@@ -564,11 +564,10 @@
       "tracked_total_clones": 1375
     },
     "2026-09-29": {
-      "clones_14d": 166,
-      "unique_cloners_14d": 117,
-      "tracked_total_clones": 1375,
       "release_downloads": 710
     }
   },
+  "clone_data_through": "2026-09-23",
+  "clone_metrics_stale": true,
   "release_downloads": 710
 }
