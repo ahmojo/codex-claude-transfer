@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -233,6 +234,11 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 	if err := verifyManifestBinding(&zr.Reader, manifest, checksums, kind); err != nil {
 		return result, err
 	}
+	if kind == agent.Claude && opts.WithMemory {
+		if err := verifyMemoryBinding(&zr.Reader, manifest.Memory, checksums); err != nil {
+			return result, err
+		}
+	}
 
 	if kind == agent.Claude && opts.ImportAsCopy {
 		for _, ms := range manifest.Sessions {
@@ -309,6 +315,7 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 		return result, err
 	}
 	result.Warnings = append(result.Warnings, filterWarns...)
+	plannedWrites := make(map[string]string)
 
 	for _, f := range zr.File {
 		if f.Name == ManifestName || f.Name == ChecksumsName {
@@ -479,6 +486,17 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 		}
 		item.Action = action
 		switch action {
+		case ActionImport, ActionImportCopy, ActionReplace, ActionUpdate:
+			// Portable bundles must not assign two entries to one target. This
+			// catches cwd-remap collisions and case aliases on common filesystems
+			// before either entry is written.
+			key := strings.ToLower(filepath.Clean(item.DestPath))
+			if previous, ok := plannedWrites[key]; ok {
+				return result, fmt.Errorf("bundle entries %q and %q target the same destination", previous, rel)
+			}
+			plannedWrites[key] = rel
+		}
+		switch action {
 		case ActionImport:
 			result.Imported++
 			if item.Mapped {
@@ -523,8 +541,29 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 	}
 	for i := range result.Items {
 		item := &result.Items[i]
+		if item.Memory {
+			continue // memory entries were written while they were planned
+		}
 		if item.Action != ActionImport && item.Action != ActionReplace && item.Action != ActionImportCopy && item.Action != ActionUpdate {
 			continue
+		}
+		// Planning may take time. Recheck the actual path just before any read,
+		// backup, or write so a newly introduced link cannot redirect this item.
+		destRel, err := filepath.Rel(home.Root, item.DestPath)
+		if err != nil {
+			return result, err
+		}
+		if _, err := safety.DestPath(home.Root, filepath.ToSlash(destRel)); err != nil {
+			return result, err
+		}
+		if item.Action == ActionImport || item.Action == ActionImportCopy {
+			// CopyAtomic replaces an existing file on Windows. A destination may
+			// have appeared since planning, including through a filesystem alias.
+			if _, err := os.Lstat(item.DestPath); err == nil {
+				return result, fmt.Errorf("destination %q appeared after import planning", item.DestPath)
+			} else if !os.IsNotExist(err) {
+				return result, err
+			}
 		}
 		// For a replace, back up the existing local file first so nothing is
 		// lost. The backup keeps a suffix that does not match Codex's rollout

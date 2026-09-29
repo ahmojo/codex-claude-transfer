@@ -5,7 +5,9 @@
 package safety
 
 import (
+	"errors"
 	"fmt"
+	"os"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -86,10 +88,30 @@ func IsClaudeMemoryEntry(rel string) bool {
 // DestPath joins a cleaned relative bundle path onto the Codex home root and
 // verifies, as defense in depth, that the result stays within root.
 func DestPath(root, rel string) (string, error) {
+	if _, err := CleanRelPath(rel); err != nil {
+		return "", err
+	}
 	dest := filepath.Join(root, filepath.FromSlash(rel))
 	rootClean := filepath.Clean(root)
 	if dest != rootClean && !strings.HasPrefix(dest, rootClean+string(filepath.Separator)) {
 		return "", fmt.Errorf("path %q escapes Codex home", rel)
+	}
+	// A lexical containment check does not catch a pre-existing directory link
+	// under the home. Reject links in every existing component, including the
+	// leaf, before callers inspect or write the destination.
+	current := rootClean
+	for _, segment := range strings.Split(rel, "/") {
+		current = filepath.Join(current, segment)
+		info, err := os.Lstat(current)
+		if errors.Is(err, os.ErrNotExist) {
+			break // descendants of a missing component cannot exist yet
+		}
+		if err != nil {
+			return "", err
+		}
+		if !info.IsDir() && !info.Mode().IsRegular() {
+			return "", fmt.Errorf("path %q passes through a link or special file", rel)
+		}
 	}
 	return dest, nil
 }

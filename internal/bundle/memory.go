@@ -15,6 +15,34 @@ import (
 	"github.com/ahmojo/codex-claude-transfer/internal/sessions"
 )
 
+// verifyMemoryBinding checks the manifest's memory paths before import can write
+// any entries. The relative filename must stay within the named project's
+// memory directory and must describe the exact ZIP entry being imported.
+func verifyMemoryBinding(zr *zip.Reader, memory []ManifestMemory, checksums Checksums) error {
+	entries := make(map[string]bool, len(zr.File))
+	for _, f := range zr.File {
+		entries[f.Name] = true
+	}
+	seen := make(map[string]bool, len(memory))
+	for _, mm := range memory {
+		if _, err := safety.CleanRelPath(mm.Rel); err != nil {
+			return fmt.Errorf("unsafe memory filename %q: %w", mm.Rel, err)
+		}
+		if !safety.IsClaudeMemoryEntry(mm.BundlePath) ||
+			memoryBundlePath(mm.ProjectCWD, mm.Rel) != mm.BundlePath {
+			return fmt.Errorf("memory %q is not bound to its project and filename", mm.BundlePath)
+		}
+		if seen[mm.BundlePath] {
+			return fmt.Errorf("manifest lists memory %q more than once", mm.BundlePath)
+		}
+		seen[mm.BundlePath] = true
+		if !entries[mm.BundlePath] || mm.SHA256 != checksums[mm.BundlePath] {
+			return fmt.Errorf("memory %q is missing or its checksum does not match the bundle", mm.BundlePath)
+		}
+	}
+	return nil
+}
+
 // Claude Code keeps a project's auto memory next to its transcripts, in
 // projects/<encoded-cwd>/memory/. It is machine-local by Claude's own design, so
 // cct only carries it when asked twice: `export --with-memory` puts it in the

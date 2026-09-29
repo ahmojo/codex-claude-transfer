@@ -123,8 +123,7 @@ func planCanonicalMerge(item *ImportItem, rel string, bundlePlain, localPlain []
 		// Canonical fast-forward: keep the local bytes, append the bundle's raw
 		// suffix (its lines beyond the shared canonical prefix) verbatim.
 		suffix := bundlePlain[bundleOffsets[len(localLines)]:]
-		merged := make([]byte, 0, len(localPlain)+1+len(suffix))
-		merged = append(merged, localPlain...)
+		merged := append([]byte(nil), localPlain...)
 		if len(merged) > 0 && merged[len(merged)-1] != '\n' {
 			merged = append(merged, '\n')
 		}
