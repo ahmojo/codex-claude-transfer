@@ -4,7 +4,9 @@ import (
 	"archive/zip"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -333,6 +335,131 @@ func TestImportRejectsZipSlip(t *testing.T) {
 	}
 	if files := listFilesRel(t, target.Root); len(files) != 0 {
 		t.Errorf("zip-slip wrote files: %v", files)
+	}
+}
+
+func buildMemoryBundle(t *testing.T, entry, rel string, data []byte) string {
+	t.Helper()
+	manifest := Manifest{
+		FormatVersion: FormatVersion,
+		Tool:          "claude",
+		Memory: []ManifestMemory{{
+			ProjectCWD: "/proj/x",
+			Rel:        rel,
+			BundlePath: entry,
+			SHA256:     sha256Hex(data),
+		}},
+	}
+	mb, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cb, err := json.Marshal(Checksums{entry: sha256Hex(data), ManifestName: sha256Hex(mb)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundlePath := filepath.Join(t.TempDir(), "memory.codexbundle")
+	writeBundleZip(t, bundlePath, []rawEntry{{entry, data}, {ManifestName, mb}, {ChecksumsName, cb}})
+	return bundlePath
+}
+
+func TestImportRejectsSymlinkedDestinationParent(t *testing.T) {
+	dir := t.TempDir()
+	bundlePath := buildBundle(t, dir, sampleRel, []byte("synthetic session\n"), "/proj/x", nil)
+	target := fakeHome(t)
+	outside := t.TempDir()
+	link := filepath.Join(target.Root, "sessions")
+	if err := os.Symlink(outside, link); err != nil {
+		if runtime.GOOS != "windows" {
+			t.Skipf("creating a directory symlink is unavailable: %v", err)
+		}
+		// A Windows junction exercises the same parent-path redirection without
+		// requiring the developer-mode privilege needed for os.Symlink.
+		if out, junctionErr := exec.Command("cmd", "/c", "mklink", "/J", link, outside).CombinedOutput(); junctionErr != nil {
+			t.Skipf("creating a directory junction is unavailable: %v: %s", junctionErr, out)
+		}
+	}
+	if _, err := Import(target, ImportOptions{BundlePath: bundlePath}); err == nil {
+		t.Fatal("import followed a symlinked sessions directory")
+	}
+	outsideDest := filepath.Join(outside, "2026", "06", "13", filepath.Base(sampleRel))
+	if _, err := os.Lstat(outsideDest); !os.IsNotExist(err) {
+		t.Fatalf("import wrote outside the target home: %v", err)
+	}
+}
+
+func TestImportRejectsCollidingDestinationPaths(t *testing.T) {
+	otherRel := strings.Replace(sampleRel, "aaaa1111", "AAAA1111", 1)
+	first := []byte("first synthetic session\n")
+	second := []byte("second synthetic session\n")
+	manifest := Manifest{FormatVersion: FormatVersion, Sessions: []ManifestSession{
+		{BundlePath: sampleRel, SHA256: sha256Hex(first)},
+		{BundlePath: otherRel, SHA256: sha256Hex(second)},
+	}}
+	mb, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cb, err := json.Marshal(Checksums{
+		sampleRel: sha256Hex(first), otherRel: sha256Hex(second), ManifestName: sha256Hex(mb),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundlePath := filepath.Join(t.TempDir(), "collision.codexbundle")
+	writeBundleZip(t, bundlePath, []rawEntry{{sampleRel, first}, {otherRel, second}, {ManifestName, mb}, {ChecksumsName, cb}})
+
+	target := fakeHome(t)
+	if _, err := Import(target, ImportOptions{BundlePath: bundlePath}); err == nil {
+		t.Fatal("import accepted two entries targeting one destination")
+	}
+	if files := listFilesRel(t, target.Root); len(files) != 0 {
+		t.Fatalf("import wrote files before detecting a destination collision: %v", files)
+	}
+}
+
+func TestImportRejectsMemoryManifestPathEscape(t *testing.T) {
+	entry := "projects/-proj-x/memory/MEMORY.md"
+	data := []byte("synthetic memory\n")
+	bundlePath := buildMemoryBundle(t, entry, "../rollout-evil.jsonl", data)
+
+	target := fakeHome(t)
+	if _, err := Import(target, ImportOptions{BundlePath: bundlePath, WithMemory: true}); err == nil {
+		t.Fatal("import accepted a memory path outside the memory directory")
+	}
+	escaped := filepath.Join(target.Root, "projects", "-proj-x", "rollout-evil.jsonl")
+	if _, err := os.Lstat(escaped); !os.IsNotExist(err) {
+		t.Fatalf("import wrote memory outside its directory: %v", err)
+	}
+}
+
+func TestImportRejectsMemoryManifestEntryMismatch(t *testing.T) {
+	entry := "projects/-proj-x/memory/MEMORY.md"
+	bundlePath := buildMemoryBundle(t, entry, "other.md", []byte("synthetic memory\n"))
+	target := fakeHome(t)
+	if _, err := Import(target, ImportOptions{BundlePath: bundlePath, WithMemory: true}); err == nil {
+		t.Fatal("import accepted memory metadata naming a different ZIP entry")
+	}
+	if files := listFilesRel(t, target.Root); len(files) != 0 {
+		t.Fatalf("import wrote files with mismatched memory metadata: %v", files)
+	}
+}
+
+func TestImportAllowsNestedMemoryManifestPath(t *testing.T) {
+	entry := "projects/-proj-x/memory/notes/session.md"
+	data := []byte("synthetic memory\n")
+	bundlePath := buildMemoryBundle(t, entry, "notes/session.md", data)
+	target := fakeHome(t)
+	res, err := Import(target, ImportOptions{BundlePath: bundlePath, WithMemory: true})
+	if err != nil {
+		t.Fatalf("import nested memory: %v", err)
+	}
+	if res.MemoryImported != 1 {
+		t.Fatalf("memory imported = %d, want 1", res.MemoryImported)
+	}
+	got, err := os.ReadFile(filepath.Join(target.Root, filepath.FromSlash(entry)))
+	if err != nil || string(got) != string(data) {
+		t.Fatalf("nested memory content = %q, err = %v", got, err)
 	}
 }
 

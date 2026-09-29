@@ -22,6 +22,8 @@ func TestValidateRemoteURL(t *testing.T) {
 		"ext::sh -c 'evil'",   // command-execution remote helper
 		"fd::17",              // remote helper
 		"gcrypt::https://x",   // any name::addr helper transport
+		"custom://host/repo",  // unknown URL schemes invoke git-remote-custom
+		"EXT://host/repo",     // URL scheme matching is case-insensitive
 		"-oProxyCommand=evil", // looks like a flag
 		"",
 	}

@@ -18,15 +18,18 @@ var hexOIDRe = regexp.MustCompile(`^[0-9a-fA-F]{7,64}$`)
 
 // helperTransportRe matches git's "remote helper" transport syntax
 // `<name>::<address>` (e.g. ext::, fd::). The ext helper can run an arbitrary
-// command, so these are blocked. Standard URLs use `<scheme>://`, not `::`, and a
-// local path / scp-style remote contains no `::`, so they are unaffected.
+// command, so these are blocked. Standard URLs use `<scheme>://`, not `::`.
 var helperTransportRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.-]*::`)
+
+// Git also dispatches unrecognized URL schemes to git-remote-<scheme> helpers.
+// Keep the URL form limited to the transports this application supports.
+var remoteSchemeRe = regexp.MustCompile(`^([A-Za-z][A-Za-z0-9+.-]*)://`)
 
 // validateRemoteURL guards against a malicious bundle's git remote. It rejects
 // values that look like a command-line flag and git remote-helper transports
-// (ext::/fd::/…), which are the command-execution vector. Ordinary transports
-// (https/http/ssh/git, scp-style user@host:path, file://, and local paths) are
-// allowed, since they cannot execute commands. See SEC-1 in docs/security/audit.md.
+// (ext::/fd::/…), as well as unknown URL schemes that dispatch to helpers.
+// Ordinary transports (https/http/ssh/git, scp-style user@host:path, file://,
+// and local paths) are allowed. See SEC-1 in docs/security/audit.md.
 // ValidateRemoteURL is the exported form of validateRemoteURL, so callers that
 // accept a git remote from somewhere other than a bundle — a reference file
 // committed to a project repo, for example — apply exactly the same rule.
@@ -41,6 +44,13 @@ func validateRemoteURL(remote string) error {
 	}
 	if helperTransportRe.MatchString(remote) {
 		return fmt.Errorf("refusing git remote-helper transport (e.g. ext::/fd::): %q", remote)
+	}
+	if match := remoteSchemeRe.FindStringSubmatch(remote); match != nil {
+		switch strings.ToLower(match[1]) {
+		case "http", "https", "ssh", "git", "file":
+		default:
+			return fmt.Errorf("refusing unsupported git remote URL scheme %q", match[1])
+		}
 	}
 	return nil
 }
