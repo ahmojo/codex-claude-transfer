@@ -25,6 +25,41 @@ def payload(count, uniques, *days):
 
 
 class MergeTrafficMetricsTests(unittest.TestCase):
+    def test_recent_clone_window_is_marked_fresh(self):
+        result = merge_metrics(
+            None,
+            payload(3, 2, ("2026-08-05", 3, 2)),
+            release_downloads=13,
+            updated_at=NOW,
+        )
+
+        self.assertEqual(result["clone_data_through"], "2026-08-05")
+        self.assertFalse(result["clone_metrics_stale"])
+        self.assertEqual(
+            result["snapshots"]["2026-08-07"],
+            {
+                "release_downloads": 13,
+                "clones_14d": 3,
+                "unique_cloners_14d": 2,
+                "tracked_total_clones": 3,
+            },
+        )
+
+    def test_stale_clone_window_omits_clone_snapshot_fields(self):
+        result = merge_metrics(
+            None,
+            payload(3, 2, ("2026-08-01", 3, 2)),
+            release_downloads=13,
+            updated_at=NOW,
+        )
+
+        self.assertEqual(result["clone_data_through"], "2026-08-01")
+        self.assertTrue(result["clone_metrics_stale"])
+        self.assertEqual(
+            result["snapshots"]["2026-08-07"],
+            {"release_downloads": 13},
+        )
+
     def test_overlapping_windows_are_idempotent(self):
         first = merge_metrics(
             None,

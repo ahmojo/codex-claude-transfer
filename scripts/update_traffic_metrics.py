@@ -16,6 +16,7 @@ from urllib.request import Request, urlopen
 
 REPO = "ahmojo/codex-claude-transfer"
 SCHEMA_VERSION = 1
+MAX_CLONE_DATA_LAG_DAYS = 2
 RELEASES_URL = f"https://api.github.com/repos/{REPO}/releases"
 SNAPSHOT_FIELDS = (
     "release_downloads",
@@ -186,19 +187,30 @@ def merge_metrics(
     tracked_total_clones = sum(
         day["clones"] for day in sorted_days.values()
     )
+    clone_data_through = max(sorted_days) if sorted_days else None
+    clone_metrics_stale = (
+        clone_data_through is not None
+        and (now.date() - date.fromisoformat(clone_data_through)).days
+        > MAX_CLONE_DATA_LAG_DAYS
+    )
     snapshot_day = now.date().isoformat()
-    snapshot = {
-        "clones_14d": clones_14d,
-        "unique_cloners_14d": unique_cloners_14d,
-        "tracked_total_clones": tracked_total_clones,
-    }
+    snapshot: dict[str, int] = {}
+    if not clone_metrics_stale:
+        snapshot.update(
+            {
+                "clones_14d": clones_14d,
+                "unique_cloners_14d": unique_cloners_14d,
+                "tracked_total_clones": tracked_total_clones,
+            }
+        )
     if release_downloads is not None:
         snapshot["release_downloads"] = release_downloads
     elif "release_downloads" in snapshots.get(snapshot_day, {}):
         snapshot["release_downloads"] = snapshots[snapshot_day][
             "release_downloads"
         ]
-    snapshots[snapshot_day] = snapshot
+    if snapshot:
+        snapshots[snapshot_day] = snapshot
     sorted_snapshots = dict(sorted(snapshots.items()))
 
     result = {
@@ -212,6 +224,9 @@ def merge_metrics(
         "days": sorted_days,
         "snapshots": sorted_snapshots,
     }
+    if clone_data_through is not None:
+        result["clone_data_through"] = clone_data_through
+        result["clone_metrics_stale"] = clone_metrics_stale
     if release_downloads is not None:
         result["release_downloads"] = release_downloads
     elif isinstance(existing, dict) and isinstance(
