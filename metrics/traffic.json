@@ -2,10 +2,10 @@
   "schema_version": 1,
   "repo": "ahmojo/codex-claude-transfer",
   "tracked_since": "2026-07-24",
-  "updated_at": "2026-09-29T12:12:18Z",
-  "clones_14d": 166,
-  "unique_cloners_14d": 117,
-  "tracked_total_clones": 1375,
+  "updated_at": "2026-09-30T09:37:40Z",
+  "clones_14d": 544,
+  "unique_cloners_14d": 185,
+  "tracked_total_clones": 1826,
   "days": {
     "2026-07-24": {
       "clones": 65,
@@ -254,6 +254,30 @@
     "2026-09-23": {
       "clones": 16,
       "unique_cloners": 12
+    },
+    "2026-09-24": {
+      "clones": 250,
+      "unique_cloners": 65
+    },
+    "2026-09-25": {
+      "clones": 10,
+      "unique_cloners": 9
+    },
+    "2026-09-26": {
+      "clones": 61,
+      "unique_cloners": 9
+    },
+    "2026-09-27": {
+      "clones": 7,
+      "unique_cloners": 6
+    },
+    "2026-09-28": {
+      "clones": 19,
+      "unique_cloners": 14
+    },
+    "2026-09-29": {
+      "clones": 104,
+      "unique_cloners": 28
     }
   },
   "snapshots": {
@@ -565,9 +589,15 @@
     },
     "2026-09-29": {
       "release_downloads": 710
+    },
+    "2026-09-30": {
+      "clones_14d": 544,
+      "unique_cloners_14d": 185,
+      "tracked_total_clones": 1826,
+      "release_downloads": 724
     }
   },
-  "clone_data_through": "2026-09-23",
-  "clone_metrics_stale": true,
-  "release_downloads": 710
+  "clone_data_through": "2026-09-29",
+  "clone_metrics_stale": false,
+  "release_downloads": 724
 }
