@@ -18,10 +18,11 @@ type codexLine struct {
 }
 
 // FromCodexRollout reads a Codex rollout JSONL file and extracts the neutral
-// AgentSession: the visible user/assistant conversation (from event_msg lines),
+// AgentSession: the visible user/assistant conversation (from legacy or paginated events),
 // with tool calls summarized to short text turns (from response_item
 // function_call lines), plus project context from session_meta. Parsing is
-// defensive — unknown or malformed lines are skipped, never fatal.
+// defensive — unknown or malformed lines are skipped. Inherited fork history
+// is rejected because a single rollout cannot recover its source prefix.
 func FromCodexRollout(path string) (AgentSession, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -41,7 +42,8 @@ func fromCodexReader(r io.Reader) (AgentSession, error) {
 	s := AgentSession{Format: IRFormat, SourceAgent: "codex"}
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
-	sawAssistantEvent := false
+	responses := AgentSession{}
+	sawMessageEvent := false
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if line == "" {
@@ -53,20 +55,27 @@ func fromCodexReader(r io.Reader) (AgentSession, error) {
 		}
 		switch cl.Type {
 		case "session_meta":
+			var meta struct {
+				HistoryBase json.RawMessage `json:"history_base"`
+			}
+			if json.Unmarshal(cl.Payload, &meta) == nil && len(meta.HistoryBase) > 0 && string(meta.HistoryBase) != "null" {
+				return s, fmt.Errorf("cannot translate a Codex fork with inherited history; resume it in Codex instead")
+			}
 			applyCodexMeta(&s, cl)
 		case "event_msg":
-			sawAssistantEvent = consumeCodexEvent(&s, cl.Payload) || sawAssistantEvent
+			sawMessageEvent = consumeCodexEvent(&s, cl.Payload) || sawMessageEvent
 		case "response_item":
 			consumeCodexResponseItem(&s, cl.Payload)
+			consumeCodexResponseItem(&responses, cl.Payload)
+			consumeCodexMessage(&responses, cl.Payload)
 		}
 	}
 	if err := sc.Err(); err != nil {
 		return s, err
 	}
-	// Fallback: if the rollout had no agent_message events at all (older/newer
-	// shape), recover assistant prose from response_item message output_text. We
-	// only do this when nothing was captured, to avoid duplicating turns.
-	_ = sawAssistantEvent
+	if !sawMessageEvent {
+		s.Conversation = responses.Conversation
+	}
 	return s, nil
 }
 
@@ -96,12 +105,17 @@ func applyCodexMeta(s *AgentSession, cl codexLine) {
 	}
 }
 
-// consumeCodexEvent handles event_msg payloads. It returns true if it captured an
-// assistant (agent_message) turn.
+// consumeCodexEvent returns true when it captures a visible message event.
 func consumeCodexEvent(s *AgentSession, payload json.RawMessage) bool {
 	var p struct {
 		Type    string `json:"type"`
 		Message string `json:"message"`
+		Item    struct {
+			Type    string `json:"type"`
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"item"`
 	}
 	if json.Unmarshal(payload, &p) != nil {
 		return false
@@ -109,11 +123,49 @@ func consumeCodexEvent(s *AgentSession, payload json.RawMessage) bool {
 	switch p.Type {
 	case "user_message":
 		s.addTurn(RoleUser, "", stripMarker(p.Message))
+		return true
 	case "agent_message":
 		s.addTurn(RoleAssistant, "", p.Message)
 		return true
+	case "item_completed":
+		var role Role
+		switch p.Item.Type {
+		case "UserMessage":
+			role = RoleUser
+		case "AgentMessage":
+			role = RoleAssistant
+		default:
+			return false
+		}
+		var parts []string
+		for _, b := range p.Item.Content {
+			parts = append(parts, b.Text)
+		}
+		s.addTurn(role, "", strings.Join(parts, "\n"))
+		return true
 	}
 	return false
+}
+
+func consumeCodexMessage(s *AgentSession, payload json.RawMessage) {
+	var p struct {
+		Type    string `json:"type"`
+		Role    Role   `json:"role"`
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	if json.Unmarshal(payload, &p) != nil || p.Type != "message" || (p.Role != RoleUser && p.Role != RoleAssistant) {
+		return
+	}
+	var parts []string
+	for _, b := range p.Content {
+		if b.Type == "input_text" || b.Type == "output_text" {
+			parts = append(parts, b.Text)
+		}
+	}
+	s.addTurn(p.Role, "", strings.Join(parts, "\n"))
 }
 
 // consumeCodexResponseItem summarizes a tool call into a text turn. Only the call

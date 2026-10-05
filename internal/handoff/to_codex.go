@@ -29,13 +29,12 @@ func ToCodex(s AgentSession) ([]byte, string, error) {
 
 	// session_meta
 	meta := map[string]any{
-		"id":             sessionID,
-		"timestamp":      tsAt(0),
-		"cwd":            s.CWD,
-		"originator":     "cct",
-		"cli_version":    codexTargetVersion,
-		"source":         "cli",
-		"model_provider": "",
+		"id":          sessionID,
+		"timestamp":   tsAt(0),
+		"cwd":         s.CWD,
+		"originator":  "cct",
+		"cli_version": codexTargetVersion,
+		"source":      "cli",
 	}
 	if s.Git != nil {
 		g := map[string]any{}

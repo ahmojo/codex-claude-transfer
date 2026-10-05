@@ -40,6 +40,7 @@ type Session struct {
 
 	// Best-effort metadata parsed from the rollout contents.
 	ThreadID         string
+	HistoryBaseID    string // physical rollout supplying inherited paginated history
 	CWD              string
 	Originator       string
 	CLIVersion       string

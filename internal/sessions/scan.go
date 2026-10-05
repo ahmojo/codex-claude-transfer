@@ -147,6 +147,7 @@ func newSession(root, path string, d fs.DirEntry, archived bool, opts ScanOption
 
 func applyMeta(s *Session, meta parsedMeta, fileName string) {
 	s.ThreadID = meta.ThreadID
+	s.HistoryBaseID = meta.HistoryBaseID
 	s.CWD = meta.CWD
 	s.Originator = meta.Originator
 	s.CLIVersion = meta.CLIVersion

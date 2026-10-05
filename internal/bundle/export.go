@@ -159,6 +159,11 @@ func Export(home codexhome.Home, opts ExportOptions) (ExportResult, error) {
 	}
 	if kind == agent.Claude {
 		selected = expandClaudeGroups(scan.Sessions, selected)
+	} else {
+		selected, err = expandCodexHistory(home, selected, opts)
+		if err != nil {
+			return result, err
+		}
 	}
 	if len(selected) == 0 {
 		if opts.Match != "" {

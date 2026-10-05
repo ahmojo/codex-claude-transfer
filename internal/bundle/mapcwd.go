@@ -13,7 +13,7 @@ import (
 
 // CWDMapping rewrites a session's recorded working directory from Old to New
 // during import. It is the only feature that mutates session content, and it
-// touches nothing except the canonical "cwd" field of the session_meta line.
+// updates cwd and matching runtime roots in metadata and persisted thread settings.
 type CWDMapping struct {
 	Old string
 	New string
@@ -174,10 +174,8 @@ func splitKeepTerminators(content []byte) []jsonLine {
 	return lines
 }
 
-// rewriteSessionMetaCWD returns a copy of plain JSONL bytes with the cwd field
-// of the (first) session_meta line replaced by newCWD, but only when the
-// recorded cwd equals oldCWD. Every other line is preserved byte-for-byte, and
-// all other fields of session_meta (including unknown ones) are preserved.
+// rewriteSessionMetaCWD maps matching metadata and persisted thread settings.
+// Conversation records and unknown fields are preserved.
 // changed reports whether a rewrite actually happened.
 func rewriteSessionMetaCWD(content []byte, oldCWD, newCWD string) (out []byte, changed bool, err error) {
 	lines := splitKeepTerminators(content)
@@ -190,19 +188,22 @@ func rewriteSessionMetaCWD(content []byte, oldCWD, newCWD string) (out []byte, c
 		if json.Unmarshal(trimmed, &wrapper) != nil {
 			continue // tolerate non-JSON lines
 		}
-		if lineTypeOf(wrapper) != "session_meta" {
-			continue
+		var newLine []byte
+		var didChange bool
+		var rerr error
+		if lineTypeOf(wrapper) == "session_meta" {
+			newLine, didChange, rerr = rewriteMetaWrapper(wrapper, oldCWD, newCWD)
+		} else {
+			newLine, didChange, rerr = rewriteRuntimeSettings(wrapper, oldCWD, newCWD)
 		}
-		newLine, didChange, rerr := rewriteMetaWrapper(wrapper, oldCWD, newCWD)
 		if rerr != nil {
 			return nil, false, rerr
 		}
 		if !didChange {
-			return content, false, nil
+			continue
 		}
 		lines[i].text = newLine
 		changed = true
-		break
 	}
 	if !changed {
 		return content, false, nil
@@ -242,6 +243,7 @@ func rewriteMetaWrapper(wrapper map[string]json.RawMessage, oldCWD, newCWD strin
 		return nil, false, err
 	}
 	payload["cwd"] = nb
+	mapRuntimeRoots(payload, oldCWD, newCWD)
 	pb, err := json.Marshal(payload)
 	if err != nil {
 		return nil, false, err
@@ -254,59 +256,72 @@ func rewriteMetaWrapper(wrapper map[string]json.RawMessage, oldCWD, newCWD strin
 	return wb, true, nil
 }
 
-// validateMappedJSONL performs a minimal safety re-check of the mapped output:
-//   - same number of lines as the original,
-//   - every non-empty line is valid JSON,
-//   - exactly the session_meta line carries the new cwd,
-//   - all other lines are byte-identical to the original.
-func validateMappedJSONL(original, mapped []byte, newCWD string) error {
-	oLines := splitKeepTerminators(original)
-	mLines := splitKeepTerminators(mapped)
-	if len(oLines) != len(mLines) {
-		return fmt.Errorf("line count changed (%d -> %d)", len(oLines), len(mLines))
+func mapRuntimeRoots(payload map[string]json.RawMessage, oldCWD, newCWD string) {
+	var roots []string
+	if json.Unmarshal(payload["runtime_workspace_roots"], &roots) != nil {
+		return
 	}
-	metaSeen, changed := 0, 0
-	for i := range mLines {
-		mText := mLines[i].text
-		mTrim := bytes.TrimSpace(mText)
-		if len(mTrim) == 0 {
-			if !bytes.Equal(mText, oLines[i].text) {
-				return fmt.Errorf("line %d changed unexpectedly", i+1)
-			}
-			continue
+	changed := false
+	for i, root := range roots {
+		if pathEqual(root, oldCWD) {
+			roots[i], changed = newCWD, true
 		}
-		if !json.Valid(mTrim) {
+	}
+	if changed {
+		payload["runtime_workspace_roots"], _ = json.Marshal(roots)
+	}
+}
+
+func rewriteRuntimeSettings(wrapper map[string]json.RawMessage, oldCWD, newCWD string) ([]byte, bool, error) {
+	if lineTypeOf(wrapper) != "event_msg" {
+		return nil, false, nil
+	}
+	var payload map[string]json.RawMessage
+	if json.Unmarshal(wrapper["payload"], &payload) != nil {
+		return nil, false, nil
+	}
+	var typ string
+	if json.Unmarshal(payload["type"], &typ) != nil || typ != "thread_settings_applied" {
+		return nil, false, nil
+	}
+	settingsWrapper := map[string]json.RawMessage{"payload": payload["thread_settings"]}
+	_, changed, err := rewriteMetaWrapper(settingsWrapper, oldCWD, newCWD)
+	if err != nil || !changed {
+		return nil, false, err
+	}
+	payload["thread_settings"] = settingsWrapper["payload"]
+	wrapper["payload"], err = json.Marshal(payload)
+	if err != nil {
+		return nil, false, err
+	}
+	line, err := json.Marshal(wrapper)
+	return line, true, err
+}
+
+// validateMappedJSONL rejects changes outside the expected cwd/settings rewrite.
+func validateMappedJSONL(original, mapped []byte, newCWD string) error {
+	var oldCWD string
+	for _, line := range splitKeepTerminators(original) {
+		var wrapper map[string]json.RawMessage
+		if json.Unmarshal(line.text, &wrapper) == nil && lineTypeOf(wrapper) == "session_meta" {
+			oldCWD, _ = cwdOf(wrapper)
+			break
+		}
+	}
+	if oldCWD == "" {
+		return fmt.Errorf("session_meta cwd missing")
+	}
+	expected, changed, err := rewriteSessionMetaCWD(original, oldCWD, newCWD)
+	if err != nil {
+		return err
+	}
+	if !changed || !bytes.Equal(expected, mapped) {
+		return fmt.Errorf("mapped content differs from the expected cwd/settings rewrite")
+	}
+	for i, line := range splitKeepTerminators(mapped) {
+		if len(bytes.TrimSpace(line.text)) > 0 && !json.Valid(line.text) {
 			return fmt.Errorf("line %d is not valid JSON after mapping", i+1)
 		}
-		var wrapper map[string]json.RawMessage
-		if err := json.Unmarshal(mTrim, &wrapper); err != nil {
-			return fmt.Errorf("line %d: %w", i+1, err)
-		}
-		if lineTypeOf(wrapper) == "session_meta" {
-			metaSeen++
-			cwd, err := cwdOf(wrapper)
-			if err != nil {
-				return fmt.Errorf("line %d: cannot read cwd: %w", i+1, err)
-			}
-			if cwd == newCWD {
-				changed++
-				continue
-			}
-			// A non-matching session_meta must be unchanged.
-			if !bytes.Equal(mText, oLines[i].text) {
-				return fmt.Errorf("line %d: session_meta changed but cwd was not updated", i+1)
-			}
-			continue
-		}
-		if !bytes.Equal(mText, oLines[i].text) {
-			return fmt.Errorf("line %d changed but is not session_meta", i+1)
-		}
-	}
-	if metaSeen == 0 {
-		return fmt.Errorf("session_meta line missing after mapping")
-	}
-	if changed == 0 {
-		return fmt.Errorf("no cwd was updated")
 	}
 	return nil
 }
