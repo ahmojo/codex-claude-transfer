@@ -469,6 +469,30 @@ func TestRunImportAsCopy(t *testing.T) {
 	}
 }
 
+func TestRunImportIncludeArchived(t *testing.T) {
+	source, target := t.TempDir(), t.TempDir()
+	id := "abcd1111-2222-3333-4444-555566667777"
+	writeSessionCWD(t, source, id, "/project")
+	name := "rollout-2026-06-13T18-22-01-" + id + ".jsonl"
+	if err := os.MkdirAll(filepath.Join(source, "archived_sessions"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(source, "sessions/2026/06/13", name), filepath.Join(source, "archived_sessions", name)); err != nil {
+		t.Fatal(err)
+	}
+	bundle := filepath.Join(t.TempDir(), "archive.codexbundle")
+	var out, errOut bytes.Buffer
+	if code := Run([]string{"export", "--all", "--include-archived", "--codex-home", source, "-o", bundle}, &out, &errOut); code != 0 {
+		t.Fatalf("export: %s", errOut.String())
+	}
+	if code := Run([]string{"import", bundle, "--include-archived", "--codex-home", target}, &out, &errOut); code != 0 {
+		t.Fatalf("import: %s", errOut.String())
+	}
+	if _, err := os.Stat(filepath.Join(target, "archived_sessions", name)); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRunImportReplaceAndCopyMutuallyExclusive(t *testing.T) {
 	tmp := t.TempDir()
 	bundle := filepath.Join(tmp, "p.codexbundle")

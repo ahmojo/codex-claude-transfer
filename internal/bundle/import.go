@@ -315,6 +315,13 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 		return result, err
 	}
 	result.Warnings = append(result.Warnings, filterWarns...)
+	hasHistory := false
+	if kind == agent.Codex {
+		hasHistory, err = checkCodexHistory(&zr.Reader, manifest, selectedPaths, opts, mappings)
+		if err != nil {
+			return result, err
+		}
+	}
 	plannedWrites := make(map[string]string)
 
 	for _, f := range zr.File {
@@ -535,6 +542,9 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 			fmt.Sprintf("no --project given: whether imported sessions show in a project's view depends on %s's cwd filtering; if the project path differs from the source device they may be hidden from that project view", kind.Label()))
 	}
 
+	if hasHistory && (result.Conflicts > 0 || result.AlreadyAhead > 0 || result.Updated > 0) {
+		return result, fmt.Errorf("Codex inherited history differs locally; import unchanged into a separate home or use --replace-with-backup")
+	}
 	// 3) Perform copies (unless dry-run).
 	if opts.DryRun {
 		return result, nil

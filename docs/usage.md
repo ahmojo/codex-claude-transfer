@@ -45,6 +45,24 @@ With `--json`, the same validated commands are returned on reconcile failure as
 `reconcile.fallback_commands`; the field is omitted when no safe command is
 available.
 
+## Codex history compatibility
+
+Fork exports include the source rollouts required by `history_base`, even when
+those parents are archived or excluded by the selection filters. Import the
+complete bundle with `--include-archived` if it contains an archived parent.
+Missing parents and local conflicts are rejected before writing.
+
+Forks with inherited history cannot currently use `--import-as-copy`, cwd mapping,
+`--redact`, `--strip-images`, or cross-agent translation safely. Transfer them
+unchanged into a separate Codex home and resume them in Codex.
+For independent sessions, cwd mapping also updates matching runtime workspace
+roots and persisted thread settings; conversation text stays unchanged.
+
+New Claude-to-Codex handoffs omit the optional model provider so the destination
+configuration chooses it. A client explicitly sending `modelProvider: ""` still
+causes Codex's provider lookup to fail; changing a valid `config.toml` is not a
+repair for that client request.
+
 ## Optional external tools
 
 The core commands need nothing extra. A few opt-in features shell out to a

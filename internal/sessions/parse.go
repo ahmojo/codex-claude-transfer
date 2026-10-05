@@ -34,7 +34,10 @@ type rolloutLine struct {
 // sessionMetaPayload mirrors the SessionMeta(+git) fields we care about. All
 // fields are optional and tolerant of absence.
 type sessionMetaPayload struct {
-	ID            string          `json:"id"`
+	ID          string `json:"id"`
+	HistoryBase *struct {
+		ThreadID string `json:"thread_id"`
+	} `json:"history_base"`
 	Timestamp     string          `json:"timestamp"`
 	CWD           string          `json:"cwd"`
 	Originator    string          `json:"originator"`
@@ -52,6 +55,7 @@ type eventMsgPayload struct {
 // parsedMeta is the best-effort metadata recovered from a rollout file.
 type parsedMeta struct {
 	ThreadID         string
+	HistoryBaseID    string
 	CWD              string
 	Originator       string
 	CLIVersion       string
@@ -162,6 +166,27 @@ func consumeLine(line string, lineNo int, meta *parsedMeta) string {
 		applySessionMeta(rl.Payload, meta)
 	case "event_msg":
 		applyEventMsg(rl.Payload, meta)
+	case "response_item":
+		if meta.FirstUserMessage == "" {
+			var p struct {
+				Type    string `json:"type"`
+				Role    string `json:"role"`
+				Content []struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				} `json:"content"`
+			}
+			if json.Unmarshal(rl.Payload, &p) == nil && p.Type == "message" && p.Role == "user" {
+				var parts []string
+				for _, b := range p.Content {
+					if b.Type == "input_text" {
+						parts = append(parts, b.Text)
+					}
+				}
+				msg := stripUserMessageMarker(strings.Join(parts, "\n"))
+				meta.FirstUserMessage, meta.Preview = msg, preview(msg)
+			}
+		}
 	}
 	return ""
 }
@@ -173,6 +198,9 @@ func applySessionMeta(payload json.RawMessage, meta *parsedMeta) {
 	}
 	meta.FoundSessionMeta = true
 	meta.ThreadID = p.ID
+	if p.HistoryBase != nil {
+		meta.HistoryBaseID = p.HistoryBase.ThreadID
+	}
 	meta.CWD = p.CWD
 	meta.Originator = p.Originator
 	meta.CLIVersion = p.CLIVersion

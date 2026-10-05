@@ -1244,6 +1244,7 @@ func runImport(args []string, stdout, stderr io.Writer) int {
 
 	res, err := bundle.Import(home, bundle.ImportOptions{
 		BundlePath:         bundlePath,
+		IncludeArchived:    f.includeArchived,
 		DryRun:             f.dryRun,
 		ProjectPath:        absProject,
 		ProjectFilter:      absProject != "",
@@ -1661,7 +1662,7 @@ Flags:
                         (also honors $CODEX_HOME)
   --claude-home <path>  Use a specific Claude Code home instead of ~/.claude
                         (also honors $CLAUDE_HOME)
-  --include-archived    list, export, relocate: also consider archived sessions
+  --include-archived    list, export, import, relocate: include archived sessions
                         (Codex only; Claude Code has no separate archive)
   --json                doctor/list/inspect/export/import/relocate: print a
                         machine-readable JSON summary on stdout instead of text

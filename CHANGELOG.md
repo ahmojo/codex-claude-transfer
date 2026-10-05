@@ -2,6 +2,21 @@
 
 All notable changes to codex-claude-transfer are documented here.
 
+## [2.1.4] - 2026-10-05
+
+### Fixed
+- Translated Codex sessions inherit the destination's model provider instead of
+  recording an empty provider name.
+- Paginated Codex messages are recovered for handoff and list previews.
+- Claude handoff follows the active message chain, excluding abandoned branches,
+  sidechains and superseded UUID records.
+- Codex fork exports include their source rollouts, including archived parents.
+  Incomplete or conflicting imports fail before writing. Fork copying, cwd
+  mapping, content transformations and cross-agent handoff are refused until
+  inherited history positions can be preserved safely.
+- Codex cwd mapping updates matching runtime roots and persisted thread settings.
+- Native CLI imports honor `--include-archived`.
+
 ## [2.1.2] - 2026-09-24
 
 ### Fixed

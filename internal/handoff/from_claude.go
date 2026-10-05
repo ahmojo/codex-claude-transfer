@@ -11,12 +11,15 @@ import (
 
 // claudeLine is the subset of a Claude transcript line we read for translation.
 type claudeLine struct {
-	Type      string          `json:"type"`
-	SessionID string          `json:"sessionId"`
-	CWD       string          `json:"cwd"`
-	GitBranch string          `json:"gitBranch"`
-	Timestamp string          `json:"timestamp"`
-	Message   json.RawMessage `json:"message"`
+	UUID        string          `json:"uuid"`
+	ParentUUID  string          `json:"parentUuid"`
+	IsSidechain bool            `json:"isSidechain"`
+	Type        string          `json:"type"`
+	SessionID   string          `json:"sessionId"`
+	CWD         string          `json:"cwd"`
+	GitBranch   string          `json:"gitBranch"`
+	Timestamp   string          `json:"timestamp"`
+	Message     json.RawMessage `json:"message"`
 }
 
 // FromClaudeTranscript reads a Claude Code transcript and extracts the neutral
@@ -42,6 +45,9 @@ func fromClaudeReader(r io.Reader) (AgentSession, error) {
 	s := AgentSession{Format: IRFormat, SourceAgent: "claude"}
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+	var lines []claudeLine
+	byID := map[string]claudeLine{}
+	leaf := ""
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if line == "" {
@@ -51,6 +57,37 @@ func fromClaudeReader(r io.Reader) (AgentSession, error) {
 		if json.Unmarshal([]byte(line), &cl) != nil {
 			continue
 		}
+		if cl.IsSidechain {
+			continue
+		}
+		lines = append(lines, cl)
+		if cl.UUID != "" {
+			byID[cl.UUID] = cl
+			if cl.Type == "user" || cl.Type == "assistant" {
+				leaf = cl.UUID
+			}
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return s, err
+	}
+	if leaf != "" {
+		lines = nil
+		seen := map[string]bool{}
+		for leaf != "" && !seen[leaf] {
+			cl, ok := byID[leaf]
+			if !ok {
+				break
+			}
+			seen[leaf] = true
+			lines = append(lines, cl)
+			leaf = cl.ParentUUID
+		}
+		for i, j := 0, len(lines)-1; i < j; i, j = i+1, j-1 {
+			lines[i], lines[j] = lines[j], lines[i]
+		}
+	}
+	for _, cl := range lines {
 		if s.ThreadID == "" && cl.SessionID != "" {
 			s.ThreadID = cl.SessionID
 		}
@@ -70,7 +107,7 @@ func fromClaudeReader(r io.Reader) (AgentSession, error) {
 			consumeClaudeAssistant(&s, cl.Message)
 		}
 	}
-	return s, sc.Err()
+	return s, nil
 }
 
 // claudeUserText extracts text from a user message, whose content is a plain
