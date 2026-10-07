@@ -13,6 +13,8 @@ import (
 const (
 	// MaxSessionBytes caps a single session entry's uncompressed size.
 	MaxSessionBytes = 100 << 20 // 100 MiB
+	// HardMaxSessionBytes bounds an explicitly raised per-import session limit.
+	HardMaxSessionBytes = 256 << 20 // 256 MiB
 	// MaxMetadataBytes caps manifest.json / checksums.json uncompressed size.
 	MaxMetadataBytes = 16 << 20 // 16 MiB
 	// MaxBundleEntries caps the number of files in a bundle.
@@ -20,6 +22,25 @@ const (
 	// MaxBundleUncompressed caps the total uncompressed size across all entries.
 	MaxBundleUncompressed = 2 << 30 // 2 GiB
 )
+
+// SessionByteLimit validates an override; zero retains the 100 MiB default.
+func SessionByteLimit(requested int64) (int64, error) {
+	if requested == 0 {
+		return MaxSessionBytes, nil
+	}
+	if requested < 0 || requested > HardMaxSessionBytes {
+		return 0, fmt.Errorf("max-session-bytes must be between 1 and %d (hard cap)", HardMaxSessionBytes)
+	}
+	return requested, nil
+}
+
+// Optional internal arguments are normalized by Import/TranslateImport.
+func sessionReadLimit(limits []int64) int64 {
+	if len(limits) != 0 && limits[0] != 0 {
+		return limits[0]
+	}
+	return MaxSessionBytes
+}
 
 // readCapped reads up to max bytes from r, returning an error if the stream would
 // exceed max. Reading max+1 lets a lying ZIP/zstd header be detected rather than

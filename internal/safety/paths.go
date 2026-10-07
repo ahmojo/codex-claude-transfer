@@ -33,6 +33,8 @@ var claudeEntryRe = regexp.MustCompile(`^projects/[^/]+/([^/]+\.jsonl|[^/]+/suba
 // has already rejected "." and ".." segments before this is consulted.
 var claudeMemoryEntryRe = regexp.MustCompile(`^projects/[^/]+/memory/(?:[^/]+/)*[^/]+$`)
 
+var claudeTaskEntryRe = regexp.MustCompile(`^tasks/[^/]+/[1-9][0-9]*\.json$`)
+
 // CleanRelPath validates a ZIP entry name and returns it as a safe, canonical,
 // forward-slash relative path. It rejects anything that could escape the
 // destination: absolute paths, Windows drive/volume prefixes, backslashes,
@@ -83,6 +85,11 @@ func IsClaudeSessionEntry(rel string) bool {
 // Claude Code auto-memory file under projects/<encoded-cwd>/memory/.
 func IsClaudeMemoryEntry(rel string) bool {
 	return claudeMemoryEntryRe.MatchString(rel)
+}
+
+// IsClaudeTaskEntry recognizes task records, excluding transient lock files.
+func IsClaudeTaskEntry(rel string) bool {
+	return claudeTaskEntryRe.MatchString(rel)
 }
 
 // DestPath joins a cleaned relative bundle path onto the Codex home root and

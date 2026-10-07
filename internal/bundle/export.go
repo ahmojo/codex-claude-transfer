@@ -436,6 +436,11 @@ func writeBundle(opts ExportOptions, selected []sessions.Session, manifest *Mani
 			manifest.CodexVersion = s.CLIVersion
 		}
 	}
+	if kind == agent.Claude {
+		if err := addClaudeTasks(zw, opts, manifest, checksums, result); err != nil {
+			return err
+		}
+	}
 
 	// A project's auto memory only travels when it was asked for: Claude Code
 	// keeps it machine-local by design, and it is prose the agent wrote about

@@ -75,6 +75,7 @@ func runDiff(args []string, stdout, stderr io.Writer) int {
 
 	res, err := bundle.Import(home, bundle.ImportOptions{
 		BundlePath:         bundlePath,
+		MaxSessionBytes:    f.maxSessionBytes,
 		DryRun:             true, // diff never writes
 		Merge:              true, // show growth vs. conflict, not just "conflict"
 		ProjectPath:        absProject,
@@ -116,6 +117,9 @@ func printDiff(w io.Writer, kind agent.Kind, path string, res bundle.ImportResul
 	fmt.Fprintf(w, "  identical  %d   already present, unchanged\n", res.SkippedIdentical)
 	fmt.Fprintf(w, "  ahead      %d   local already has these (and more)\n", res.AlreadyAhead)
 	fmt.Fprintf(w, "  conflict   %d   changed on both sides\n", res.Conflicts)
+	if res.TasksImported+res.TaskConflicts > 0 {
+		fmt.Fprintf(w, "  tasks      %d   would be written; %d conflicts\n", res.TasksImported, res.TaskConflicts)
+	}
 	if res.SkippedDeselected > 0 {
 		fmt.Fprintf(w, "  filtered   %d   excluded by your filters\n", res.SkippedDeselected)
 	}
@@ -151,7 +155,11 @@ func printDiff(w io.Writer, kind agent.Kind, path string, res bundle.ImportResul
 		}
 	}
 	if len(news) > 0 {
-		fmt.Fprintln(w, "\nNew sessions:")
+		label := "\nNew sessions:"
+		if res.TasksImported > 0 {
+			label = "\nNew files:"
+		}
+		fmt.Fprintln(w, label)
 		for _, it := range news {
 			fmt.Fprintf(w, "  + %s\n", diffLabel(byPath, it))
 		}
@@ -165,7 +173,7 @@ func printDiff(w io.Writer, kind agent.Kind, path string, res bundle.ImportResul
 	}
 
 	fmt.Fprintln(w)
-	if res.Imported == 0 && res.Updated == 0 && res.Conflicts == 0 {
+	if res.Imported == 0 && res.Updated == 0 && res.Conflicts == 0 && res.TasksImported == 0 && res.TaskConflicts == 0 {
 		fmt.Fprintln(w, "Nothing would change: your sessions are already up to date.")
 		return
 	}

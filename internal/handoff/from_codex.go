@@ -42,8 +42,13 @@ func fromCodexReader(r io.Reader) (AgentSession, error) {
 	s := AgentSession{Format: IRFormat, SourceAgent: "codex"}
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
-	responses := AgentSession{}
-	sawMessageEvent := false
+	type capturedTurn struct {
+		Turn
+		event bool
+	}
+	var captured []capturedTurn
+	eventRoles := map[Role]bool{}
+	sawMeta := false
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if line == "" {
@@ -55,6 +60,9 @@ func fromCodexReader(r io.Reader) (AgentSession, error) {
 		}
 		switch cl.Type {
 		case "session_meta":
+			if sawMeta {
+				continue
+			}
 			var meta struct {
 				HistoryBase json.RawMessage `json:"history_base"`
 			}
@@ -62,19 +70,31 @@ func fromCodexReader(r io.Reader) (AgentSession, error) {
 				return s, fmt.Errorf("cannot translate a Codex fork with inherited history; resume it in Codex instead")
 			}
 			applyCodexMeta(&s, cl)
+			sawMeta = s.ThreadID != ""
 		case "event_msg":
-			sawMessageEvent = consumeCodexEvent(&s, cl.Payload) || sawMessageEvent
+			var events AgentSession
+			consumeCodexEvent(&events, cl.Payload)
+			for _, turn := range events.Conversation {
+				eventRoles[turn.Role] = true
+				captured = append(captured, capturedTurn{turn, true})
+			}
 		case "response_item":
-			consumeCodexResponseItem(&s, cl.Payload)
+			var responses AgentSession
 			consumeCodexResponseItem(&responses, cl.Payload)
 			consumeCodexMessage(&responses, cl.Payload)
+			for _, turn := range responses.Conversation {
+				captured = append(captured, capturedTurn{turn, false})
+			}
 		}
 	}
 	if err := sc.Err(); err != nil {
 		return s, err
 	}
-	if !sawMessageEvent {
-		s.Conversation = responses.Conversation
+	// Each role can use a different persisted representation in hybrid histories.
+	for _, turn := range captured {
+		if turn.Role == RoleTool || turn.event == eventRoles[turn.Role] {
+			s.Conversation = append(s.Conversation, turn.Turn)
+		}
 	}
 	return s, nil
 }

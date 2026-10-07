@@ -2,6 +2,8 @@ module github.com/ahmojo/codex-claude-transfer
 
 go 1.23.0
 
+toolchain go1.26.8
+
 require (
 	github.com/charmbracelet/huh v1.0.0
 	github.com/mattn/go-isatty v0.0.24

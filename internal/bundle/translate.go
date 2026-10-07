@@ -16,9 +16,10 @@ import (
 // one agent's sessions and writing translated, continue-from-here sessions into a
 // different agent's home.
 type TranslateOptions struct {
-	BundlePath string
-	TargetTool agent.Kind
-	DryRun     bool
+	MaxSessionBytes int64
+	BundlePath      string
+	TargetTool      agent.Kind
+	DryRun          bool
 }
 
 // TranslateItem is the plan/outcome for one translated session.
@@ -51,6 +52,13 @@ type TranslateResult struct {
 // bundle are verified before anything is read, exactly like a native import.
 func TranslateImport(targetHome codexhome.Home, opts TranslateOptions) (TranslateResult, error) {
 	result := TranslateResult{TargetTool: agent.Normalize(opts.TargetTool), DryRun: opts.DryRun}
+	limit, err := SessionByteLimit(opts.MaxSessionBytes)
+	if err != nil {
+		return result, err
+	}
+	if opts.DryRun && limit > MaxSessionBytes {
+		result.Warnings = append(result.Warnings, fmt.Sprintf("session limit raised from 100 MiB to %d bytes; large sessions increase memory and disk use", limit))
+	}
 
 	zr, err := zip.OpenReader(opts.BundlePath)
 	if err != nil {
@@ -71,7 +79,7 @@ func TranslateImport(targetHome codexhome.Home, opts TranslateOptions) (Translat
 		return result, fmt.Errorf("bundle already contains %s sessions; use a plain import (no --to) instead", sourceKind.Label())
 	}
 
-	if err := verifyBundle(&zr.Reader, checksums); err != nil {
+	if err := verifyBundle(&zr.Reader, checksums, limit); err != nil {
 		return result, err
 	}
 	if err := verifyManifestBinding(&zr.Reader, manifest, checksums, sourceKind); err != nil {
@@ -83,7 +91,7 @@ func TranslateImport(targetHome codexhome.Home, opts TranslateOptions) (Translat
 		if rel == ManifestName || rel == ChecksumsName || !isImportableEntry(sourceKind, rel) {
 			continue
 		}
-		srcBytes, err := readEntryBytes(&zr.Reader, rel)
+		srcBytes, err := readEntryBytes(&zr.Reader, rel, limit)
 		if err != nil {
 			return result, err
 		}

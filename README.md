@@ -66,7 +66,7 @@ All recordings use throwaway demo sessions, never a real `~/.codex` or
 ## Install
 
 ```bash
-# From source (Go 1.23+)
+# From source (Go 1.26.8+ recommended for patched standard libraries)
 go install github.com/ahmojo/codex-claude-transfer/cmd/cct@latest
 ```
 
@@ -178,9 +178,15 @@ agent version it was last verified against:
 
 | Agent | Last tested | Supported data | Known gaps |
 | --- | --- | --- | --- |
-| **Codex CLI / app-server** | 0.144.6 (2026-07-23) | Sessions (`rollout-*.jsonl`, compressed `.jsonl.zst`), session metadata, git context, inline images; synthetic live-import `thread/read` reconciliation | SQLite/session_index are never written directly by cct; `--reconcile` is capability-probed because app-server is experimental; `.jsonl.zst` needs external `zstd` for metadata, `--map-cwd`, and merge |
-| **Claude Code** | 2.1.212 (2026-07-18) | Conversations (`projects/<encoded-cwd>/*.jsonl`), tool events, project mapping, project relocation (`relocate --tool claude`, which also moves the project's `memory/`), opt-in auto memory in bundles (`--with-memory`) | `~/.claude.json` config is never touched; auto memory travels only when `--with-memory` is passed on both export and import; sidechains/subagent transcripts transfer as files but are not translated cross-agent; the project-folder encoding is lossy, so two project paths can share one folder (relocation rewrites those in place) |
+| **Codex CLI / app-server** | 0.161.0 (2026-10-07) | Sessions (`rollout-*.jsonl`, compressed `.jsonl.zst`), legacy/paginated history, session metadata, git context, inline images; native read/reconcile/resume | SQLite/session_index are never written directly by cct; inherited forks require their parent rollouts and cannot be transformed; `--reconcile` is capability-probed because app-server is experimental; `.jsonl.zst` needs external `zstd` for metadata, `--map-cwd`, and merge |
+| **Claude Code** | 2.1.292 (2026-10-07) | Conversations (`projects/<encoded-cwd>/*.jsonl`), tool events, parent/subagent resume, persisted session tasks, plan-mode launch via `cct resume`, project mapping, project relocation (`relocate --tool claude`, which also moves the project's `memory/`), opt-in auto memory in bundles (`--with-memory`) | `~/.claude.json` config and external/shared task lists are not bundled; task conflicts are preserved, with opt-in backup/replacement; task-bearing bundles cannot be imported as copies; auto memory travels only when `--with-memory` is passed on both export and import; sidechains/subagent transcripts are not translated cross-agent; the project-folder encoding is lossy, so two project paths can share one folder (relocation rewrites those in place) |
 | **Cross-agent handoff** (`import --to`) | same versions | Conversation text and project context, translated between the two formats | A translation, not a clone: tool calls, command output, runtime state, and provider-specific ids do not carry over byte-for-byte |
+
+The [2026-10-07 canary](docs/research/agent-canary-2026-10-07.md) used native
+Windows binaries, disposable homes, and local mock APIs. It verifies committed
+conversation history, persisted task restoration, and interactive plan-mode
+launch through `cct resume`. Complete runtime-state transfer and desktop UI
+remain outside that evidence.
 
 If a newer agent version breaks something, please
 [open an issue](https://github.com/ahmojo/codex-claude-transfer/issues) — with

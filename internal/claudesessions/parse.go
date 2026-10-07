@@ -69,6 +69,37 @@ func parseTranscript(path string) (claudeMeta, []string, error) {
 	return meta, warnings, nil
 }
 
+// ResumePlanMode recovers the latest parent permission state for CLI resume.
+// Only plan mode is restored; elevated permissions are never carried over.
+func ResumePlanMode(path string) (bool, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+	reader := bufio.NewReader(f)
+	mode := ""
+	for {
+		raw, readErr := readLine(reader)
+		var record struct {
+			Type           string `json:"type"`
+			PermissionMode string `json:"permissionMode"`
+			IsSidechain    bool   `json:"isSidechain"`
+		}
+		if json.Unmarshal(raw, &record) == nil && !record.IsSidechain {
+			if record.Type == "permission-mode" || (record.Type == "user" && record.PermissionMode != "") {
+				mode = record.PermissionMode
+			}
+		}
+		if readErr == io.EOF {
+			return mode == "plan", nil
+		}
+		if readErr != nil {
+			return false, readErr
+		}
+	}
+}
+
 func parseTranscriptReader(r io.Reader) (meta claudeMeta, warnings []string) {
 	reader := bufio.NewReader(r)
 	lineNo := 0

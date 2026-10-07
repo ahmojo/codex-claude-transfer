@@ -62,8 +62,8 @@ func classifyGrowth(bundlePlain, localPlain []byte) growthRelation {
 // A compressed session that cannot be compared without zstd stays a conflict with
 // an explanatory warning. Only IO/decompression failures return an error (which
 // aborts the import before any write).
-func planMerge(zr *zip.Reader, item *ImportItem, rel string, result *ImportResult) (Action, error) {
-	bundlePlain, localPlain, comparable, err := mergePlaintext(zr, item, rel, item.DestPath)
+func planMerge(zr *zip.Reader, item *ImportItem, rel string, result *ImportResult, limits ...int64) (Action, error) {
+	bundlePlain, localPlain, comparable, err := mergePlaintext(zr, item, rel, item.DestPath, limits...)
 	if err != nil {
 		return "", err
 	}
@@ -202,10 +202,10 @@ func canonicalJSONLLine(line []byte) []byte {
 // on-disk bytes are the plaintext. For .jsonl.zst files both sides are
 // decompressed, which requires the external zstd tool; when it is unavailable,
 // comparable is false and the caller leaves the entry a conflict.
-func mergePlaintext(zr *zip.Reader, item *ImportItem, rel, dest string) (bundlePlain, localPlain []byte, comparable bool, err error) {
+func mergePlaintext(zr *zip.Reader, item *ImportItem, rel, dest string, limits ...int64) (bundlePlain, localPlain []byte, comparable bool, err error) {
 	bundleBytes := item.content
 	if bundleBytes == nil {
-		bundleBytes, err = readEntryBytes(zr, rel)
+		bundleBytes, err = readEntryBytes(zr, rel, limits...)
 		if err != nil {
 			return nil, nil, false, err
 		}

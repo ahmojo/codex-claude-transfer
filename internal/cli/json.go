@@ -177,6 +177,8 @@ type importJSON struct {
 	Bundle                  string               `json:"bundle"`
 	SessionsInBundle        int                  `json:"sessions_in_bundle"`
 	Imported                int                  `json:"imported"`
+	TasksImported           int                  `json:"tasks_imported,omitempty"`
+	TaskConflicts           int                  `json:"task_conflicts,omitempty"`
 	SkippedIdentical        int                  `json:"skipped_identical"`
 	Conflicts               int                  `json:"conflicts"`
 	Updated                 int                  `json:"updated"`
@@ -236,6 +238,8 @@ func printImportJSON(w io.Writer, path string, res bundle.ImportResult, report p
 		Bundle:                  path,
 		SessionsInBundle:        len(res.Manifest.Sessions),
 		Imported:                res.Imported,
+		TasksImported:           res.TasksImported,
+		TaskConflicts:           res.TaskConflicts,
 		SkippedIdentical:        res.SkippedIdentical,
 		Conflicts:               res.Conflicts,
 		Updated:                 res.Updated,
@@ -266,6 +270,8 @@ type diffJSON struct {
 	Bundle           string           `json:"bundle"`
 	SessionsInBundle int              `json:"sessions_in_bundle"`
 	New              int              `json:"new"`
+	TasksNew         int              `json:"tasks_new,omitempty"`
+	TaskConflicts    int              `json:"task_conflicts,omitempty"`
 	Grow             int              `json:"grow"`
 	Identical        int              `json:"identical"`
 	Ahead            int              `json:"ahead"`
@@ -306,6 +312,8 @@ func printDiffJSON(w io.Writer, path string, res bundle.ImportResult) {
 		Bundle:           path,
 		SessionsInBundle: len(res.Manifest.Sessions),
 		New:              res.Imported,
+		TasksNew:         res.TasksImported,
+		TaskConflicts:    res.TaskConflicts,
 		Grow:             res.Updated,
 		Identical:        res.SkippedIdentical,
 		Ahead:            res.AlreadyAhead,
