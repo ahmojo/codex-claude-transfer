@@ -44,6 +44,12 @@ func Run(args []string, stdout, stderr io.Writer) int {
 
 	command := args[0]
 	rest := args[1:]
+	for _, arg := range rest {
+		if (arg == "--max-session-bytes" || strings.HasPrefix(arg, "--max-session-bytes=")) && command != "import" && command != "diff" {
+			fmt.Fprintln(stderr, "error: --max-session-bytes applies only to import and diff")
+			return 2
+		}
+	}
 
 	switch command {
 	case "doctor":
@@ -105,6 +111,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 
 // commonFlags holds flags shared by commands.
 type commonFlags struct {
+	maxSessionBytes int64
 	codexHome       string
 	claudeHome      string
 	tool            string
@@ -164,6 +171,23 @@ func parseFlags(args []string) (commonFlags, error) {
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch {
+		case arg == "--max-session-bytes" || hasPrefix(arg, "--max-session-bytes="):
+			val := strings.TrimPrefix(arg, "--max-session-bytes=")
+			if arg == "--max-session-bytes" {
+				var err error
+				val, err = takeValue(args, &i, "--max-session-bytes")
+				if err != nil {
+					return f, err
+				}
+			}
+			n, err := strconv.ParseInt(val, 10, 64)
+			if err != nil || n < 1 {
+				return f, fmt.Errorf("invalid --max-session-bytes %q (want positive bytes)", val)
+			}
+			if _, err := bundle.SessionByteLimit(n); err != nil {
+				return f, err
+			}
+			f.maxSessionBytes = n
 		case arg == "--codex-home":
 			val, err := takeValue(args, &i, "--codex-home")
 			if err != nil {
@@ -1244,6 +1268,7 @@ func runImport(args []string, stdout, stderr io.Writer) int {
 
 	res, err := bundle.Import(home, bundle.ImportOptions{
 		BundlePath:         bundlePath,
+		MaxSessionBytes:    f.maxSessionBytes,
 		IncludeArchived:    f.includeArchived,
 		DryRun:             f.dryRun,
 		ProjectPath:        absProject,
@@ -1516,9 +1541,10 @@ func runTranslateImport(f commonFlags, bundlePath string, stdout, stderr io.Writ
 	}
 
 	res, err := bundle.TranslateImport(home, bundle.TranslateOptions{
-		BundlePath: bundlePath,
-		TargetTool: target,
-		DryRun:     f.dryRun,
+		BundlePath:      bundlePath,
+		MaxSessionBytes: f.maxSessionBytes,
+		TargetTool:      target,
+		DryRun:          f.dryRun,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "error: handoff failed: %v\n", err)
@@ -1703,6 +1729,8 @@ Flags:
                         an existing file there is replaced
   --dry-run             import: validate and report only, write nothing
                         relocate: preview session rewrites and any directory move
+  --max-session-bytes N import, diff: override the uncompressed ZIP session limit
+                        in bytes (default 100 MiB; hard cap 256 MiB)
   --move-project        relocate: rename OLD to NEW before rewriting sessions;
                         same-filesystem moves only (without it, NEW must exist)
   --merge               import: incremental sync. When a session already exists

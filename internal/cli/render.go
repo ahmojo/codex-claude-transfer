@@ -455,6 +455,9 @@ func printImport(w io.Writer, kind agent.Kind, path string, res bundle.ImportRes
 	fmt.Fprintf(w, "Sessions in bundle: %d\n", len(res.Manifest.Sessions))
 	fmt.Fprintf(w, "New sessions: %d\n", res.Imported)
 	fmt.Fprintf(w, "Already existing: %d\n", res.SkippedIdentical)
+	if res.TasksImported+res.TaskConflicts > 0 {
+		fmt.Fprintf(w, "Claude tasks: %d written, %d kept (not overwritten)\n", res.TasksImported, res.TaskConflicts)
+	}
 	if res.MemoryImported+res.MemorySkipped+res.MemoryConflicts > 0 {
 		fmt.Fprintf(w, "Project memory: %d written, %d already identical, %d kept (not overwritten)\n",
 			res.MemoryImported, res.MemorySkipped, res.MemoryConflicts)

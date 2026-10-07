@@ -28,6 +28,15 @@ cct export --tool claude --project .
 cct import ./project.codexbundle
 ```
 
+Claude's persisted `tasks/<session-id>/*.json` travel with the selected
+conversation. Existing differing tasks remain conflicts; use
+`--replace-with-backup` to preserve the local version before replacing it.
+Task-bearing bundles reject `--import-as-copy` because task identities cannot
+be safely cloned. Shared task lists and lock files are excluded.
+
+`cct resume --tool claude --run` restores recorded plan mode when launching
+Claude. Other permission modes, including bypasses, are not restored.
+
 After importing, run the agent again so it re-scans the files. For a native
 Codex import, `--reconcile` is an opt-in alternative: cct launches a short-lived
 Codex app-server scoped to the selected `CODEX_HOME`, asks Codex to read any
@@ -111,6 +120,21 @@ passphrase from an interactive terminal. In the browser app, use age
 recipient/identity key files.
 
 ## Common workflows
+
+### Import a large session
+
+The default uncompressed ZIP entry limit is 100 MiB. For a trusted larger
+session, preview with an explicit byte limit and reuse it for the import:
+
+```bash
+cct import large.codexbundle --max-session-bytes 157286400 --dry-run
+cct import large.codexbundle --max-session-bytes 157286400
+```
+
+This example allows 150 MiB. The absolute cap is 256 MiB; metadata remains
+limited to 16 MiB and the whole bundle to 2 GiB. Inner zstd decompression keeps
+its separate 256 MiB cap. Raising the limit increases memory and disk use and
+does not change subsequent commands' defaults. `cct diff` accepts the same flag.
 
 ### Carry sessions through git
 

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,48 @@ import (
 	"github.com/ahmojo/codex-claude-transfer/internal/bundle"
 	"github.com/ahmojo/codex-claude-transfer/internal/claudehome"
 )
+
+func TestMaxSessionBytesFlag(t *testing.T) {
+	for _, value := range []string{"0", "-1", "nope", "9223372036854775808", strconv.FormatInt(bundle.HardMaxSessionBytes+1, 10)} {
+		for _, args := range [][]string{{"--max-session-bytes", value}, {"--max-session-bytes=" + value}} {
+			if _, err := parseFlags(args); err == nil {
+				t.Fatalf("invalid flag accepted: %v", args)
+			}
+		}
+	}
+	source := t.TempDir()
+	writeSession(t, source, "aaaa1111-2222-3333-4444-555566667777", "/project")
+	path := filepath.Join(t.TempDir(), "test.codexbundle")
+	var out, errOut bytes.Buffer
+	if code := Run([]string{"export", "--all", "--codex-home", source, "-o", path}, &out, &errOut); code != 0 {
+		t.Fatalf("export failed: %s", errOut.String())
+	}
+	for _, command := range []string{"import", "diff"} {
+		for _, extra := range [][]string{nil, {"--to", "claude"}} {
+			if command == "diff" && extra != nil {
+				continue
+			}
+			home := t.TempDir()
+			args := append([]string{command, path, "--codex-home", home, "--claude-home", home, "--dry-run"}, extra...)
+			out.Reset()
+			errOut.Reset()
+			if code := Run(append(args, "--max-session-bytes=1"), &out, &errOut); code != 1 || !strings.Contains(errOut.String(), "limit") {
+				t.Fatalf("%v ignored limit: %d, %s", args, code, errOut.String())
+			}
+			out.Reset()
+			errOut.Reset()
+			if code := Run(append(args, "--max-session-bytes", "157286400"), &out, &errOut); code != 0 || !strings.Contains(out.String()+errOut.String(), "memory and disk") {
+				t.Fatalf("%v failed override/warning: %d, %s, %s", args, code, out.String(), errOut.String())
+			}
+			if entries, err := os.ReadDir(home); err != nil || len(entries) != 0 {
+				t.Fatalf("preview wrote files: %v, %v", entries, err)
+			}
+		}
+	}
+	if code := Run([]string{"export", "--max-session-bytes=157286400"}, &out, &errOut); code != 2 {
+		t.Fatal("export silently accepted an import-only flag")
+	}
+}
 
 func writeSession(t *testing.T, home, threadID, cwd string) {
 	t.Helper()

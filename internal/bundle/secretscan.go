@@ -74,7 +74,7 @@ func isSessionEntry(name string) bool {
 	// Memory files are ordinary notes and need not have an extension, so they
 	// are recognized by shape rather than by the "has a file extension" rule the
 	// transcript paths can rely on.
-	if safety.IsClaudeMemoryEntry(name) {
+	if safety.IsClaudeMemoryEntry(name) || safety.IsClaudeTaskEntry(name) {
 		return true
 	}
 	top := name

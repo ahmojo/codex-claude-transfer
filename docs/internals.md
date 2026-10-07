@@ -15,7 +15,8 @@ alongside it that `cct` never writes:
   `~/.claude/projects/<encoded-cwd>/<uuid>.jsonl`. Its `~/.claude.json` holds
   config, not a session index.
 
-`cct` works only with those JSONL files. `export` packages them with a manifest
+`cct` works with those JSONL files and Claude's session-bound task records.
+`export` packages them with a manifest
 and SHA-256 checksums into a `.codexbundle` ZIP. `import` verifies checksums and
 copies session files back into place. The agent then re-discovers the files on
 its next run. A native Codex import may opt into `--reconcile`: after the file
@@ -52,6 +53,11 @@ project.codexbundle
 ```
 
 Format version: `codex-sync-bundle-v1`.
+
+Claude bundles also declare `tasks/<session-id>/<number>.json` in the optional
+`tasks` manifest field. Each task is bound to a parent transcript and checksum,
+validated before writes, and restored through the ordinary atomic write,
+backup, and undo path. Older readers ignore the field and skip task files.
 
 Compressed `.jsonl.zst` rollouts are copied byte-for-byte and never recompressed
 or modified. Their metadata can be read during export when `zstd` is installed.
@@ -147,10 +153,13 @@ session bytes — its lifecycle is worth understanding.
   can drift.
 - **Codex app-server may change.** `import --reconcile` is opt-in and probes the
   live methods/fields instead of assuming that a version number guarantees them.
-  The last synthetic live-import verification was 0.144.6; other/newer builds
-  safely fall back when the protocol is incompatible.
+  The [2026-10-07 canary](research/agent-canary-2026-10-07.md) verified native
+  read/reconcile/resume with 0.161.0; incompatible builds safely fall back.
 - **Claude Code's format is closed-source and moves fast.** Support is based on
   empirical behavior and may need updates after Claude Code changes.
+  Session-bound tasks travel with their conversation; external/shared task
+  lists and transient locks do not. Task JSON is not merged: differing files
+  remain conflicts unless `--replace-with-backup` is selected.
 - **Compressed `.jsonl.zst` sessions need `zstd`** to recover metadata and to be
   remapped with `--map-cwd`. Without it they are copied as-is and their cwd may
   be unknown to `--project`.

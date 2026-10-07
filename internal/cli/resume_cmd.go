@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/ahmojo/codex-claude-transfer/internal/agent"
+	"github.com/ahmojo/codex-claude-transfer/internal/claudesessions"
 	"github.com/ahmojo/codex-claude-transfer/internal/search"
 	"github.com/ahmojo/codex-claude-transfer/internal/sessions"
 )
@@ -45,6 +46,16 @@ func runResume(args []string, stdout, stderr io.Writer) int {
 	}
 
 	name, cmdArgs := resumeCommand(kind, chosen.ThreadID)
+	if kind == agent.Claude {
+		plan, err := claudesessions.ResumePlanMode(chosen.Path)
+		if err != nil {
+			fmt.Fprintf(stderr, "error: read Claude resume state: %v\n", err)
+			return 1
+		}
+		if plan {
+			cmdArgs = append(cmdArgs, "--permission-mode", "plan")
+		}
+	}
 	fmt.Fprintf(stdout, "Session: %s\n", safeTerminal(title(chosen)))
 	fmt.Fprintf(stdout, "Thread:  %s\n", chosen.ThreadID)
 	if chosen.CWD != "" {

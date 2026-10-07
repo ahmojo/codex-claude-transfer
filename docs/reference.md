@@ -14,7 +14,7 @@ Use this page when you need exact commands and flags. For guided workflows, see
 | `cct search <query>` | Full-text search across session conversation text. Supports `--regex`, `--case-sensitive`, `--project`, `--since`, and `--json`. |
 | `cct scan` | Check sessions for likely secrets before sharing or syncing. Read-only; values are masked. |
 | `cct stats` | Summarize sessions: totals, busiest projects, and recent activity (`--json`). |
-| `cct resume [query]` | Find the best matching session and print the agent command that continues it; `--run` launches it. |
+| `cct resume [query]` | Find the best matching session and print the agent command that continues it; `--run` launches it. Claude plan-mode sessions add `--permission-mode plan`; other permission modes are not restored. |
 | `cct browse` | Interactive session browser: search, pick one, then resume, export, tag, or name it. |
 | `cct tag add\|rm\|ls` / `cct name` | Add cct-only tags and friendly names. These are stored in cct config, never in agent session files. |
 | `cct config list\|get\|set\|path` | Save defaults such as tool, homes, port, and the `repo-sync` mode. Explicit flags always win. |
@@ -52,6 +52,7 @@ Use this page when you need exact commands and flags. For guided workflows, see
 | `--include-archived` | list, export, import, relocate | Include archived sessions. Codex only: Claude Code keeps no separate archive location, so `relocate --tool claude` refuses the flag. |
 | `--json` | doctor, list, inspect, export, import, relocate, diff, sync | Print machine-readable JSON instead of text. |
 | `--dry-run` | import, relocate, undo, sync | Validate and report only; write nothing. |
+| `--max-session-bytes N` | import, diff | Per-entry uncompressed ZIP read limit in bytes, including cross-agent imports. Default: 104857600 (100 MiB); hard cap: 268435456 (256 MiB). Raised limits produce a dry-run warning. Metadata and total bundle limits stay fixed. |
 | `--move-project` | relocate | Rename `OLD` to `NEW` before rewriting session cwd. Uses a same-filesystem rename only; `NEW` must not exist. |
 | `--list` | undo | Show recent imports (newest first) instead of reversing one. |
 | `--to <codex\|claude>` | import | Cross-agent handoff: translate bundle sessions into the other agent's format. |

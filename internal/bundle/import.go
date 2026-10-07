@@ -62,6 +62,8 @@ type ImportItem struct {
 	// ordinary import/skip/conflict actions, which keeps them in the undo journal
 	// on the same terms as any other file cct writes.
 	Memory bool
+	// Task entries use the write/backup/undo path without affecting session counts.
+	Task bool
 	// content, when non-nil, is the (cwd-mapped) bytes to write instead of
 	// streaming the entry verbatim from the bundle.
 	content []byte
@@ -69,8 +71,10 @@ type ImportItem struct {
 
 // ImportOptions configures an import.
 type ImportOptions struct {
-	BundlePath string
-	DryRun     bool
+	// MaxSessionBytes overrides the per-entry read limit (zero uses the default).
+	MaxSessionBytes int64
+	BundlePath      string
+	DryRun          bool
 	// IncludeArchived permits Codex rollout entries under archived_sessions/ to
 	// use the same validated import, mapping, backup, and undo path as active
 	// sessions. It is opt-in; ordinary imports continue to skip archived entries.
@@ -188,6 +192,8 @@ type ImportResult struct {
 	MemoryImported  int
 	MemorySkipped   int
 	MemoryConflicts int
+	TasksImported   int
+	TaskConflicts   int
 	Warnings        []string
 }
 
@@ -208,6 +214,14 @@ type ImportResult struct {
 //   - .jsonl.zst files are copied byte-for-byte; never parsed or decompressed.
 func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 	result := ImportResult{DryRun: opts.DryRun, ProjectProvided: opts.ProjectPath != ""}
+	limit, err := SessionByteLimit(opts.MaxSessionBytes)
+	if err != nil {
+		return result, err
+	}
+	opts.MaxSessionBytes = limit
+	if opts.DryRun && limit > MaxSessionBytes {
+		result.Warnings = append(result.Warnings, fmt.Sprintf("session limit raised from 100 MiB to %d bytes; large sessions increase memory and disk use", limit))
+	}
 
 	zr, err := zip.OpenReader(opts.BundlePath)
 	if err != nil {
@@ -228,11 +242,19 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 	// 1) Verify integrity of the entire bundle before writing anything, and make
 	//    the manifest authoritative so a bundle cannot smuggle in session files
 	//    that never appear in the inspect/preview the user reviews.
-	if err := verifyBundle(&zr.Reader, checksums); err != nil {
+	if err := verifyBundle(&zr.Reader, checksums, limit); err != nil {
 		return result, err
 	}
 	if err := verifyManifestBinding(&zr.Reader, manifest, checksums, kind); err != nil {
 		return result, err
+	}
+	if kind == agent.Claude {
+		if err := verifyClaudeTasks(&zr.Reader, manifest, checksums); err != nil {
+			return result, err
+		}
+		if opts.ImportAsCopy && len(manifest.Tasks) > 0 {
+			return result, fmt.Errorf("--import-as-copy does not support Claude task identities; import unchanged into a separate home")
+		}
 	}
 	if kind == agent.Claude && opts.WithMemory {
 		if err := verifyMemoryBinding(&zr.Reader, manifest.Memory, checksums); err != nil {
@@ -330,6 +352,9 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 		}
 		// Paths were already validated as safe in verifyBundle.
 		rel := f.Name
+		if kind == agent.Claude && safety.IsClaudeTaskEntry(rel) {
+			continue // planned with their parent after all transcripts are inspected
+		}
 
 		// A project's auto memory rides along only when both sides asked for it.
 		if kind == agent.Claude && safety.IsClaudeMemoryEntry(rel) {
@@ -384,7 +409,7 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 		if m := matchMapping(item.OriginalCWD, mappings); m != nil {
 			switch {
 			case kind == agent.Claude:
-				orig, err := readEntryBytes(&zr.Reader, rel)
+				orig, err := readEntryBytes(&zr.Reader, rel, limit)
 				if err != nil {
 					return result, err
 				}
@@ -405,7 +430,7 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 						fmt.Sprintf("%s: recorded cwd did not match the mapping; not rewritten", rel))
 				}
 			case strings.HasSuffix(rel, compressedSessionSuffix):
-				mapped, changed, available, err := remapCompressed(&zr.Reader, rel, m)
+				mapped, changed, available, err := remapCompressed(&zr.Reader, rel, m, limit)
 				if err != nil {
 					return result, err
 				}
@@ -423,7 +448,7 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 						fmt.Sprintf("%s: recorded cwd did not match the mapping; not rewritten", rel))
 				}
 			default:
-				orig, err := readEntryBytes(&zr.Reader, rel)
+				orig, err := readEntryBytes(&zr.Reader, rel, limit)
 				if err != nil {
 					return result, err
 				}
@@ -469,7 +494,7 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 		// untouched. Anything that genuinely diverged stays a conflict and is
 		// handled by the resolution flags below (with which --merge composes).
 		if action == ActionConflict && opts.Merge {
-			action, err = planMerge(&zr.Reader, &item, rel, &result)
+			action, err = planMerge(&zr.Reader, &item, rel, &result, limit)
 			if err != nil {
 				return result, err
 			}
@@ -483,9 +508,9 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 			action = ActionReplace
 		} else if action == ActionConflict && opts.ImportAsCopy {
 			if kind == agent.Claude {
-				action, err = planImportCopyClaude(&zr.Reader, &item, rel, destRel, home.Root, &result)
+				action, err = planImportCopyClaude(&zr.Reader, &item, rel, destRel, home.Root, &result, limit)
 			} else {
-				action, err = planImportCopy(&zr.Reader, &item, rel, home.Root, &result)
+				action, err = planImportCopy(&zr.Reader, &item, rel, home.Root, &result, limit)
 			}
 			if err != nil {
 				return result, err
@@ -545,6 +570,11 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 	if hasHistory && (result.Conflicts > 0 || result.AlreadyAhead > 0 || result.Updated > 0) {
 		return result, fmt.Errorf("Codex inherited history differs locally; import unchanged into a separate home or use --replace-with-backup")
 	}
+	if kind == agent.Claude {
+		if err := planClaudeTasks(home, manifest, opts, &result, plannedWrites); err != nil {
+			return result, err
+		}
+	}
 	// 3) Perform copies (unless dry-run).
 	if opts.DryRun {
 		return result, nil
@@ -601,7 +631,7 @@ func Import(home codexhome.Home, opts ImportOptions) (ImportResult, error) {
 			if err := safety.CopyAtomic(item.DestPath, bytes.NewReader(item.content)); err != nil {
 				return result, fmt.Errorf("import %s: %w", item.BundlePath, err)
 			}
-		} else if err := copyEntry(&zr.Reader, item.BundlePath, item.DestPath); err != nil {
+		} else if err := copyEntry(&zr.Reader, item.BundlePath, item.DestPath, limit); err != nil {
 			return result, fmt.Errorf("import %s: %w", item.BundlePath, err)
 		}
 		// Restore the session's original modification time (keyed by the bundle
@@ -672,10 +702,10 @@ func isImportableEntryForImport(kind agent.Kind, rel string, includeArchived boo
 // leaving the diverged local transcript untouched. A hard error aborts the whole
 // import before any write; otherwise it returns ActionImportCopy on success or a
 // skipped ActionConflict when the transcript has no sessionId to reassign.
-func planImportCopyClaude(zr *zip.Reader, item *ImportItem, rel, destRel, root string, result *ImportResult) (Action, error) {
+func planImportCopyClaude(zr *zip.Reader, item *ImportItem, rel, destRel, root string, result *ImportResult, limits ...int64) (Action, error) {
 	base := item.content // may already be cwd-mapped bytes
 	if base == nil {
-		b, err := readEntryBytes(zr, rel)
+		b, err := readEntryBytes(zr, rel, limits...)
 		if err != nil {
 			return "", err
 		}
@@ -727,7 +757,7 @@ func planImportCopyClaude(zr *zip.Reader, item *ImportItem, rel, destRel, root s
 // warning) when the session cannot be safely copied — a compressed file or one
 // without a session_meta id. A hard error is only returned for internal/IO
 // failures, in which case the whole import aborts before writing anything.
-func planImportCopy(zr *zip.Reader, item *ImportItem, rel, root string, result *ImportResult) (Action, error) {
+func planImportCopy(zr *zip.Reader, item *ImportItem, rel, root string, result *ImportResult, limits ...int64) (Action, error) {
 	if strings.HasSuffix(rel, compressedSessionSuffix) {
 		result.Warnings = append(result.Warnings,
 			fmt.Sprintf("%s: compressed session cannot be imported as a copy in v0.1; skipped (conflict)", rel))
@@ -735,7 +765,7 @@ func planImportCopy(zr *zip.Reader, item *ImportItem, rel, root string, result *
 	}
 	base := item.content // may already be cwd-mapped bytes
 	if base == nil {
-		b, err := readEntryBytes(zr, rel)
+		b, err := readEntryBytes(zr, rel, limits...)
 		if err != nil {
 			return "", err
 		}
@@ -796,11 +826,11 @@ func planImportCopy(zr *zip.Reader, item *ImportItem, rel, root string, result *
 // additionally verifies the recompressed frame round-trips back to the exact
 // rewritten plaintext before it is accepted. Any decompress/compress/validation
 // failure is returned as an error and aborts the import before any write.
-func remapCompressed(zr *zip.Reader, rel string, m *CWDMapping) (mapped []byte, changed bool, available bool, err error) {
+func remapCompressed(zr *zip.Reader, rel string, m *CWDMapping, limits ...int64) (mapped []byte, changed bool, available bool, err error) {
 	if !zstdcli.Available() {
 		return nil, false, false, nil
 	}
-	raw, err := readEntryBytes(zr, rel)
+	raw, err := readEntryBytes(zr, rel, limits...)
 	if err != nil {
 		return nil, false, true, err
 	}
@@ -838,12 +868,13 @@ func remapCompressed(zr *zip.Reader, rel string, m *CWDMapping) (mapped []byte, 
 // copied byte-for-byte unless an opted-in --map-cwd rewrite recompresses one.
 const compressedSessionSuffix = ".jsonl.zst"
 
-func readEntryBytes(zr *zip.Reader, name string) ([]byte, error) {
+func readEntryBytes(zr *zip.Reader, name string, limits ...int64) ([]byte, error) {
+	limit := sessionReadLimit(limits)
 	f, err := openByName(zr, name)
 	if err != nil {
 		return nil, err
 	}
-	if err := checkDeclaredSize(f, MaxSessionBytes, "session "+name); err != nil {
+	if err := checkDeclaredSize(f, limit, "session "+name); err != nil {
 		return nil, err
 	}
 	rc, err := f.Open()
@@ -851,7 +882,7 @@ func readEntryBytes(zr *zip.Reader, name string) ([]byte, error) {
 		return nil, err
 	}
 	defer rc.Close()
-	return readCapped(rc, MaxSessionBytes, "session "+name)
+	return readCapped(rc, limit, "session "+name)
 }
 
 // decideAction determines conflict handling for a single target path.
@@ -878,7 +909,7 @@ func decideAction(dest, expectedSum string) (Action, error) {
 
 // verifyBundle validates every entry path and confirms each file's SHA-256
 // matches checksums.json. checksums.json itself is not self-referential.
-func verifyBundle(zr *zip.Reader, checksums Checksums) error {
+func verifyBundle(zr *zip.Reader, checksums Checksums, limits ...int64) error {
 	if len(zr.File) > MaxBundleEntries {
 		return fmt.Errorf("bundle has %d entries, over the %d limit", len(zr.File), MaxBundleEntries)
 	}
@@ -893,7 +924,7 @@ func verifyBundle(zr *zip.Reader, checksums Checksums) error {
 		}
 		// Bound resource use: reject oversized entries cheaply by their declared
 		// size, and cap the total uncompressed footprint of the whole bundle.
-		limit := int64(MaxSessionBytes)
+		limit := sessionReadLimit(limits)
 		if f.Name == ManifestName {
 			limit = MaxMetadataBytes
 		}
@@ -908,7 +939,7 @@ func verifyBundle(zr *zip.Reader, checksums Checksums) error {
 		if !ok {
 			return fmt.Errorf("bundle entry %q is missing from checksums.json", f.Name)
 		}
-		actual, err := sha256ZipEntry(f)
+		actual, err := sha256ZipEntry(f, limit)
 		if err != nil {
 			return fmt.Errorf("hash %q: %w", f.Name, err)
 		}
@@ -1055,7 +1086,7 @@ func resolveImportSelection(zr *zip.Reader, manifest Manifest, opts ImportOption
 				delete(selected, p)
 				continue
 			}
-			data, rerr := readEntryBytes(zr, p)
+			data, rerr := readEntryBytes(zr, p, opts.MaxSessionBytes)
 			if rerr != nil {
 				delete(selected, p)
 				continue
@@ -1136,14 +1167,15 @@ func isArchivedEntry(rel string) bool {
 		rel[:len(codexhome.ArchivedSessionsSubdir)+1] == codexhome.ArchivedSessionsSubdir+"/"
 }
 
-func copyEntry(zr *zip.Reader, name, dest string) error {
+func copyEntry(zr *zip.Reader, name, dest string, limits ...int64) error {
+	limit := sessionReadLimit(limits)
 	f, err := openByName(zr, name)
 	if err != nil {
 		return err
 	}
 	// verifyBundle already capped every entry before any write; this is belt: a
 	// declared-oversize entry never reaches the disk.
-	if err := checkDeclaredSize(f, MaxSessionBytes, "session "+name); err != nil {
+	if err := checkDeclaredSize(f, limit, "session "+name); err != nil {
 		return err
 	}
 	rc, err := f.Open()
@@ -1151,7 +1183,7 @@ func copyEntry(zr *zip.Reader, name, dest string) error {
 		return err
 	}
 	defer rc.Close()
-	return safety.CopyAtomic(dest, io.LimitReader(rc, MaxSessionBytes))
+	return safety.CopyAtomic(dest, io.LimitReader(rc, limit))
 }
 
 func openByName(zr *zip.Reader, name string) (*zip.File, error) {
@@ -1163,7 +1195,8 @@ func openByName(zr *zip.Reader, name string) (*zip.File, error) {
 	return nil, fmt.Errorf("entry %q not found in bundle", name)
 }
 
-func sha256ZipEntry(f *zip.File) (string, error) {
+func sha256ZipEntry(f *zip.File, limits ...int64) (string, error) {
+	limit := sessionReadLimit(limits)
 	rc, err := f.Open()
 	if err != nil {
 		return "", err
@@ -1172,12 +1205,12 @@ func sha256ZipEntry(f *zip.File) (string, error) {
 	h := sha256.New()
 	// Cap the inflated stream so a lying header (declared small, inflates huge)
 	// cannot exhaust CPU/memory during verification.
-	n, err := io.Copy(h, io.LimitReader(rc, MaxSessionBytes+1))
+	n, err := io.Copy(h, io.LimitReader(rc, limit+1))
 	if err != nil {
 		return "", err
 	}
-	if n > MaxSessionBytes {
-		return "", fmt.Errorf("entry %q exceeds the %d-byte limit (possible decompression bomb)", f.Name, MaxSessionBytes)
+	if n > limit {
+		return "", fmt.Errorf("entry %q exceeds the %d-byte limit (possible decompression bomb)", f.Name, limit)
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }

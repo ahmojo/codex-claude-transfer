@@ -2,9 +2,35 @@ package handoff
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestCodexResponseUserRecoveredWithAssistantEvent(t *testing.T) {
+	s, err := FromCodexBytes([]byte(
+		`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}}` + "\n" +
+			`{"type":"event_msg","payload":{"type":"agent_message","message":"done"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Turn{{Role: RoleUser, Text: "hello"}, {Role: RoleAssistant, Text: "done"}}
+	if !reflect.DeepEqual(s.Conversation, want) {
+		t.Fatalf("conversation = %+v, want %+v", s.Conversation, want)
+	}
+}
+
+func TestCodexInheritedMetadataKeepsChildIdentity(t *testing.T) {
+	s, err := FromCodexBytes([]byte(
+		`{"timestamp":"child-time","type":"session_meta","payload":{"id":"child","cwd":"/child","timestamp":"child-time","git":{"branch":"child-branch"}}}` + "\n" +
+			`{"timestamp":"parent-time","type":"session_meta","payload":{"id":"parent","cwd":"/parent","timestamp":"parent-time","git":{"branch":"parent-branch"}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.ThreadID != "child" || s.CWD != "/child" || s.CreatedAt != "child-time" || s.Git == nil || s.Git.Branch != "child-branch" {
+		t.Fatalf("child identity overwritten: %+v", s)
+	}
+}
 
 func TestCodexHandoffOmitsProvider(t *testing.T) {
 	data, _, err := ToCodex(sampleIR("claude"))

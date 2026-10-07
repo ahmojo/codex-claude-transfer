@@ -67,22 +67,30 @@ func historyBase(content []byte) (string, error) {
 	sc.Buffer(make([]byte, 4096), 16*1024*1024)
 	for sc.Scan() {
 		var line struct {
-			Type    string `json:"type"`
-			Payload struct {
-				HistoryBase *struct {
-					ThreadID string `json:"thread_id"`
-				} `json:"history_base"`
-			} `json:"payload"`
+			Type    string          `json:"type"`
+			Payload json.RawMessage `json:"payload"`
 		}
-		if json.Unmarshal(sc.Bytes(), &line) == nil && line.Type == "session_meta" {
-			if line.Payload.HistoryBase != nil {
-				if line.Payload.HistoryBase.ThreadID == "" {
-					return "", fmt.Errorf("invalid Codex history_base")
-				}
-				return line.Payload.HistoryBase.ThreadID, nil
+		if json.Unmarshal(sc.Bytes(), &line) != nil || line.Type != "session_meta" {
+			continue
+		}
+		var payload struct {
+			HistoryBase json.RawMessage `json:"history_base"`
+		}
+		if len(line.Payload) != 0 {
+			if err := json.Unmarshal(line.Payload, &payload); err != nil {
+				return "", fmt.Errorf("invalid Codex session_meta: %w", err)
 			}
+		}
+		if len(payload.HistoryBase) == 0 || bytes.Equal(bytes.TrimSpace(payload.HistoryBase), []byte("null")) {
 			return "", nil
 		}
+		var base struct {
+			ThreadID string `json:"thread_id"`
+		}
+		if err := json.Unmarshal(payload.HistoryBase, &base); err != nil || base.ThreadID == "" {
+			return "", fmt.Errorf("invalid Codex history_base")
+		}
+		return base.ThreadID, nil
 	}
 	return "", sc.Err()
 }
@@ -98,7 +106,7 @@ func checkCodexHistory(zr *zip.Reader, manifest Manifest, selected map[string]bo
 	}
 	hasHistory := false
 	for _, path := range paths {
-		content, err := readEntryBytes(zr, path)
+		content, err := readEntryBytes(zr, path, opts.MaxSessionBytes)
 		if err != nil {
 			return false, err
 		}

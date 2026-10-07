@@ -37,6 +37,15 @@ type Manifest struct {
 	// a cct that predates the field ignores it and skips the entries, so an older
 	// version can still read the bundle.
 	Memory []ManifestMemory `json:"memory,omitempty"`
+	// Tasks holds persisted tasks belonging to the exported Claude conversations.
+	// Older readers ignore this field and skip the accompanying task entries.
+	Tasks []ManifestTask `json:"tasks,omitempty"`
+}
+
+type ManifestTask struct {
+	SessionID  string `json:"session_id"`
+	BundlePath string `json:"bundle_path"`
+	SHA256     string `json:"sha256"`
 }
 
 // ManifestMemory is one Claude Code auto-memory file recorded in the manifest.
