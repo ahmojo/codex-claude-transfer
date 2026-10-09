@@ -66,7 +66,7 @@ All recordings use throwaway demo sessions, never a real `~/.codex` or
 ## Install
 
 ```bash
-# From source (Go 1.26.8+ recommended for patched standard libraries)
+# From source (Go 1.26.9+ recommended for patched standard libraries)
 go install github.com/ahmojo/codex-claude-transfer/cmd/cct@latest
 ```
 

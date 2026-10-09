@@ -2,7 +2,7 @@ module github.com/ahmojo/codex-claude-transfer
 
 go 1.23.0
 
-toolchain go1.26.8
+toolchain go1.26.9
 
 require (
 	github.com/charmbracelet/huh v1.0.0
